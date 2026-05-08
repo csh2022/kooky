@@ -28,6 +28,14 @@ final class Workspace: Identifiable {
         return result
     }
 
+    /// Aggregated state for the sidebar dot — `.attention` wins over `.running`
+    /// wins over `.idle` so the most-needs-the-user signal surfaces first.
+    var activityState: SessionActivityState {
+        if tabs.contains(where: { $0.activityState == .attention }) { return .attention }
+        if tabs.contains(where: { $0.activityState == .running }) { return .running }
+        return .idle
+    }
+
     init(id: UUID = UUID(), title: String, workingDirectory: URL) {
         self.id = id
         self.title = title

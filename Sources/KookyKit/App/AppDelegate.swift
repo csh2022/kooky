@@ -5,11 +5,15 @@ import SwiftUI
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     let store = WorkspaceStore()
+    private lazy var hookServer = HookServer { [weak store] event, sessionId in
+        store?.applyHookEvent(event, sessionId: sessionId)
+    }
 
     public override init() { super.init() }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         KookyFonts.registerOnce()
+        KookyShellIntegration.installAgentHooks()
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -31,6 +35,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         installMainMenu()
+        hookServer.start()
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -39,6 +44,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_ notification: Notification) {
         store.flushPersistence()
+        hookServer.stop()
         KookyShellIntegration.cleanup()
     }
 
@@ -69,6 +75,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenu.addItem(.separator())
         fileMenu.addItem(menuItem(title: "Close Tab", action: #selector(handleCloseTab), keyEquivalent: "w"))
         fileMenu.addItem(menuItem(title: "Close Workspace", action: #selector(handleCloseWorkspace), keyEquivalent: "w", modifiers: [.command, .shift]))
+        #if DEBUG
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(menuItem(title: "Cycle Activity (debug)", action: #selector(handleCycleActivity), keyEquivalent: "a", modifiers: [.command, .shift]))
+        #endif
         mainMenu.addItem(submenu(fileMenu))
 
         // Edit menu uses first-responder selectors so libghostty's NSResponder
@@ -142,4 +152,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let workspace = store.active, index >= 0, index < workspace.tabs.count else { return }
         store.activateTab(workspace.tabs[index], in: workspace)
     }
+
+    #if DEBUG
+    @objc private func handleCycleActivity() {
+        guard let tab = store.active?.activeTab else { return }
+        switch tab.activityState {
+        case .idle: tab.activityState = .running
+        case .running: tab.activityState = .attention
+        case .attention: tab.activityState = .idle
+        }
+    }
+    #endif
 }

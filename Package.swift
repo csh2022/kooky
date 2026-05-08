@@ -15,6 +15,14 @@ let package = Package(
             dependencies: ["KookyKit"],
             path: "Sources/Kooky"
         ),
+        // Tiny stand-alone CLI invoked from Claude Code / Codex hooks. Reads
+        // $KOOKY_SURFACE_ID from env, opens the unix socket the running app
+        // owns, writes one JSON line, exits. Doesn't link KookyKit on purpose
+        // — keeps the binary fast and dependency-free.
+        .executableTarget(
+            name: "KookyHook",
+            path: "Sources/KookyHook"
+        ),
         .target(
             name: "KookyKit",
             dependencies: [

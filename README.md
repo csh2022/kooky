@@ -9,7 +9,7 @@ Built on **[libghostty](https://github.com/ghostty-org/ghostty)** for GPU-accele
 
 ## Status
 
-M4 shipped — keyboard shortcuts (⌘T / ⌘N / ⌘W / ⌘⇧W / ⌘1-9), workspace + tab persistence across relaunches (JSON snapshot in Application Support), hidden window title bar with traffic lights overlaid on the sidebar. Earlier milestones: agent launcher (Claude Code / Codex / Gemini CLI / OpenCode / Amp) with inline auto-launch, OSC 7 cwd tracking, refined chrome (Onest + JetBrains Mono, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons)). 20-test XCTest suite. Up next: M5 — `.app` bundle + Settings UI.
+v0.3 — Real Claude Code integration: sidebar dot tracks `running` / `attention` / `idle` driven by Claude Code's hooks (helper CLI + bundled wrapper + unix socket). Earlier: keyboard shortcuts (⌘T / ⌘N / ⌘W / ⌘⇧W / ⌘1-9), workspace + tab persistence (JSON in Application Support), hidden window title bar, agent launcher (Claude Code / Codex / Gemini CLI / OpenCode / Amp) with inline auto-launch, OSC 7 cwd tracking, refined chrome (Onest + JetBrains Mono, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons)). 20-test XCTest suite. Up next: hook integrations for the other agents, then `.app` bundle + Settings UI.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the roadmap and design notes.
 

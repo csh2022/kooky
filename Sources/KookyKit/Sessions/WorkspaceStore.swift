@@ -94,6 +94,21 @@ final class WorkspaceStore {
         scheduleSave()
     }
 
+    /// Routes a hook event to the named session. Called from `HookServer`
+    /// after a `kooky-hook` write lands. Unknown events are ignored.
+    func applyHookEvent(_ event: String, sessionId: UUID) {
+        for ws in workspaces {
+            guard let session = ws.tabs.first(where: { $0.id == sessionId }) else { continue }
+            switch event {
+            case "running": session.activityState = .running
+            case "attention": session.activityState = .attention
+            case "idle": session.activityState = .idle
+            default: break
+            }
+            return
+        }
+    }
+
     func activateTab(_ session: Session, in workspace: Workspace) {
         guard workspace.activeTabId != session.id else { return }
         workspace.activeTabId = session.id
@@ -165,6 +180,15 @@ final class WorkspaceStore {
         let engine = engineFactory()
         var config = template.makeSessionConfig()
         config.workingDirectory = initialCwd.path
+        // Lets the kooky-hook CLI tag inbound hook events back to this session.
+        config.environment["KOOKY_SURFACE_ID"] = sessionId.uuidString
+        // Hooks JSON path consumed by the bundled `claude` wrapper.
+        config.environment["KOOKY_HOOKS_PATH"] = KookyShellIntegration.claudeHooksPath
+        // Wrapper directory; the rc files re-prepend it to PATH after the
+        // user's .zshrc / .bashrc has had a chance to rewrite PATH itself.
+        config.environment["KOOKY_BIN_DIR"] = KookyShellIntegration.kookyBinDirectory
+        let parentPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/local/bin:/usr/bin:/bin"
+        config.environment["PATH"] = "\(KookyShellIntegration.kookyBinDirectory):\(parentPath)"
         engine.start(config: config)
         let session = Session(id: sessionId, engine: engine, currentDirectory: initialCwd, agent: template)
         wirePwdSync(engine: engine, session: session, workspace: workspace)

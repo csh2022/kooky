@@ -12,6 +12,83 @@ enum KookyShellIntegration {
     static let bashPath = "/bin/bash"
     static let zdotdirKey = "ZDOTDIR"
 
+    /// Directory we prepend to spawned-shell `PATH` so wrapper scripts (e.g.
+    /// `claude` shim) get found before the real binaries on disk.
+    static let kookyBinDirectory: String = {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = support.appendingPathComponent("kooky/bin", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.path
+    }()
+
+    /// Path to the generated Claude Code hooks JSON. Passed to `claude` via
+    /// `--settings <path>` by the wrapper script when `KOOKY_SURFACE_ID` is set.
+    static let claudeHooksPath: String = {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = support.appendingPathComponent("kooky/hooks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("claude.json").path
+    }()
+
+    /// Absolute path to the bundled `KookyHook` helper binary. Lives next to
+    /// the main executable for both `swift run` (`.build/<config>/`) and
+    /// `.app` bundles (`Contents/MacOS/`).
+    static let kookyHookBinaryPath: String = {
+        guard let exe = Bundle.main.executablePath else { return "" }
+        let dir = (exe as NSString).deletingLastPathComponent
+        return (dir as NSString).appendingPathComponent("KookyHook")
+    }()
+
+    /// Writes the `claude` wrapper script and the hooks JSON to disk. Idempotent
+    /// — call on every app launch so the hook command tracks the latest
+    /// `KookyHook` location.
+    static func installAgentHooks() {
+        let claudeWrapper = """
+        #!/usr/bin/env bash
+        # kooky claude wrapper. Inside a kooky session ($KOOKY_SURFACE_ID set),
+        # injects --settings so Claude Code's hooks report state back to the
+        # app via the bundled KookyHook helper. Outside, transparent passthrough.
+
+        self_dir="$(cd "$(dirname "$0")" && pwd)"
+        real=""
+        IFS=:
+        for dir in $PATH; do
+            [[ "$dir" == "$self_dir" ]] && continue
+            if [[ -x "$dir/claude" ]]; then
+                real="$dir/claude"
+                break
+            fi
+        done
+        unset IFS
+
+        if [[ -z "$real" ]]; then
+            echo "kooky: real 'claude' binary not found in PATH" >&2
+            exit 127
+        fi
+
+        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOKS_PATH" ]]; then
+            exec "$real" --settings "$KOOKY_HOOKS_PATH" "$@"
+        fi
+        exec "$real" "$@"
+        """
+        let claudeWrapperPath = (kookyBinDirectory as NSString).appendingPathComponent("claude")
+        try? claudeWrapper.write(toFile: claudeWrapperPath, atomically: true, encoding: .utf8)
+        chmod(claudeWrapperPath, 0o755)
+
+        let hookCmd = kookyHookBinaryPath
+        let hooks: [String: Any] = [
+            "hooks": [
+                "UserPromptSubmit": [["hooks": [["type": "command", "command": "\(hookCmd) running"]]]],
+                "Stop":             [["hooks": [["type": "command", "command": "\(hookCmd) attention"]]]],
+                "Notification":     [["hooks": [["type": "command", "command": "\(hookCmd) attention"]]]],
+                "SessionEnd":       [["hooks": [["type": "command", "command": "\(hookCmd) idle"]]]],
+            ]
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: hooks, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: URL(fileURLWithPath: claudeHooksPath), options: .atomic)
+        }
+    }
+
     enum DetectedUserShell { case zsh, bash, other }
 
     static var detectedUserShell: DetectedUserShell {
@@ -34,6 +111,10 @@ enum KookyShellIntegration {
 
         let bashrc = """
         [[ -r "$HOME/.bashrc" ]] && source "$HOME/.bashrc"
+
+        # User rc may rewrite PATH; re-prepend the kooky wrapper directory so
+        # `claude` etc. resolve to our shims first.
+        [[ -n "$KOOKY_BIN_DIR" ]] && export PATH="$KOOKY_BIN_DIR:$PATH"
 
         _kooky_osc7_pwd() { printf '\\e]7;file://%s%s\\e\\\\' "$HOSTNAME" "$PWD"; }
         PROMPT_COMMAND="_kooky_osc7_pwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
@@ -62,6 +143,11 @@ enum KookyShellIntegration {
         )
         let zshrc = """
         [[ -f "$HOME/.zshrc" ]] && source "$HOME/.zshrc"
+
+        # User rc may rewrite PATH; re-prepend the kooky wrapper directory so
+        # `claude` etc. resolve to our shims first.
+        [[ -n "$KOOKY_BIN_DIR" ]] && export PATH="$KOOKY_BIN_DIR:$PATH"
+
         autoload -Uz add-zsh-hook
         _kooky_osc7_pwd() { printf '\\e]7;file://%s%s\\e\\\\' "$HOST" "$PWD" }
         add-zsh-hook chpwd _kooky_osc7_pwd

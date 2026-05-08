@@ -2,6 +2,13 @@
 
 Notable changes per release. Tagged commits use `vX.Y` shortform.
 
+## v0.3 — 2026-05-08
+
+- **Agent activity state in the sidebar.** Each workspace row shows a small status dot in the close-button slot — blue while an agent is processing, amber when it's waiting on user input, hidden when idle. Aggregated across the workspace's tabs (`attention` > `running` > `idle`).
+- **Real Claude Code integration.** App ships a `KookyHook` CLI helper next to the main binary plus a generated wrapper at `~/Library/Application Support/kooky/bin/claude`. Inside a kooky session (`$KOOKY_SURFACE_ID` set) the wrapper invokes the real `claude` with `--settings <hooks.json>`; Claude Code's `UserPromptSubmit` / `Stop` / `Notification` / `SessionEnd` hooks `exec` the `KookyHook` helper, which opens the unix socket the app listens on (`~/Library/Application Support/kooky/socket`), writes one JSON line, and exits. App routes the event to the matching session's `activityState`.
+- **Env injection for new sessions.** `KOOKY_SURFACE_ID`, `KOOKY_HOOKS_PATH`, `KOOKY_BIN_DIR` injected at spawn; wrapper rc files (`.zshrc` / `.bashrc`) re-prepend `KOOKY_BIN_DIR` to `PATH` after sourcing the user's rc so the `claude` wrapper resolves first regardless of what the user's shell config does to `PATH`.
+- **Codex / Gemini / OpenCode / Amp** still use the inline-launch path from v0.1 but don't yet drive `activityState` — their wrappers + per-agent hook protocols are the next slice.
+
 ## v0.2 — 2026-05-08
 
 - **Keyboard shortcuts.** `⌘T` new tab, `⌘N` new workspace, `⌘W` close tab, `⌘⇧W` close workspace, `⌘1`-`⌘9` switch tab in active workspace, plus standard `⌘C` / `⌘V` / `⌘X` / `⌘A` routed through first-responder selectors so libghostty handles them inside the surface. Wired via `NSMenu` so keyEquivalents fire even with libghostty's `keyDown` intercept.

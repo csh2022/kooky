@@ -23,15 +23,24 @@ struct SidebarWorkspaceRow: View {
                     .truncationMode(.head)
             }
             Spacer(minLength: 0)
-            HoverableIconButton(
-                systemName: "xmark",
-                fontSize: 9,
-                size: 20,
-                help: "Close workspace",
-                action: onClose
-            )
-            .opacity(isHovered ? 1 : 0)
-            .allowsHitTesting(isHovered)
+            // Activity dot lives at the trailing edge — visible at all times
+            // when not idle, eats the close-button slot only on hover.
+            ZStack {
+                if let color = activityDotColor {
+                    Circle().fill(color).frame(width: 6, height: 6)
+                        .opacity(isHovered ? 0 : 1)
+                }
+                HoverableIconButton(
+                    systemName: "xmark",
+                    fontSize: 9,
+                    size: 20,
+                    help: "Close workspace",
+                    action: onClose
+                )
+                .opacity(isHovered ? 1 : 0)
+                .allowsHitTesting(isHovered)
+            }
+            .frame(minWidth: 20, alignment: .trailing)
         }
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, 11)
@@ -69,6 +78,16 @@ struct SidebarWorkspaceRow: View {
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.chromeMuted)
                 .frame(width: 20, height: 20)
+        }
+    }
+
+    private var activityDotColor: Color? {
+        // Hue chosen for at-a-glance read: cool blue == "thinking", warm
+        // amber == "needs you". Idle stays unmarked so the row reads quiet.
+        switch workspace.activityState {
+        case .idle: return nil
+        case .running: return Color(.sRGB, red: 0.41, green: 0.69, blue: 0.86, opacity: 1)
+        case .attention: return Color(.sRGB, red: 0.91, green: 0.69, blue: 0.40, opacity: 1)
         }
     }
 
