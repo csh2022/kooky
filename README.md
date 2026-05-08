@@ -9,7 +9,7 @@ Built on **[libghostty](https://github.com/ghostty-org/ghostty)** for GPU-accele
 
 ## Status
 
-v0.4 — Codex now drives the sidebar agent dot too (`running` / `attention` via the `notify` config + `running` / `ended` brackets in the wrapper); Claude Code already had full hook coverage. Plain Terminal tabs auto-promote to the right agent template when `claude` / `codex` is launched inline. Full IME (中日韩 / 越南文 / etc.) via `NSTextInputClient`. Earlier: keyboard shortcuts (⌘T / ⌘N / ⌘W / ⌘⇧W / ⌘1-9), workspace + tab persistence (JSON in Application Support), hidden window title bar, agent launcher (Claude Code / Codex / Gemini CLI / OpenCode / Amp) with inline auto-launch, OSC 7 cwd tracking, refined chrome (Onest + JetBrains Mono, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons)). 20-test XCTest suite. Up next: Gemini / OpenCode / Amp wrappers, then `.app` bundle + Settings UI.
+v0.5 — Splits, . Each workspace is a recursive pane tree; ⌘D / ⌘⇧D slice the whole pane region (tab strip + content together) so two halves each get their own independent tab bar. ⌘W closes the focused tab and collapses an empty pane up into its sibling; ⌘[ / ⌘] cycle pane focus; clicking into any pane's terminal updates focus + cwd tracking via libghostty's first-responder hook. Right-click context menus (tab + sidebar workspace rows) styled to match the chrome instead of system NSMenu — ⌘W / ⌘D / ⌘⇧D / ⌘⇧W shortcut hints render in SF Pro next to each item. Persistence schema upgrades with backward compat for v0.4 flat tabs. Earlier: Codex hook coverage via `notify` + wrapper bracketing, Claude Code full hooks, IME (中日韩 / 越南文 / etc.) via `NSTextInputClient`, keyboard shortcuts, workspace + tab persistence, hidden title bar, agent launcher (Claude Code / Codex / Gemini CLI / OpenCode / Amp) with inline auto-launch, OSC 7 cwd tracking, Onest + JetBrains Mono chrome, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons). 26-test XCTest suite. Up next: Gemini / OpenCode / Amp wrappers, then `.app` bundle + Settings UI.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the roadmap and design notes.
 
@@ -30,7 +30,7 @@ Requires Xcode 26+ and macOS 15+.
 
 swift build
 swift run
-swift test          # 20 unit tests covering AgentTemplate + WorkspaceStore (incl. persistence)
+swift test          # 26 unit tests covering AgentTemplate + WorkspaceStore (incl. persistence + splits)
 ```
 
 `Vendor/` is gitignored; the setup script is idempotent and skips the download when the pinned SHA already matches.
