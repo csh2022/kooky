@@ -9,7 +9,7 @@ Built on **[libghostty](https://github.com/ghostty-org/ghostty)** for GPU-accele
 
 ## Status
 
-M3 shipped — one-click agent launcher (Claude Code, Codex, Gemini CLI, OpenCode, Amp), per-tab working-directory tracking via OSC 7, workspace cwd that follows the active tab, refined chrome (custom Onest + JetBrains Mono fonts, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons)), and a 17-test XCTest suite. Up next: M4 — persistence + keyboard shortcuts (⌘T / ⌘W / ⌘1-9).
+M4 shipped — keyboard shortcuts (⌘T / ⌘N / ⌘W / ⌘⇧W / ⌘1-9), workspace + tab persistence across relaunches (JSON snapshot in Application Support), hidden window title bar with traffic lights overlaid on the sidebar. Earlier milestones: agent launcher (Claude Code / Codex / Gemini CLI / OpenCode / Amp) with inline auto-launch, OSC 7 cwd tracking, refined chrome (Onest + JetBrains Mono, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons)). 20-test XCTest suite. Up next: M5 — `.app` bundle + Settings UI.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the roadmap and design notes.
 
@@ -30,7 +30,7 @@ Requires Xcode 26+ and macOS 15+.
 
 swift build
 swift run
-swift test          # 17 unit tests covering AgentTemplate + WorkspaceStore
+swift test          # 20 unit tests covering AgentTemplate + WorkspaceStore (incl. persistence)
 ```
 
 `Vendor/` is gitignored; the setup script is idempotent and skips the download when the pinned SHA already matches.

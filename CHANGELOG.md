@@ -2,6 +2,15 @@
 
 Notable changes per release. Tagged commits use `vX.Y` shortform.
 
+## v0.2 — 2026-05-08
+
+- **Keyboard shortcuts.** `⌘T` new tab, `⌘N` new workspace, `⌘W` close tab, `⌘⇧W` close workspace, `⌘1`-`⌘9` switch tab in active workspace, plus standard `⌘C` / `⌘V` / `⌘X` / `⌘A` routed through first-responder selectors so libghostty handles them inside the surface. Wired via `NSMenu` so keyEquivalents fire even with libghostty's `keyDown` intercept.
+- **Persistence.** Workspaces, tabs, agent type, per-tab and per-workspace cwd survive relaunch. JSON snapshot under `~/Library/Application Support/kooky/state.json`, debounced 1s on mutation and flushed on `applicationWillTerminate`. PTY state itself doesn't persist — restored tabs spawn fresh sessions in the saved cwd; cwd that no longer exists falls back to `$HOME`. `WorkspaceStore.engineFactory` + the new `Persistence` protocol both inject through the initializer for tests.
+- **Hidden title bar.** Full-content window with the traffic lights overlaid on the sidebar; the tab bar sits directly at the window top edge. Sidebar header reserves 32pt for the traffic lights.
+- **Sidebar leading icon.** First non-terminal agent's brand icon + `+N` capsule when more agents are running, falling back to the terminal SF symbol for plain shells. Sidebar row title weight is regular for both active and inactive — selection is distinguished by background fill alone, no weight shift.
+- **SwiftTerm dropped.** libghostty has carried every active session since M2; the fallback's `onPwdChange` was a stub anyway. `TerminalEngine` protocol stays so future engine swaps don't touch the UI layer; `TestEngine` continues to validate the seam.
+- **Tests.** Three new persistence cases (restore from disk, restore spawns engines with saved cwd, flushPersistence writes snapshot). 20 total.
+
 ## v0.1 — 2026-05-08
 
 First public release. Native macOS terminal with vertical-tab workspaces and one-click AI agent sessions.

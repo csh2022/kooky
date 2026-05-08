@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 @Observable
 final class Workspace: Identifiable {
-    let id = UUID()
+    let id: UUID
     var title: String
     /// Project root. New tabs spawn here; the active tab's OSC 7 reports keep
     /// this in sync — `cd` in any tab updates the workspace, the next new tab
@@ -28,7 +28,8 @@ final class Workspace: Identifiable {
         return result
     }
 
-    init(title: String, workingDirectory: URL) {
+    init(id: UUID = UUID(), title: String, workingDirectory: URL) {
+        self.id = id
         self.title = title
         self.workingDirectory = workingDirectory
     }

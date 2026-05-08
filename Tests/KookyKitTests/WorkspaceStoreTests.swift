@@ -7,8 +7,22 @@ final class WorkspaceStoreTests: XCTestCase {
     private let projectB = URL(fileURLWithPath: "/tmp/projectB")
     private let projectC = URL(fileURLWithPath: "/tmp/projectC")
 
-    private func makeStore() -> WorkspaceStore {
-        WorkspaceStore(engineFactory: { TestEngine() })
+    override func setUp() {
+        super.setUp()
+        // Restore-side cwd-existence check (in WorkspaceStore.restore) needs
+        // these directories to actually be present, otherwise the engine is
+        // spawned in $HOME and the assertion fails.
+        let fm = FileManager.default
+        for path in ["/tmp/projectA", "/tmp/projectA/sub", "/tmp/projectA/deep", "/tmp/projectB", "/tmp/projectC"] {
+            try? fm.createDirectory(atPath: path, withIntermediateDirectories: true)
+        }
+    }
+
+    private func makeStore(initial: PersistedState? = nil) -> WorkspaceStore {
+        WorkspaceStore(
+            persistence: InMemoryPersistence(initial: initial),
+            engineFactory: { TestEngine() }
+        )
     }
 
     func testInitialStateHasOneWorkspaceWithOneTab() {
@@ -113,5 +127,69 @@ final class WorkspaceStoreTests: XCTestCase {
         store.closeWorkspace(ws)
         XCTAssertTrue(store.workspaces.isEmpty)
         XCTAssertNil(store.activeWorkspaceId)
+    }
+
+    // MARK: Persistence
+
+    func testRestoreFromPersistedStateRebuildsWorkspacesAndTabs() {
+        let wsId = UUID()
+        let tab1 = UUID()
+        let tab2 = UUID()
+        let initial = PersistedState(
+            workspaces: [
+                PersistedWorkspace(
+                    id: wsId,
+                    title: "kookycode",
+                    workingDirectoryPath: "/tmp/projectA",
+                    tabs: [
+                        PersistedTab(id: tab1, agentId: "terminal", currentDirectoryPath: "/tmp/projectA"),
+                        PersistedTab(id: tab2, agentId: "claude-code", currentDirectoryPath: "/tmp/projectA/sub"),
+                    ],
+                    activeTabId: tab2
+                )
+            ],
+            activeWorkspaceId: wsId
+        )
+        let store = makeStore(initial: initial)
+        XCTAssertEqual(store.workspaces.count, 1)
+        let ws = store.workspaces[0]
+        XCTAssertEqual(ws.id, wsId)
+        XCTAssertEqual(ws.title, "kookycode")
+        XCTAssertEqual(ws.workingDirectory.path, "/tmp/projectA")
+        XCTAssertEqual(ws.tabs.map(\.id), [tab1, tab2])
+        XCTAssertEqual(ws.tabs[1].agent.id, "claude-code")
+        XCTAssertEqual(ws.activeTabId, tab2)
+        XCTAssertEqual(store.activeWorkspaceId, wsId)
+    }
+
+    func testRestoreSpawnsEngineWithSavedWorkingDirectory() {
+        let wsId = UUID()
+        let tabId = UUID()
+        let initial = PersistedState(
+            workspaces: [
+                PersistedWorkspace(
+                    id: wsId,
+                    title: "x",
+                    workingDirectoryPath: "/tmp/projectA",
+                    tabs: [PersistedTab(id: tabId, agentId: "terminal", currentDirectoryPath: "/tmp/projectA/deep")],
+                    activeTabId: tabId
+                )
+            ],
+            activeWorkspaceId: wsId
+        )
+        let store = makeStore(initial: initial)
+        let engine = store.workspaces[0].tabs[0].engine as? TestEngine
+        XCTAssertEqual(engine?.startedConfigs.last?.workingDirectory, "/tmp/projectA/deep")
+    }
+
+    func testFlushPersistenceWritesCurrentSnapshot() throws {
+        let persistence = InMemoryPersistence()
+        let store = WorkspaceStore(persistence: persistence, engineFactory: { TestEngine() })
+        store.addWorkspace(workingDirectory: URL(fileURLWithPath: "/tmp/projectB"))
+        store.flushPersistence()
+        let saved = try XCTUnwrap(persistence.saved)
+        XCTAssertEqual(saved.workspaces.count, 2)
+        XCTAssertEqual(saved.workspaces.last?.workingDirectoryPath, "/tmp/projectB")
+        XCTAssertEqual(saved.activeWorkspaceId, store.activeWorkspaceId)
     }
 }

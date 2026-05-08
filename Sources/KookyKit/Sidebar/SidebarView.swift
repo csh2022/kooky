@@ -31,7 +31,9 @@ struct SidebarView: View {
             }
         }
         .padding(.horizontal, Theme.space4)
-        .padding(.top, Theme.space4)
+        // Top padding clears the traffic-light area (window is full-content;
+        // there's no real title bar to push us down).
+        .padding(.top, 32)
         .padding(.bottom, Theme.space3)
     }
 

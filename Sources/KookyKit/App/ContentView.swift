@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
-    @State private var store = WorkspaceStore()
+    let store: WorkspaceStore
 
     var body: some View {
         HStack(spacing: 0) {
@@ -12,6 +12,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(chromeBackground)
+        .ignoresSafeArea(.all)
         .onChange(of: store.workspaces.isEmpty) { _, isEmpty in
             // Closing the last workspace closes the window — matches Warp/Ghostty.
             // applicationShouldTerminateAfterLastWindowClosed then quits the app.
