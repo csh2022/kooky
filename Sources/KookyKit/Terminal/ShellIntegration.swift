@@ -215,6 +215,8 @@ enum KookyShellIntegration {
         add-zsh-hook chpwd _kooky_osc7_pwd
         _kooky_osc7_pwd
 
+        \(osc133Block)
+
         \(agentLaunchBlock)
         """
         writeFile(at: (dir as NSString).appendingPathComponent(".zshrc"), contents: zshrc)
@@ -249,6 +251,28 @@ enum KookyShellIntegration {
             "$_kooky_cmd"
         fi
         """
+
+    /// FinalTerm / OSC 133 prompt+command boundary markers. libghostty parses
+    /// these and fires `GHOSTTY_ACTION_COMMAND_FINISHED` on `D`, which kooky
+    /// uses to surface per-tab last-command status (exit + duration) and to
+    /// power scroll-to-prompt jumps. Re-injects the `B` marker into PROMPT on
+    /// every redraw because Starship / p10k-style themes rebuild PROMPT each
+    /// `precmd` and would otherwise drop our suffix.
+    private static let osc133Block = #"""
+        __kooky_133_first=1
+        __kooky_133_precmd() {
+            local last=$?
+            if (( ! __kooky_133_first )); then
+                printf '\e]133;D;%s\e\\' "$last"
+            fi
+            __kooky_133_first=0
+            printf '\e]133;A\e\\'
+            [[ "$PROMPT" != *$'\e]133;B\e\\'* ]] && PROMPT="${PROMPT}"$'\e]133;B\e\\'
+        }
+        __kooky_133_preexec() { printf '\e]133;C\e\\' }
+        add-zsh-hook precmd __kooky_133_precmd
+        add-zsh-hook preexec __kooky_133_preexec
+        """#
 
     private static func writeFile(at path: String, contents: String, executable: Bool = false) {
         try? contents.write(toFile: path, atomically: true, encoding: .utf8)

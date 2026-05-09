@@ -107,6 +107,15 @@ private let kookyActionCb: ghostty_runtime_action_cb = { _, target, action in
         let shape = action.action.mouse_shape
         dispatchToView(userdata) { $0.applyMouseShape(shape) }
         return true
+    case GHOSTTY_ACTION_COMMAND_FINISHED:
+        // Shell emitted `OSC 133;D[;exit]` — last command done. exit=-1 means
+        // the shell omitted the field; pass `nil` upward so the UI can pick a
+        // neutral treatment instead of pretending we know it succeeded.
+        let finished = action.action.command_finished
+        let exit: Int? = finished.exit_code < 0 ? nil : Int(finished.exit_code)
+        let duration = TimeInterval(finished.duration) / 1_000_000_000
+        dispatchToView(userdata) { $0.onCommandFinished?(exit, duration) }
+        return true
     default:
         return false
     }
@@ -158,6 +167,10 @@ final class LibghosttyEngine: TerminalEngine {
         get { surfaceView.onFocus }
         set { surfaceView.onFocus = newValue }
     }
+    var onCommandFinished: ((Int?, TimeInterval) -> Void)? {
+        get { surfaceView.onCommandFinished }
+        set { surfaceView.onCommandFinished = newValue }
+    }
 
     init() {
         surfaceView = GhosttySurfaceView()
@@ -200,6 +213,7 @@ final class GhosttySurfaceView: NSView {
     var pendingConfig: TerminalSessionConfig?
     var onPwdChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
+    var onCommandFinished: ((Int?, TimeInterval) -> Void)?
     private(set) var surface: ghostty_surface_t? {
         didSet {
             if surface != nil { propagateSizeToSurface() }

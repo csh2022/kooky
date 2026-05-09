@@ -83,6 +83,21 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(ws.workingDirectory.path, "/tmp/projectA/sub")
     }
 
+    func testCommandFinishedUpdatesSessionStatus() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let session = firstPane(ws).tabs[0]
+        XCTAssertNil(session.lastCommandExit)
+        XCTAssertNil(session.lastCommandDuration)
+        engine(session).emitCommandFinished(exit: 1, duration: 0.42)
+        XCTAssertEqual(session.lastCommandExit, 1)
+        XCTAssertEqual(session.lastCommandDuration, 0.42)
+        // Subsequent zero-exit overwrites the failure (so the dot disappears
+        // when the next command succeeds, instead of sticking forever).
+        engine(session).emitCommandFinished(exit: 0, duration: 0.05)
+        XCTAssertEqual(session.lastCommandExit, 0)
+    }
+
     func testNewTabInheritsLatestPwd() {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA)

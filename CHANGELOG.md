@@ -2,6 +2,14 @@
 
 Notable changes per release. Tagged commits use `vX.Y` shortform.
 
+## v0.7.3 — 2026-05-09
+
+- **Per-tab last-command status (OSC 133).** A small red dot lights up to the left of each tab's icon when the most recent command exited non-zero. Hover the dot for a native tooltip showing `exit N · 12.4s`. Successful runs leave the row clean — a green dot on every command would dominate the chrome. Status resets to "no dot" on the next zero-exit command, so the indicator always reflects the *latest* run, not a sticky failure record. Not persisted: each launch starts fresh.
+- **`⌘↑` / `⌘↓` jump to previous/next prompt** in the active pane's scrollback. Routed through libghostty's `jump_to_prompt:N` named action so the engine is the single source of truth on what counts as a prompt boundary.
+- **OSC 133 hooks bolted into the kooky ZDOTDIR wrapper** — same scaffold the OSC 7 / agent-launcher hooks live in (`Sources/KookyKit/Terminal/ShellIntegration.swift`), so the user's real `~/.zshrc` is left alone. `precmd` emits `D;<exit>` for the just-finished command then `A`; `preexec` emits `C`; the wrapper reinjects the `B` marker into `PROMPT` on every redraw because Starship / p10k themes rebuild PROMPT each `precmd` and would otherwise drop our suffix. First-prompt guard skips the spurious `D` before any command has run.
+- **Internals.** New `TerminalEngine.onCommandFinished: ((Int?, TimeInterval) -> Void)?` protocol member; `LibghosttyEngine` forwards from the new `GHOSTTY_ACTION_COMMAND_FINISHED` action_cb case (exit `-1` → `nil` so the UI can use neutral treatment instead of pretending we know the result; duration ns → `TimeInterval` seconds). `Session` gains `lastCommandExit: Int?` + `lastCommandDuration: TimeInterval?` (runtime-only, not Codable). `WorkspaceStore.wirePwdSync` now also wires this callback alongside the existing pwd + focus paths. Regression test in `WorkspaceStoreTests` covers the engine-callback → session-state propagation including the zero-exit-after-failure clear.
+- **Deferred.** Quadruple-click to select the entire command output region — libghostty doesn't bind quad-click to a select-command gesture by default, would need either a custom hit-test routing to a libghostty named action, or for libghostty to expose prompt-region selection over its API. Backlog.
+
 ## v0.7.2 — 2026-05-09
 
 - **Manual rename for tabs and workspaces.** Right-click any tab pill → *Rename Tab…* opens a small popover anchored under the tab; type the new title, hit Enter. Same gesture on any sidebar workspace row → *Rename Workspace…*. Submitting an empty / whitespace string clears the override so the title resumes tracking the cwd (the natural default — `cd` in any pane updates the label like before). Both overrides persist through quit + relaunch via new `Session.customTitle` / `Workspace.customTitle` Codable fields with `decodeIfPresent`, so old `state.json` files keep loading clean.

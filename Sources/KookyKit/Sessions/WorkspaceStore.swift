@@ -481,6 +481,11 @@ final class WorkspaceStore {
             guard let self, let session, let workspace else { return }
             self.activateTab(session, in: workspace)
         }
+        engine.onCommandFinished = { [weak session] exit, duration in
+            guard let session else { return }
+            session.lastCommandExit = exit
+            session.lastCommandDuration = duration
+        }
     }
 
     private func scheduleSave() {

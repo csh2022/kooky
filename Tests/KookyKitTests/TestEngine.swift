@@ -9,6 +9,7 @@ final class TestEngine: TerminalEngine {
     var backgroundColor: NSColor { .black }
     var onPwdChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
+    var onCommandFinished: ((Int?, TimeInterval) -> Void)?
 
     private(set) var startedConfigs: [TerminalSessionConfig] = []
     private(set) var terminateCount = 0
@@ -30,5 +31,9 @@ final class TestEngine: TerminalEngine {
 
     func emitPwd(_ path: String) {
         onPwdChange?(path)
+    }
+
+    func emitCommandFinished(exit: Int?, duration: TimeInterval) {
+        onCommandFinished?(exit, duration)
     }
 }

@@ -37,6 +37,10 @@ protocol TerminalEngine: AnyObject {
     /// leaf as focused so split-aware operations (cwd tracking, ⌘D inheritance)
     /// follow the visually-active pane.
     var onFocus: (() -> Void)? { get set }
+    /// Called when libghostty sees `OSC 133;D` from the shell — the
+    /// most-recent command's exit code and run duration. `exitCode` is `nil`
+    /// when the shell omitted it from the OSC sequence.
+    var onCommandFinished: ((Int?, TimeInterval) -> Void)? { get set }
     func start(config: TerminalSessionConfig)
     func terminate()
     /// Trigger a libghostty named action (e.g. `increase_font_size:1`,

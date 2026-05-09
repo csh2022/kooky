@@ -121,6 +121,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             .separator,
             selfRow("Clear Pane", #selector(handleClearScrollback), "k"),
             .separator,
+            // Arrow function-keys via NSEvent's specialKey codepoints — AppKit
+            // renders them as ↑/↓ glyphs in the menu. Routed through libghostty
+            // bindings so the engine is the single source of truth on what
+            // counts as a prompt boundary.
+            selfRow("Jump to Previous Prompt", #selector(handleJumpToPreviousPrompt), "\u{F700}"),
+            selfRow("Jump to Next Prompt", #selector(handleJumpToNextPrompt), "\u{F701}"),
+            .separator,
             selfRow("Split Right", #selector(handleSplitRight), "d"),
             selfRow("Split Down", #selector(handleSplitDown), "d", modifiers: [.command, .shift]),
             selfRow("Focus Previous Pane", #selector(handleFocusPreviousPane), "["),
@@ -301,6 +308,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleClearScrollback() {
         store.active?.activeSession?.engine.performAction("clear_screen")
+    }
+
+    @objc private func handleJumpToPreviousPrompt() {
+        store.active?.activeSession?.engine.performAction("jump_to_prompt:-1")
+    }
+
+    @objc private func handleJumpToNextPrompt() {
+        store.active?.activeSession?.engine.performAction("jump_to_prompt:1")
     }
 
     @objc private func handleToggleSidebar() {

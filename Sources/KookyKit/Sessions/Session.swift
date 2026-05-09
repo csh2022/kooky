@@ -28,6 +28,13 @@ final class Session: Identifiable {
     /// Empty / whitespace input via `renameTab` clears this back to `nil` so
     /// the tab title resumes tracking the cwd.
     var customTitle: String?
+    /// Exit status of the most recent command — populated from libghostty's
+    /// `OSC 133;D` event. `nil` until the shell reports its first finish (or
+    /// when it omits the exit field). Not persisted: each launch starts fresh.
+    var lastCommandExit: Int?
+    /// Wall-clock duration of the most recent command in seconds. Same source
+    /// as `lastCommandExit`; `nil` until first OSC 133;D arrives.
+    var lastCommandDuration: TimeInterval?
 
     /// `lastPathComponent` of the cwd, with `~` for $HOME — unless `customTitle`
     /// is set, which always wins. Empty cwd path falls back to the agent name
