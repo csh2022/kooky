@@ -9,9 +9,12 @@ struct SidebarWorkspaceRow: View {
     let onClose: () -> Void
     let onCloseOthers: () -> Void
     let onDuplicate: () -> Void
+    let onRename: (String) -> Void
 
     @State private var isHovered = false
     @State private var isContextMenuOpen = false
+    @State private var isRenameOpen = false
+    @State private var pendingRename = ""
 
     var body: some View {
         Group {
@@ -38,6 +41,14 @@ struct SidebarWorkspaceRow: View {
                     onCloseOthers()
                 }
                 KookyMenuDivider()
+                KookyMenuRow(title: "Rename Workspace…") {
+                    isContextMenuOpen = false
+                    pendingRename = workspace.customTitle ?? workspace.title
+                    // Defer one runloop tick so the context popover finishes
+                    // dismissing before the rename popover anchors — back-to-back
+                    // popovers off the same view glitch otherwise.
+                    DispatchQueue.main.async { isRenameOpen = true }
+                }
                 KookyMenuRow(title: "Duplicate Workspace") {
                     isContextMenuOpen = false
                     onDuplicate()
@@ -46,6 +57,12 @@ struct SidebarWorkspaceRow: View {
             .padding(Theme.space1)
             .frame(minWidth: 240)
             .background(Theme.chromeBackground)
+        }
+        .popover(isPresented: $isRenameOpen, arrowEdge: .trailing) {
+            KookyRenameField(placeholder: "Workspace title", text: $pendingRename) {
+                onRename(pendingRename)
+                isRenameOpen = false
+            }
         }
         .help(workspace.workingDirectory.path)
     }

@@ -132,6 +132,7 @@ private struct DraggableTabRow: View {
             onCloseOthers: { store.closeOtherTabs(keeping: tab, in: workspace) },
             onCloseToRight: { store.closeTabsToRight(of: tab, in: workspace) },
             onDuplicate: { store.duplicateTab(tab, in: workspace) },
+            onRename: { store.renameTab(tab, to: $0) },
             onSplit: { store.splitPane(pane, orientation: $0, in: workspace) }
         )
         .dropIndicator(active: isTargeted && !isSelfDrag, on: edge)

@@ -9,10 +9,13 @@ struct TabBarItem: View {
     let onCloseOthers: () -> Void
     let onCloseToRight: () -> Void
     let onDuplicate: () -> Void
+    let onRename: (String) -> Void
     let onSplit: (SplitOrientation) -> Void
 
     @State private var isHovered = false
     @State private var isContextMenuOpen = false
+    @State private var isRenameOpen = false
+    @State private var pendingRename = ""
 
     var body: some View {
         HStack(spacing: 7) {
@@ -63,6 +66,14 @@ struct TabBarItem: View {
                     onSplit(.vertical)
                 }
                 KookyMenuDivider()
+                KookyMenuRow(title: "Rename Tab…") {
+                    isContextMenuOpen = false
+                    pendingRename = tab.customTitle ?? tab.title
+                    // Defer one runloop tick so the context popover finishes
+                    // dismissing before the rename popover anchors — back-to-back
+                    // popovers off the same view glitch otherwise.
+                    DispatchQueue.main.async { isRenameOpen = true }
+                }
                 KookyMenuRow(title: "Duplicate Tab") {
                     isContextMenuOpen = false
                     onDuplicate()
@@ -71,6 +82,12 @@ struct TabBarItem: View {
             .padding(Theme.space1)
             .frame(minWidth: 240)
             .background(Theme.chromeBackground)
+        }
+        .popover(isPresented: $isRenameOpen, arrowEdge: .bottom) {
+            KookyRenameField(placeholder: "Tab title", text: $pendingRename) {
+                onRename(pendingRename)
+                isRenameOpen = false
+            }
         }
     }
 

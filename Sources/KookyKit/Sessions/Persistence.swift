@@ -15,6 +15,7 @@ struct PersistedWorkspace: Codable, Equatable {
     var workingDirectoryPath: String
     var root: PersistedPaneNode
     var activePaneId: UUID?
+    var customTitle: String?
 
     @MainActor
     init(_ ws: Workspace) {
@@ -22,17 +23,19 @@ struct PersistedWorkspace: Codable, Equatable {
         self.workingDirectoryPath = ws.workingDirectory.path
         self.root = PersistedPaneNode(ws.root)
         self.activePaneId = ws.activePaneId
+        self.customTitle = ws.customTitle
     }
 
-    init(id: UUID, workingDirectoryPath: String, root: PersistedPaneNode, activePaneId: UUID? = nil) {
+    init(id: UUID, workingDirectoryPath: String, root: PersistedPaneNode, activePaneId: UUID? = nil, customTitle: String? = nil) {
         self.id = id
         self.workingDirectoryPath = workingDirectoryPath
         self.root = root
         self.activePaneId = activePaneId
+        self.customTitle = customTitle
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, workingDirectoryPath, root, activePaneId
+        case id, workingDirectoryPath, root, activePaneId, customTitle
         // Legacy keys
         case tabs, activeTabId
     }
@@ -43,12 +46,14 @@ struct PersistedWorkspace: Codable, Equatable {
         try c.encode(workingDirectoryPath, forKey: .workingDirectoryPath)
         try c.encode(root, forKey: .root)
         try c.encodeIfPresent(activePaneId, forKey: .activePaneId)
+        try c.encodeIfPresent(customTitle, forKey: .customTitle)
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         workingDirectoryPath = try c.decode(String.self, forKey: .workingDirectoryPath)
+        customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
         if let root = try c.decodeIfPresent(PersistedPaneNode.self, forKey: .root) {
             self.root = root
             self.activePaneId = try c.decodeIfPresent(UUID.self, forKey: .activePaneId)
@@ -161,18 +166,21 @@ struct PersistedTab: Codable, Equatable {
     var id: UUID
     var agentId: String
     var currentDirectoryPath: String
+    var customTitle: String?
 
     @MainActor
     init(_ session: Session) {
         self.id = session.id
         self.agentId = session.agent.id
         self.currentDirectoryPath = session.currentDirectory.path
+        self.customTitle = session.customTitle
     }
 
-    init(id: UUID, agentId: String, currentDirectoryPath: String) {
+    init(id: UUID, agentId: String, currentDirectoryPath: String, customTitle: String? = nil) {
         self.id = id
         self.agentId = agentId
         self.currentDirectoryPath = currentDirectoryPath
+        self.customTitle = customTitle
     }
 }
 

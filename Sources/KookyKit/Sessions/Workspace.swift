@@ -14,8 +14,12 @@ final class Workspace: Identifiable {
     /// Currently focused leaf-pane id. Splits/closes update this so cwd
     /// tracking and ⌘D act on what the user is looking at.
     var activePaneId: UUID?
+    /// Empty / whitespace input via `renameWorkspace` clears this back to
+    /// `nil` so the sidebar label resumes tracking the cwd.
+    var customTitle: String? = nil
 
     var title: String {
+        if let custom = customTitle, !custom.isEmpty { return custom }
         if workingDirectory.path == NSHomeDirectory() { return "Home" }
         let last = workingDirectory.lastPathComponent
         return last.isEmpty ? workingDirectory.path : last

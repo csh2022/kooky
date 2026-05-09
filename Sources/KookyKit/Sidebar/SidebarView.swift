@@ -103,7 +103,8 @@ private struct DraggableWorkspaceRow: View {
             onActivate: { store.activateWorkspace(workspace) },
             onClose: { store.closeWorkspace(workspace) },
             onCloseOthers: { store.closeOtherWorkspaces(keeping: workspace) },
-            onDuplicate: { store.duplicateWorkspace(workspace) }
+            onDuplicate: { store.duplicateWorkspace(workspace) },
+            onRename: { store.renameWorkspace(workspace, to: $0) }
         )
         .dropIndicator(active: isTargeted && !isSelfDrag, on: edge)
         .onDrag {

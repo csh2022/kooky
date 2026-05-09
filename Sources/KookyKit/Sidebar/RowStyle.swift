@@ -136,3 +136,24 @@ struct KookyMenuDivider: View {
             .padding(.horizontal, Theme.space2)
     }
 }
+
+/// Shared rename-popover body used by tab + workspace rename. Both render
+/// inside `.popover` modifiers anchored to their own row; the caller picks
+/// the arrowEdge so the popover points the right way.
+struct KookyRenameField: View {
+    let placeholder: String
+    @Binding var text: String
+    let onSubmit: () -> Void
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(Theme.display(13))
+            .foregroundStyle(Theme.chromeForeground)
+            .padding(.horizontal, Theme.space3)
+            .padding(.vertical, Theme.space2 + 2)
+            .frame(minWidth: 220)
+            .background(Theme.chromeBackground)
+            .onSubmit(onSubmit)
+    }
+}

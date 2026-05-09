@@ -2,6 +2,12 @@
 
 Notable changes per release. Tagged commits use `vX.Y` shortform.
 
+## v0.7.2 — 2026-05-09
+
+- **Manual rename for tabs and workspaces.** Right-click any tab pill → *Rename Tab…* opens a small popover anchored under the tab; type the new title, hit Enter. Same gesture on any sidebar workspace row → *Rename Workspace…*. Submitting an empty / whitespace string clears the override so the title resumes tracking the cwd (the natural default — `cd` in any pane updates the label like before). Both overrides persist through quit + relaunch via new `Session.customTitle` / `Workspace.customTitle` Codable fields with `decodeIfPresent`, so old `state.json` files keep loading clean.
+- **`WorkspaceStore.renameTab(_:to:)` / `renameWorkspace(_:to:)`** trim the input, treat empty as "clear", and short-circuit no-op renames before scheduling a save — `scheduleSave` already 1s-debounces, so rapid re-renames coalesce into one disk write.
+- **Internals.** `KookyRenameField` (`Sidebar/RowStyle.swift`) is the single rename TextField primitive — both call sites (`TabBarItem` for tabs, `SidebarWorkspaceRow` for workspaces) just pick a placeholder + a popover `arrowEdge`. The right-click menu defers `isRenameOpen = true` by one runloop tick (`DispatchQueue.main.async`) so the context popover finishes dismissing before the rename popover anchors — anchoring two popovers on the same view in the same tick glitches the second one. Comment lives at both call sites for symmetry.
+
 ## v0.7.1 — 2026-05-09
 
 - **URL ⌘+click.** Print a URL into your terminal — `gh pr view 42`, `docker logs ...` — and ⌘+click opens it in your default browser. libghostty handles hit-detection and gives us the resolved string via `GHOSTTY_ACTION_OPEN_URL`; we route to `NSWorkspace.shared.open`. Returns `false` to libghostty when `URL(string:)` rejects the input (some OSC 8 / unescaped `file://` shapes the Foundation parser refuses) so libghostty's built-in opener gets a fallback shot.

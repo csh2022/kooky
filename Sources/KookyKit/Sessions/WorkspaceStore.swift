@@ -103,6 +103,16 @@ final class WorkspaceStore {
         addWorkspace(workingDirectory: workspace.workingDirectory)
     }
 
+    /// Set or clear a user-provided workspace title. Empty / whitespace input
+    /// clears the override so the sidebar label resumes tracking the cwd.
+    func renameWorkspace(_ workspace: Workspace, to newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next: String? = trimmed.isEmpty ? nil : trimmed
+        guard workspace.customTitle != next else { return }
+        workspace.customTitle = next
+        scheduleSave()
+    }
+
     /// Reorder workspaces in the sidebar — dragged workspace takes the
     /// destination index, others shift.
     func moveWorkspace(from sourceIndex: Int, to destIndex: Int) {
@@ -147,6 +157,16 @@ final class WorkspaceStore {
     func duplicateTab(_ session: Session, in workspace: Workspace) -> Session? {
         guard let pane = pane(containing: session, in: workspace) else { return nil }
         return addTab(in: workspace, pane: pane, template: session.agent, initialCwd: session.currentDirectory)
+    }
+
+    /// Set or clear a user-provided tab title. Empty / whitespace input clears
+    /// the override so the title resumes tracking the working directory.
+    func renameTab(_ session: Session, to newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next: String? = trimmed.isEmpty ? nil : trimmed
+        guard session.customTitle != next else { return }
+        session.customTitle = next
+        scheduleSave()
     }
 
     func moveTab(from sourceIndex: Int, to destIndex: Int, in pane: Pane) {
@@ -378,6 +398,7 @@ final class WorkspaceStore {
                 workingDirectory: URL(fileURLWithPath: ws.workingDirectoryPath),
                 root: root
             )
+            workspace.customTitle = ws.customTitle
             // Wire engines now that workspace is constructed (engines need
             // the workspace ref for cwd-sync callbacks).
             for pane in workspace.root.allPanes {
@@ -409,7 +430,9 @@ final class WorkspaceStore {
                 let cwd = fm.fileExists(atPath: tab.currentDirectoryPath)
                     ? URL(fileURLWithPath: tab.currentDirectoryPath)
                     : URL(fileURLWithPath: NSHomeDirectory())
-                pane.tabs.append(spawnSession(template: agent, initialCwd: cwd, sessionId: tab.id))
+                let session = spawnSession(template: agent, initialCwd: cwd, sessionId: tab.id)
+                session.customTitle = tab.customTitle
+                pane.tabs.append(session)
             }
             pane.activeTabId = pane.tabs.contains(where: { $0.id == p.activeTabId })
                 ? p.activeTabId
