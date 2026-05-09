@@ -77,15 +77,26 @@ enum KookyFonts {
     private static var registered = false
 }
 
-/// SPM's `.process("Resources")` preserves the source directory layout in the
-/// bundle, so `Bundle.module.url(forResource:withExtension:)` without a
-/// `subdirectory:` won't find files nested under `Resources/Fonts/` etc. Try
-/// the explicit subdirectory first; fall back to the flat lookup so the helper
-/// still works if SPM's bundling behavior changes.
+/// SPM's auto-generated `Bundle.module` for executable targets looks for
+/// `Kooky_KookyKit.bundle` only at `Bundle.main.bundleURL`. That works for
+/// `swift run` (binary's parent dir) but **fatalErrors** when shipping inside
+/// a `.app`, where `Bundle.main.bundleURL` is the `.app` root and resources
+/// canonically live in `Contents/Resources/`. We resolve candidates ourselves
+/// so both layouts work and never trigger SPM's accessor's first-access
+/// crash.
 @MainActor
 func bundleResourceURL(name: String, ext: String, subdirectory: String) -> URL? {
-    Bundle.module.url(forResource: name, withExtension: ext, subdirectory: subdirectory)
-        ?? Bundle.module.url(forResource: name, withExtension: ext)
+    let bundleName = "Kooky_KookyKit"
+    let candidates: [URL?] = [
+        Bundle.main.resourceURL?.appendingPathComponent("\(bundleName).bundle"),
+        Bundle.main.bundleURL.appendingPathComponent("\(bundleName).bundle"),
+    ]
+    for candidate in candidates {
+        guard let candidate, let bundle = Bundle(url: candidate) else { continue }
+        if let url = bundle.url(forResource: name, withExtension: ext, subdirectory: subdirectory) { return url }
+        if let url = bundle.url(forResource: name, withExtension: ext) { return url }
+    }
+    return nil
 }
 
 extension Color {

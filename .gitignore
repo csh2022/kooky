@@ -29,3 +29,6 @@ xcuserdata/
 
 # Vendored prebuilt binaries — fetched via scripts/setup-libghostty.sh on first build
 Vendor/
+
+# .app bundle output (build-app.sh)
+dist/

@@ -2,6 +2,12 @@
 
 Notable changes per release. Tagged commits use `vX.Y` shortform.
 
+## v0.7.5 — 2026-05-09
+
+- **`.app` bundle, finally.** New `scripts/build-app.sh` does `swift build -c release`, assembles `dist/Kooky.app/Contents/{MacOS,Resources,Info.plist,PkgInfo}`, and adhoc-codesigns the result. Version pulled from `KookyApp.displayVersion` so `Info.plist`'s `CFBundleShortVersionString` can't drift from the About panel. Bundle ID `com.iamcorey.kooky`, min macOS 15, dev-tools category. `dist/` is gitignored. You can now `cp -R dist/Kooky.app /Applications` and launch from Spotlight / Dock like a real app — and clipboard managers (Paste, Maccy) finally see kooky's writes (the long-suspected unbundled-process filter).
+- **Custom resource-bundle resolver.** SPM's auto-generated `Bundle.module` for executable targets only checks `Bundle.main.bundleURL/Kooky_KookyKit.bundle`, which works for `swift run` (binary's parent dir) but `fatalError`s when the .app ships the bundle in canonical `Contents/Resources/`. Replaced the single call site in `Theme.swift` with a small custom resolver that tries `Bundle.main.resourceURL` first (the .app layout) then falls back to `Bundle.main.bundleURL` (dev `swift run` layout). Both modes load Onest + JetBrains Mono cleanly; SPM's accessor is now untouched at runtime so its first-access crash never fires.
+- **Adhoc codesign.** `codesign --sign -` signs inside-out: the inner `Kooky_KookyKit.bundle` first (after promoting it to the canonical `Contents/Resources/*` layout with a synthesized `Info.plist` carrying `CFBundlePackageType=BNDL` so codesign's bundle validator accepts it), then the two binaries, then the `.app` itself. Local launch works, Gatekeeper doesn't kill it. `spctl -a -t exec` still rejects the adhoc signature — public distribution still needs an Apple Developer ID + `notarytool`, which is the next sub-milestone.
+
 ## v0.7.4 — 2026-05-09
 
 - **Workspace-level command-failure dot.** The same red dot v0.7.3 added to per-tab pills now also surfaces on the sidebar workspace row when *any* tab in *any* pane has a non-zero last exit. Precedence: attention (amber) > failure (red) > running (blue) > idle. Sibling-pane failures don't get lost when you're focused on a different split — and because the agent activity dot still wins on attention, an `attention` agent state still pulls the row to amber even with a stale failure underneath.
