@@ -36,6 +36,7 @@ private struct PaneView: View {
             if let active = pane.activeTab {
                 TerminalView(engine: active.engine)
                     .id(active.id)
+                    .padding(8)
             } else {
                 Color.clear
             }

@@ -39,6 +39,11 @@ enum Theme {
     static let space3: CGFloat = 12
     static let space4: CGFloat = 16
     static let space5: CGFloat = 24
+
+    // MARK: Motion
+    /// Standard transition for chrome state changes (sidebar collapse,
+    /// drag-reorder commit). One source so timings can't drift across sites.
+    static let chromeTransition: Animation = .easeInOut(duration: 0.2)
 }
 
 /// Registers bundled fonts at app launch via Core Text. SPM resources show up

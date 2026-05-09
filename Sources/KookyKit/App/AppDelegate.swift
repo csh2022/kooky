@@ -34,9 +34,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             backing: .buffered,
             defer: false
         )
-        window.title = "kooky"
+        window.title = KookyApp.name
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // Tab strips sit under the transparent titlebar; let only our explicit
+        // sidebar handle move the window so tab DnD never races AppKit.
+        window.isMovable = false
+        window.isMovableByWindowBackground = false
         // Force dark chrome regardless of system appearance — the terminal
         // surface and our sidebar are always dark, and SwiftUI's .primary /
         // .secondary need a dark context to resolve to readable colors.
@@ -71,93 +75,135 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     private func installMainMenu() {
         let mainMenu = NSMenu()
 
-        let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About kooky", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide kooky", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        let hideOthers = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
-        hideOthers.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(hideOthers)
-        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
-        appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit kooky", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        mainMenu.addItem(submenu(appMenu))
+        // App menu — system-routed selectors via the responder chain. About
+        // routes to our own handler so we can populate the panel without a
+        // bundled Info.plist (the responder-chain default reads from there).
+        mainMenu.addItem(submenu(buildMenu(title: KookyApp.name, entries: [
+            selfRow("About \(KookyApp.name)", #selector(handleAbout)),
+            .separator,
+            responderRow("Hide \(KookyApp.name)", #selector(NSApplication.hide(_:)), "h"),
+            responderRow("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", modifiers: [.command, .option]),
+            responderRow("Show All", #selector(NSApplication.unhideAllApplications(_:))),
+            .separator,
+            responderRow("Quit \(KookyApp.name)", #selector(NSApplication.terminate(_:)), "q"),
+        ])))
 
-        let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(menuItem(title: "New Tab", action: #selector(handleNewTab), keyEquivalent: "t"))
-        fileMenu.addItem(menuItem(title: "New Workspace", action: #selector(handleNewWorkspace), keyEquivalent: "n"))
-        fileMenu.addItem(.separator())
-        fileMenu.addItem(menuItem(title: "Close Tab", action: #selector(handleCloseTab), keyEquivalent: "w"))
-        fileMenu.addItem(menuItem(title: "Close Workspace", action: #selector(handleCloseWorkspace), keyEquivalent: "w", modifiers: [.command, .shift]))
-        fileMenu.addItem(.separator())
-        fileMenu.addItem(menuItem(title: "Split Right", action: #selector(handleSplitRight), keyEquivalent: "d"))
-        fileMenu.addItem(menuItem(title: "Split Down", action: #selector(handleSplitDown), keyEquivalent: "d", modifiers: [.command, .shift]))
-        fileMenu.addItem(menuItem(title: "Focus Next Pane", action: #selector(handleFocusNextPane), keyEquivalent: "]"))
-        fileMenu.addItem(menuItem(title: "Focus Previous Pane", action: #selector(handleFocusPreviousPane), keyEquivalent: "["))
-        #if DEBUG
-        fileMenu.addItem(.separator())
-        fileMenu.addItem(menuItem(title: "Cycle Activity (debug)", action: #selector(handleCycleActivity), keyEquivalent: "a", modifiers: [.command, .shift]))
-        #endif
-        mainMenu.addItem(submenu(fileMenu))
+        mainMenu.addItem(submenu(buildMenu(title: "File", entries: [
+            selfRow("New Tab", #selector(handleNewTab), "t"),
+            selfRow("New Workspace", #selector(handleNewWorkspace), "n"),
+            .separator,
+            selfRow("Close Tab", #selector(handleCloseTab), "w"),
+            selfRow("Close Workspace", #selector(handleCloseWorkspace), "w", modifiers: [.command, .shift]),
+        ])))
 
-        // Edit menu uses first-responder selectors so libghostty's NSResponder
+        // Edit menu — first-responder selectors so libghostty's NSResponder
         // implementation handles copy/paste inside the surface.
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        mainMenu.addItem(submenu(editMenu))
+        mainMenu.addItem(submenu(buildMenu(title: "Edit", entries: [
+            responderRow("Cut", #selector(NSText.cut(_:)), "x"),
+            responderRow("Copy", #selector(NSText.copy(_:)), "c"),
+            responderRow("Paste", #selector(NSText.paste(_:)), "v"),
+            responderRow("Select All", #selector(NSText.selectAll(_:)), "a"),
+        ])))
 
-        let viewMenu = NSMenu(title: "View")
+        let tabSwitchRows: [MenuEntry] = MenuTag.tabRange.map { n in
+            selfRow("Tab \(n)", #selector(handleSwitchTab(_:)), "\(n)", tag: MenuTag.tab(n))
+        }
+        let workspaceSwitchRows: [MenuEntry] = (1...9).map { n in
+            selfRow("Workspace \(n)", #selector(handleSwitchWorkspace(_:)), "\(n)",
+                    modifiers: [.command, .option], tag: MenuTag.workspace(n))
+        }
+        let viewEntries: [MenuEntry] = [
+            selfRow("Toggle Sidebar", #selector(handleToggleSidebar), "s", modifiers: [.command, .control]),
+            .separator,
+            selfRow("Split Right", #selector(handleSplitRight), "d"),
+            selfRow("Split Down", #selector(handleSplitDown), "d", modifiers: [.command, .shift]),
+            selfRow("Focus Previous Pane", #selector(handleFocusPreviousPane), "["),
+            selfRow("Focus Next Pane", #selector(handleFocusNextPane), "]"),
+            .separator,
+        ]
+        + tabSwitchRows
+        + [.separator]
+        + workspaceSwitchRows
+        + [
+            .separator,
+            responderRow("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", modifiers: [.command, .control]),
+        ]
+        let viewMenu = buildMenu(title: "View", entries: viewEntries)
         viewMenu.delegate = self
-        for n in MenuTag.tabRange {
-            let item = menuItem(title: "Tab \(n)", action: #selector(handleSwitchTab(_:)), keyEquivalent: "\(n)")
-            item.tag = MenuTag.tab(n)
-            viewMenu.addItem(item)
-        }
-        viewMenu.addItem(.separator())
-        for n in 1...9 {
-            let item = menuItem(
-                title: "Workspace \(n)",
-                action: #selector(handleSwitchWorkspace(_:)),
-                keyEquivalent: "\(n)",
-                modifiers: [.command, .option]
-            )
-            item.tag = MenuTag.workspace(n)
-            viewMenu.addItem(item)
-        }
         mainMenu.addItem(submenu(viewMenu))
 
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
-        windowMenu.addItem(.separator())
-        windowMenu.addItem(menuItem(title: "Center", action: #selector(handleCenterWindow), keyEquivalent: ""))
-        windowMenu.addItem(.separator())
-        let fullScreenItem = NSMenuItem(
-            title: "Toggle Full Screen",
-            action: #selector(NSWindow.toggleFullScreen(_:)),
-            keyEquivalent: "f"
-        )
-        fullScreenItem.keyEquivalentModifierMask = [.command, .control]
-        windowMenu.addItem(fullScreenItem)
+        let windowMenu = buildMenu(title: "Window", entries: [
+            responderRow("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
+            responderRow("Zoom", #selector(NSWindow.performZoom(_:))),
+            selfRow("Center", #selector(handleCenterWindow)),
+        ])
         mainMenu.addItem(submenu(windowMenu))
+
+        #if DEBUG
+        mainMenu.addItem(submenu(buildMenu(title: "Debug", entries: [
+            selfRow("Cycle Activity", #selector(handleCycleActivity), "a", modifiers: [.command, .shift]),
+        ])))
+        #endif
+
+        let helpMenu = buildMenu(title: "Help", entries: [
+            selfRow("Report an Issue", #selector(handleOpenIssues)),
+            selfRow("View on GitHub", #selector(handleOpenRepo)),
+        ])
+        mainMenu.addItem(submenu(helpMenu))
 
         NSApp.mainMenu = mainMenu
         NSApp.windowsMenu = windowMenu
+        NSApp.helpMenu = helpMenu
     }
 
-    private func menuItem(
-        title: String,
-        action: Selector,
-        keyEquivalent: String,
-        modifiers: NSEvent.ModifierFlags = .command
-    ) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
-        item.keyEquivalentModifierMask = modifiers
-        item.target = self
-        return item
+    // MARK: - Menu DSL
+
+    private struct MenuRow {
+        let title: String
+        let selector: Selector
+        let key: String
+        let modifiers: NSEvent.ModifierFlags
+        let target: AnyObject?
+        let tag: Int
+    }
+
+    private enum MenuEntry {
+        case row(MenuRow)
+        case separator
+    }
+
+    /// Item routed to `self` — used for the AppDelegate's own `handle*`
+    /// methods that need a concrete target.
+    private func selfRow(_ title: String, _ selector: Selector, _ key: String = "",
+                         modifiers: NSEvent.ModifierFlags = .command, tag: Int = 0) -> MenuEntry {
+        .row(MenuRow(title: title, selector: selector, key: key,
+                     modifiers: modifiers, target: self, tag: tag))
+    }
+
+    /// Item with `target: nil` — AppKit dispatches via the responder chain.
+    /// Used for system selectors like `NSWindow.performZoom(_:)` and
+    /// `NSText.cut(_:)`, which let libghostty / the active window handle them.
+    private func responderRow(_ title: String, _ selector: Selector, _ key: String = "",
+                              modifiers: NSEvent.ModifierFlags = .command) -> MenuEntry {
+        .row(MenuRow(title: title, selector: selector, key: key,
+                     modifiers: modifiers, target: nil, tag: 0))
+    }
+
+    private func buildMenu(title: String, entries: [MenuEntry]) -> NSMenu {
+        let menu = NSMenu(title: title)
+        for entry in entries {
+            switch entry {
+            case .row(let row):
+                let item = NSMenuItem(title: row.title, action: row.selector, keyEquivalent: row.key)
+                item.keyEquivalentModifierMask = row.modifiers
+                item.target = row.target
+                item.tag = row.tag
+                menu.addItem(item)
+            case .separator:
+                menu.addItem(.separator())
+            }
+        }
+        return menu
     }
 
     private func submenu(_ menu: NSMenu) -> NSMenuItem {
@@ -233,6 +279,58 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                 item.isHidden = MenuTag.workspaceIndex(from: item.tag) >= workspaceCount
             }
         }
+    }
+
+    @objc private func handleToggleSidebar() {
+        withAnimation(Theme.chromeTransition) {
+            store.sidebarMode = store.sidebarMode.next
+        }
+    }
+
+    @objc private func handleAbout() {
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: KookyApp.name,
+            .applicationVersion: KookyApp.displayVersion,
+            .credits: aboutCredits,
+        ])
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private var aboutCredits: NSAttributedString {
+        let centered = NSMutableParagraphStyle()
+        centered.alignment = .center
+        let body: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: centered,
+        ]
+        let credits = NSMutableAttributedString(string: "\(KookyApp.tagline)\n\n", attributes: body)
+        credits.append(NSAttributedString(
+            string: KookyApp.repositoryDisplay,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.linkColor,
+                .link: KookyApp.repositoryURL,
+                .paragraphStyle: centered,
+            ]
+        ))
+        credits.append(NSAttributedString(
+            string: "\n\n\(KookyApp.copyrightLine)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: centered,
+            ]
+        ))
+        return credits
+    }
+
+    @objc private func handleOpenIssues() {
+        NSWorkspace.shared.open(KookyApp.issuesURL)
+    }
+
+    @objc private func handleOpenRepo() {
+        NSWorkspace.shared.open(KookyApp.repositoryURL)
     }
 
     @objc private func handleCenterWindow() {

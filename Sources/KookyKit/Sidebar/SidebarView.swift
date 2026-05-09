@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct SidebarView: View {
-    static let width: CGFloat = 220
+    static let fullWidth: CGFloat = 220
+    static let compactWidth: CGFloat = 52
 
     @Bindable var store: WorkspaceStore
     /// Id of the workspace currently being dragged. Set by `.onDrag`, cleared
@@ -10,38 +11,51 @@ struct SidebarView: View {
     @State private var draggingWorkspaceId: UUID?
 
     var body: some View {
+        let isCompact = store.sidebarMode == .compact
         VStack(spacing: 0) {
-            header
-            list
+            brand(isCompact: isCompact)
+            list(isCompact: isCompact)
             Spacer(minLength: 0)
         }
-        .frame(width: Self.width)
+        .frame(width: isCompact ? Self.compactWidth : Self.fullWidth)
         .background(Theme.chromeBackground)
     }
 
-    private var header: some View {
-        HStack(spacing: 0) {
-            Text("kooky")
-                .font(Theme.display(15, weight: .medium))
-                .foregroundStyle(Theme.chromeForeground)
-            Spacer()
+    @ViewBuilder
+    private func brand(isCompact: Bool) -> some View {
+        if isCompact {
             HoverableIconButton(
                 systemName: "plus",
                 fontSize: 12,
-                size: 26,
+                size: 28,
                 help: "New workspace"
             ) {
                 store.addWorkspace()
             }
+            .padding(.top, Theme.space3)
+            .padding(.bottom, Theme.space2)
+        } else {
+            HStack(spacing: 0) {
+                Text("kooky")
+                    .font(Theme.display(15, weight: .medium))
+                    .foregroundStyle(Theme.chromeForeground)
+                Spacer()
+                HoverableIconButton(
+                    systemName: "plus",
+                    fontSize: 12,
+                    size: 26,
+                    help: "New workspace"
+                ) {
+                    store.addWorkspace()
+                }
+            }
+            .padding(.horizontal, Theme.space4)
+            .padding(.top, Theme.space3)
+            .padding(.bottom, Theme.space2)
         }
-        .padding(.horizontal, Theme.space4)
-        // Top padding clears the traffic-light area (window is full-content;
-        // there's no real title bar to push us down).
-        .padding(.top, 32)
-        .padding(.bottom, Theme.space3)
     }
 
-    private var list: some View {
+    private func list(isCompact: Bool) -> some View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 2) {
                 ForEach(Array(store.workspaces.enumerated()), id: \.element.id) { index, workspace in
@@ -49,12 +63,13 @@ struct SidebarView: View {
                         workspace: workspace,
                         store: store,
                         myIndex: index,
+                        isCompact: isCompact,
                         draggingId: $draggingWorkspaceId
                     )
                 }
             }
             .padding(.horizontal, Theme.space2)
-            .padding(.bottom, Theme.space2)
+            .padding(.vertical, Theme.space2)
         }
     }
 }
@@ -66,6 +81,7 @@ private struct DraggableWorkspaceRow: View {
     @Bindable var workspace: Workspace
     @Bindable var store: WorkspaceStore
     let myIndex: Int
+    let isCompact: Bool
     @Binding var draggingId: UUID?
 
     @State private var isTargeted = false
@@ -82,6 +98,7 @@ private struct DraggableWorkspaceRow: View {
         SidebarWorkspaceRow(
             workspace: workspace,
             isActive: workspace.id == store.activeWorkspaceId,
+            isCompact: isCompact,
             canCloseOthers: store.workspaces.count > 1,
             onActivate: { store.activateWorkspace(workspace) },
             onClose: { store.closeWorkspace(workspace) },

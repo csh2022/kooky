@@ -3,6 +3,7 @@ import SwiftUI
 struct SidebarWorkspaceRow: View {
     let workspace: Workspace
     let isActive: Bool
+    let isCompact: Bool
     let canCloseOthers: Bool
     let onActivate: () -> Void
     let onClose: () -> Void
@@ -13,6 +14,43 @@ struct SidebarWorkspaceRow: View {
     @State private var isContextMenuOpen = false
 
     var body: some View {
+        Group {
+            if isCompact {
+                compactBody
+            } else {
+                fullBody
+            }
+        }
+        .background(rowBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onActivate)
+        .onHover { isHovered = $0 }
+        .overlay(RightClickCatcher { isContextMenuOpen = true })
+        .popover(isPresented: $isContextMenuOpen, arrowEdge: .trailing) {
+            VStack(alignment: .leading, spacing: 0) {
+                KookyMenuRow(title: "Close Workspace", shortcut: "⌘⇧W") {
+                    isContextMenuOpen = false
+                    onClose()
+                }
+                KookyMenuRow(title: "Close Other Workspaces", isDisabled: !canCloseOthers) {
+                    isContextMenuOpen = false
+                    onCloseOthers()
+                }
+                KookyMenuDivider()
+                KookyMenuRow(title: "Duplicate Workspace") {
+                    isContextMenuOpen = false
+                    onDuplicate()
+                }
+            }
+            .padding(Theme.space1)
+            .frame(minWidth: 240)
+            .background(Theme.chromeBackground)
+        }
+        .help(workspace.workingDirectory.path)
+    }
+
+    private var fullBody: some View {
         HStack(spacing: Theme.space2) {
             agentIcons
             VStack(alignment: .leading, spacing: 2) {
@@ -48,33 +86,22 @@ struct SidebarWorkspaceRow: View {
         }
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, 11)
-        .background(rowBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onActivate)
-        .onHover { isHovered = $0 }
-        .overlay(RightClickCatcher { isContextMenuOpen = true })
-        .popover(isPresented: $isContextMenuOpen, arrowEdge: .trailing) {
-            VStack(alignment: .leading, spacing: 0) {
-                KookyMenuRow(title: "Close Workspace", shortcut: "⌘⇧W") {
-                    isContextMenuOpen = false
-                    onClose()
-                }
-                KookyMenuRow(title: "Close Other Workspaces", isDisabled: !canCloseOthers) {
-                    isContextMenuOpen = false
-                    onCloseOthers()
-                }
-                KookyMenuDivider()
-                KookyMenuRow(title: "Duplicate Workspace") {
-                    isContextMenuOpen = false
-                    onDuplicate()
-                }
+    }
+
+    private var compactBody: some View {
+        // Icon-only row — activity dot floats over the icon as a small badge
+        // since there's no trailing slot in the narrowed column.
+        ZStack(alignment: .topTrailing) {
+            agentIcons
+            if let color = activityDotColor {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+                    .offset(x: 3, y: -3)
             }
-            .padding(Theme.space1)
-            .frame(minWidth: 240)
-            .background(Theme.chromeBackground)
         }
-        .help(workspace.workingDirectory.path)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
     }
 
     @ViewBuilder

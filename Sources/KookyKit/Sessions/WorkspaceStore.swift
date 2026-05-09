@@ -1,5 +1,21 @@
 import Foundation
 
+/// Three-state sidebar visibility. `next` cycles full → compact → hidden →
+/// full so each toggle hides more and eventually wraps around.
+enum SidebarMode: Equatable, Sendable {
+    case full
+    case compact
+    case hidden
+
+    var next: SidebarMode {
+        switch self {
+        case .full: return .compact
+        case .compact: return .hidden
+        case .hidden: return .full
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class WorkspaceStore {
@@ -9,6 +25,9 @@ final class WorkspaceStore {
     /// all `TabBarView` instances so target panes can show drop indicators
     /// even when the source lives in a different pane.
     var draggingTabId: UUID?
+    /// Sidebar visibility mode. Transient — fresh each launch so a returning
+    /// user doesn't get stuck in a state they don't recognize.
+    var sidebarMode: SidebarMode = .full
 
     private let engineFactory: @MainActor () -> any TerminalEngine
     private let persistence: any Persistence
