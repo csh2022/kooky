@@ -9,7 +9,7 @@ Built on **[libghostty](https://github.com/ghostty-org/ghostty)** for GPU-accele
 
 ## Status
 
-v0.5 — Splits, . Each workspace is a recursive pane tree; ⌘D / ⌘⇧D slice the whole pane region (tab strip + content together) so two halves each get their own independent tab bar. ⌘W closes the focused tab and collapses an empty pane up into its sibling; ⌘[ / ⌘] cycle pane focus; clicking into any pane's terminal updates focus + cwd tracking via libghostty's first-responder hook. Right-click context menus (tab + sidebar workspace rows) styled to match the chrome instead of system NSMenu — ⌘W / ⌘D / ⌘⇧D / ⌘⇧W shortcut hints render in SF Pro next to each item. Persistence schema upgrades with backward compat for v0.4 flat tabs. Earlier: Codex hook coverage via `notify` + wrapper bracketing, Claude Code full hooks, IME (中日韩 / 越南文 / etc.) via `NSTextInputClient`, keyboard shortcuts, workspace + tab persistence, hidden title bar, agent launcher (Claude Code / Codex / Gemini CLI / OpenCode / Amp) with inline auto-launch, OSC 7 cwd tracking, Onest + JetBrains Mono chrome, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons). 26-test XCTest suite. Up next: Gemini / OpenCode / Amp wrappers, then `.app` bundle + Settings UI.
+v0.7 — Three-state collapsible sidebar (full / 52pt icon-only / hidden, ⌘⌃S cycles), 32pt top chrome strip with traffic-light clearance + sidebar toggle + explicit `WindowDragHandle` (`window.isMovable = false` globally so tab DnD always beats AppKit's implicit title-bar drag). View menu becomes the navigation hub: Tab `⌘1`-`⌘9`, Workspace `⌥⌘1`-`⌥⌘9`, Split, Focus Pane, Toggle Sidebar, Enter Full Screen. New Help menu (Report Issue / View on GitHub) and DEBUG-only Debug menu. Custom About panel sourced from `KookyApp` constants with a clickable repo link. Earlier (v0.6): drag-reorder workspaces and tabs, cross-pane tab move that preserves session state (same engine / scrollback / agent), `+` doubles as drop-at-end target, double-click tab bar = Zoom, right-click menu shortcut hints, declarative menu DSL. v0.5:  splits — recursive `PaneNode` tree, per-pane tab bars, ⌘D / ⌘⇧D split, drag-resize divider, click-to-focus via libghostty's first-responder hook. Earlier still: Codex hooks via `notify` + wrapper bracketing, Claude Code full hooks, IME (中日韩 / 越南文 / etc.) via `NSTextInputClient`, keyboard shortcuts, workspace + tab persistence, hidden title bar, agent launcher (Claude Code / Codex / Gemini CLI / OpenCode / Amp) with inline auto-launch, OSC 7 cwd tracking, Onest + JetBrains Mono chrome, brand icons from [lobe-icons](https://github.com/lobehub/lobe-icons). 28-test XCTest suite. Up next: Gemini / OpenCode / Amp wrappers, then `.app` bundle + Settings UI.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the roadmap and design notes.
 
@@ -30,7 +30,7 @@ Requires Xcode 26+ and macOS 15+.
 
 swift build
 swift run
-swift test          # 26 unit tests covering AgentTemplate + WorkspaceStore (incl. persistence + splits)
+swift test          # 28 unit tests covering AgentTemplate + WorkspaceStore (incl. persistence + splits + cross-pane move)
 ```
 
 `Vendor/` is gitignored; the setup script is idempotent and skips the download when the pinned SHA already matches.
