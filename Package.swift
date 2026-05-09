@@ -4,6 +4,8 @@ import PackageDescription
 let package = Package(
     name: "Kooky",
     platforms: [
+        // .v14 floor — `@Observable` macro requires Sonoma+. Dropping further
+        // would mean reverting all session models to ObservableObject + @Published.
         .macOS(.v14)
     ],
     dependencies: [],

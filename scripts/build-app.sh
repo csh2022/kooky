@@ -80,7 +80,13 @@ if [ -f "$ICON_SOURCE" ]; then
     done
     iconutil -c icns -o "${APP}/Contents/Resources/AppIcon.icns" "$ICONSET"
     rm -rf "$(dirname "$ICONSET")"
-    APPLE_ICON_PLIST_KEYS="<key>CFBundleIconFile</key><string>AppIcon</string><key>CFBundleIconName</key><string>AppIcon</string>"
+    APPLE_ICON_PLIST_KEYS=$(cat <<'KEYS'
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+KEYS
+    )
 else
     APPLE_ICON_PLIST_KEYS=""
 fi
@@ -154,7 +160,7 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
     <false/>
     <key>NSSupportsSuddenTermination</key>
     <false/>
-    ${APPLE_ICON_PLIST_KEYS}
+${APPLE_ICON_PLIST_KEYS}
 </dict>
 </plist>
 PLIST

@@ -77,22 +77,18 @@ enum KookyFonts {
     private static var registered = false
 }
 
-/// SPM's auto-generated `Bundle.module` for executable targets looks for
-/// `Kooky_KookyKit.bundle` only at `Bundle.main.bundleURL`. That works for
-/// `swift run` (binary's parent dir) but **fatalErrors** when shipping inside
-/// a `.app`, where `Bundle.main.bundleURL` is the `.app` root and resources
-/// canonically live in `Contents/Resources/`. We resolve candidates ourselves
-/// so both layouts work and never trigger SPM's accessor's first-access
-/// crash.
+/// Replaces SPM's auto-generated `Bundle.module`, which `fatalError`s on
+/// first access inside a `.app` (it only checks `Bundle.main.bundleURL` —
+/// the .app root — but resources canonically ship in `Contents/Resources/`).
 @MainActor
 func bundleResourceURL(name: String, ext: String, subdirectory: String) -> URL? {
     let bundleName = "Kooky_KookyKit"
-    let candidates: [URL?] = [
-        Bundle.main.resourceURL?.appendingPathComponent("\(bundleName).bundle"),
-        Bundle.main.bundleURL.appendingPathComponent("\(bundleName).bundle"),
-    ]
+    let candidates: [URL] = [
+        Bundle.main.resourceURL,
+        Bundle.main.bundleURL,
+    ].compactMap { $0?.appendingPathComponent("\(bundleName).bundle") }
     for candidate in candidates {
-        guard let candidate, let bundle = Bundle(url: candidate) else { continue }
+        guard let bundle = Bundle(url: candidate) else { continue }
         if let url = bundle.url(forResource: name, withExtension: ext, subdirectory: subdirectory) { return url }
         if let url = bundle.url(forResource: name, withExtension: ext) { return url }
     }
