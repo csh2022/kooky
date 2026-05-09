@@ -39,6 +39,19 @@ Download the latest `Kooky-vX.Y.Z.dmg` from [Releases](https://github.com/iAmCor
 xattr -d com.apple.quarantine /Applications/Kooky.app
 ```
 
+**Path C — when "Open Anyway" doesn't appear at all**
+
+Newer macOS sometimes hides the **Open Anyway** button entirely for adhoc-signed apps. If that happens, run once to re-enable the legacy "Anywhere" option, then redo Path A:
+
+```sh
+sudo spctl --global-disable      # macOS 15+ (Sequoia); older systems use --master-disable
+# Open System Settings → Privacy & Security → set "Allow applications from" to Anywhere
+# Open Kooky.app → it now launches
+sudo spctl --global-enable       # turn Gatekeeper back on once kooky is whitelisted
+```
+
+This is **system-wide** — while disabled, macOS will run any unsigned app. Re-enable as soon as kooky launches once (the per-app whitelist persists after re-enabling).
+
 Either way, macOS only blocks the first launch. After that you launch normally from Spotlight / Dock / Finder.
 
 ## Building from source
