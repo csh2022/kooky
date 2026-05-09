@@ -4,7 +4,7 @@
 
 🇨🇳 中文  ·  🇬🇧 [English](README.md)
 
-![kooky 截图 —— 侧边栏三个 workspace,两个 pane 并排跑 Claude Code 和 Codex,sidebar 上有 agent 活动点](screenshot.webp)
+![kooky 截图 —— 侧边栏三个 workspace,两个 pane 并排跑 Claude Code 和 Codex,`+` 菜单展开了五种内置 agent](screenshot.png)
 
 现在的终端都是在 AI agent 出现之前设计的。**kooky 直接把 agent 会话做成 tab** —— Claude Code / Codex / Gemini CLI 跟 shell 并排放在一起,界面会跟着 agent 的状态走。开源、仅支持 macOS、MIT 许可。底层 GPU 渲染走 [libghostty](https://github.com/ghostty-org/ghostty)。
 

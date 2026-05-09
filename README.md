@@ -4,7 +4,7 @@
 
 🇬🇧 English  ·  🇨🇳 [中文](README_cn.md)
 
-![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, agent activity dots](screenshot.webp)
+![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, the `+` menu showing the five built-in agent templates](screenshot.png)
 
 Existing terminals were built before AI agents lived in your dev loop. **kooky treats agent sessions as first-class tabs** — Claude Code, Codex, Gemini CLI live next to your shells, and the chrome reacts to what each is doing. Open-source, macOS-only, MIT. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
 
