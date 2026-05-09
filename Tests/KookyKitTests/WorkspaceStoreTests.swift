@@ -98,6 +98,40 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(session.lastCommandExit, 0)
     }
 
+    func testWorkspaceFailureAggregatesAcrossPanes() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let pane = firstPane(ws)
+        // Failure-bearing tab must live in a different pane from the active
+        // one to verify the DFS picks it up regardless of focus.
+        store.splitPane(pane, orientation: .horizontal, in: ws)
+        let firstTab = pane.tabs[0]
+        let secondPaneTab = ws.root.allPanes.last!.tabs[0]
+        XCTAssertFalse(ws.hasCommandFailure)
+        engine(secondPaneTab).emitCommandFinished(exit: 1, duration: 0.1)
+        XCTAssertTrue(ws.hasCommandFailure)
+        engine(secondPaneTab).emitCommandFinished(exit: 0, duration: 0.1)
+        XCTAssertFalse(ws.hasCommandFailure)
+        engine(firstTab).emitCommandFinished(exit: 2, duration: 0.1)
+        XCTAssertTrue(ws.hasCommandFailure)
+    }
+
+    func testFailureSurfacesEvenWhenAttentionFiresFirstInDFS() {
+        // Regression: `sidebarReadout`'s walk used to short-circuit on attention,
+        // leaving `hasCommandFailure` false when a sibling pane held a non-zero
+        // exit. The walk now runs to completion so each field is independent.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let pane = firstPane(ws)
+        store.splitPane(pane, orientation: .horizontal, in: ws)
+        let firstPaneTab = pane.tabs[0]
+        let secondPaneTab = ws.root.allPanes.last!.tabs[0]
+        firstPaneTab.activityState = .attention
+        engine(secondPaneTab).emitCommandFinished(exit: 1, duration: 0.1)
+        XCTAssertEqual(ws.activityState, .attention)
+        XCTAssertTrue(ws.hasCommandFailure)
+    }
+
     func testNewTabInheritsLatestPwd() {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA)

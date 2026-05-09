@@ -391,12 +391,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     #if DEBUG
+    /// Cycles through every dot state in precedence order: idle → running
+    /// → failure → attention → idle. Used to preview the dot palette without
+    /// running real agents / commands.
     @objc private func handleCycleActivity() {
         guard let session = store.active?.activeSession else { return }
-        switch session.activityState {
-        case .idle: session.activityState = .running
-        case .running: session.activityState = .attention
-        case .attention: session.activityState = .idle
+        let isFailure = session.lastCommandExit.map { $0 != 0 } ?? false
+        switch (session.activityState, isFailure) {
+        case (.idle, false):
+            session.activityState = .running
+        case (.running, _):
+            session.activityState = .idle
+            session.lastCommandExit = 1
+            session.lastCommandDuration = 0.42
+        case (.idle, true):
+            session.activityState = .attention
+        case (.attention, _):
+            session.activityState = .idle
+            session.lastCommandExit = nil
+            session.lastCommandDuration = nil
         }
     }
     #endif

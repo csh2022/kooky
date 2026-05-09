@@ -2,6 +2,12 @@
 
 Notable changes per release. Tagged commits use `vX.Y` shortform.
 
+## v0.7.4 — 2026-05-09
+
+- **Workspace-level command-failure dot.** The same red dot v0.7.3 added to per-tab pills now also surfaces on the sidebar workspace row when *any* tab in *any* pane has a non-zero last exit. Precedence: attention (amber) > failure (red) > running (blue) > idle. Sibling-pane failures don't get lost when you're focused on a different split — and because the agent activity dot still wins on attention, an `attention` agent state still pulls the row to amber even with a stale failure underneath.
+- **Debug Cycle Activity** (`⌘⇧A`, `#if DEBUG` only) now previews all four states in precedence order — idle (none) → running (blue) → failure (red) → attention (amber) → idle. Each step flips one signal in isolation so the dot palette + precedence reads in 4 keystrokes without spawning real agents or running failing commands.
+- **Internals.** `Theme.activityRunning` / `activityFailure` / `activityAttention` color tokens replace inline `Color(.sRGB, ...)` constants that were duplicated in `TabBarItem` and `SidebarWorkspaceRow`; one design-token group for the palette so future theme work has one place to change. `Workspace.aggregate` renamed to `sidebarReadout` and lifted to internal so the sidebar row reads the (agents, state, hasCommandFailure) tuple once per render — the row's helpers (`fullBody` / `compactBody` / `agentIcons`) take parameters instead of re-invoking the DFS per accessor (the "fold them so we allocate one DFS, not three" comment was previously aspirational, now actual). Dropped the attention short-circuit in the walk: the previous implementation left `hasCommandFailure` falsely `false` when attention fired in DFS-earlier panes than the failure, so the boolean's "any tab failed" semantics silently broke whenever both signals coexisted; new regression test in `WorkspaceStoreTests` covers attention + failure across panes.
+
 ## v0.7.3 — 2026-05-09
 
 - **Per-tab last-command status (OSC 133).** A small red dot lights up to the left of each tab's icon when the most recent command exited non-zero. Hover the dot for a native tooltip showing `exit N · 12.4s`. Successful runs leave the row clean — a green dot on every command would dominate the chrome. Status resets to "no dot" on the next zero-exit command, so the indicator always reflects the *latest* run, not a sticky failure record. Not persisted: each launch starts fresh.

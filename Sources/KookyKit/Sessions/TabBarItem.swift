@@ -104,7 +104,7 @@ struct TabBarItem: View {
     private var commandStatusDot: some View {
         if let exit = tab.lastCommandExit, exit != 0 {
             Circle()
-                .fill(Color(.sRGB, red: 0.91, green: 0.40, blue: 0.40, opacity: 1))
+                .fill(Theme.activityFailure)
                 .frame(width: 5, height: 5)
                 .help(Self.statusTooltip(exit: exit, duration: tab.lastCommandDuration))
         }

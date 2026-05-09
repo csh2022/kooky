@@ -17,11 +17,13 @@ struct SidebarWorkspaceRow: View {
     @State private var pendingRename = ""
 
     var body: some View {
+        let readout = workspace.sidebarReadout
+        let dotColor = Self.activityDotColor(state: readout.state, hasFailure: readout.hasCommandFailure)
         Group {
             if isCompact {
-                compactBody
+                compactBody(agents: readout.agents, dotColor: dotColor)
             } else {
-                fullBody
+                fullBody(agents: readout.agents, dotColor: dotColor)
             }
         }
         .background(rowBackground)
@@ -67,9 +69,9 @@ struct SidebarWorkspaceRow: View {
         .help(workspace.workingDirectory.path)
     }
 
-    private var fullBody: some View {
+    private func fullBody(agents: [AgentTemplate], dotColor: Color?) -> some View {
         HStack(spacing: Theme.space2) {
-            agentIcons
+            agentIcons(agents: agents)
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.title)
                     .font(Theme.display(13, weight: .regular))
@@ -85,8 +87,8 @@ struct SidebarWorkspaceRow: View {
             // Activity dot lives at the trailing edge — visible at all times
             // when not idle, eats the close-button slot only on hover.
             ZStack {
-                if let color = activityDotColor {
-                    Circle().fill(color).frame(width: 6, height: 6)
+                if let dotColor {
+                    Circle().fill(dotColor).frame(width: 6, height: 6)
                         .opacity(isHovered ? 0 : 1)
                 }
                 HoverableIconButton(
@@ -105,14 +107,14 @@ struct SidebarWorkspaceRow: View {
         .padding(.vertical, 11)
     }
 
-    private var compactBody: some View {
+    private func compactBody(agents: [AgentTemplate], dotColor: Color?) -> some View {
         // Icon-only row — activity dot floats over the icon as a small badge
         // since there's no trailing slot in the narrowed column.
         ZStack(alignment: .topTrailing) {
-            agentIcons
-            if let color = activityDotColor {
+            agentIcons(agents: agents)
+            if let dotColor {
                 Circle()
-                    .fill(color)
+                    .fill(dotColor)
                     .frame(width: 6, height: 6)
                     .offset(x: 3, y: -3)
             }
@@ -122,12 +124,11 @@ struct SidebarWorkspaceRow: View {
     }
 
     @ViewBuilder
-    private var agentIcons: some View {
+    private func agentIcons(agents: [AgentTemplate]) -> some View {
         // Single leading mark: first non-terminal agent's brand icon, or the
         // Terminal SF Symbol when the workspace only runs plain shells.
         // Multi-agent workspaces get a `+N` badge showing the additional
         // distinct agents — first agent stays the dominant mark.
-        let agents = workspace.distinctAgents
         if let agent = agents.first {
             ZStack(alignment: .bottomTrailing) {
                 AgentIconView(asset: agent.iconAsset, fallbackSymbol: agent.symbol, size: 20)
@@ -150,14 +151,14 @@ struct SidebarWorkspaceRow: View {
         }
     }
 
-    private var activityDotColor: Color? {
-        // Hue chosen for at-a-glance read: cool blue == "thinking", warm
-        // amber == "needs you". Idle stays unmarked so the row reads quiet.
-        switch workspace.activityState {
-        case .idle: return nil
-        case .running: return Color(.sRGB, red: 0.41, green: 0.69, blue: 0.86, opacity: 1)
-        case .attention: return Color(.sRGB, red: 0.91, green: 0.69, blue: 0.40, opacity: 1)
-        }
+    /// Precedence: attention (agent literally waits on you) > failure
+    /// (last shell command non-zero, look when free) > running (agent in
+    /// flight, FYI) > idle (quiet).
+    private static func activityDotColor(state: SessionActivityState, hasFailure: Bool) -> Color? {
+        if state == .attention { return Theme.activityAttention }
+        if hasFailure { return Theme.activityFailure }
+        if state == .running { return Theme.activityRunning }
+        return nil
     }
 
     private var rowBackground: Color {

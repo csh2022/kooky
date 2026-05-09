@@ -33,32 +33,38 @@ final class Workspace: Identifiable {
     var activeSession: Session? { activePane?.activeTab }
 
     /// Distinct non-terminal agents and aggregated activity, computed in a
-    /// single tree walk. Sidebar reads both per render — fold them so we
-    /// allocate one DFS, not two.
-    private var aggregate: (agents: [AgentTemplate], state: SessionActivityState) {
+    /// single tree walk. Sidebar reads all three per render. The walk runs
+    /// to completion (no short-circuit) so each field reflects the whole
+    /// tree — short-circuiting on attention previously left `hasFailure`
+    /// false when a sibling pane held a non-zero exit.
+    var sidebarReadout: (agents: [AgentTemplate], state: SessionActivityState, hasCommandFailure: Bool) {
         var seen: Set<String> = []
         var agents: [AgentTemplate] = []
         var state: SessionActivityState = .idle
-        var stop = false
+        var hasFailure = false
         walk(root) { pane in
             for tab in pane.tabs {
                 if tab.agent.id != AgentTemplate.terminal.id, !seen.contains(tab.agent.id) {
                     seen.insert(tab.agent.id)
                     agents.append(tab.agent)
                 }
-                if tab.activityState == .attention {
-                    state = .attention
-                    stop = true
-                    return
+                if let exit = tab.lastCommandExit, exit != 0 { hasFailure = true }
+                switch tab.activityState {
+                case .attention: state = .attention
+                case .running where state != .attention: state = .running
+                default: break
                 }
-                if tab.activityState == .running { state = .running }
             }
-        } shouldStop: { stop }
-        return (agents, state)
+        } shouldStop: { false }
+        return (agents, state, hasFailure)
     }
 
-    var distinctAgents: [AgentTemplate] { aggregate.agents }
-    var activityState: SessionActivityState { aggregate.state }
+    var distinctAgents: [AgentTemplate] { sidebarReadout.agents }
+    var activityState: SessionActivityState { sidebarReadout.state }
+    /// True when any tab's last command exited non-zero. Sidebar uses this
+    /// (with attention > failure > running > idle precedence) so a
+    /// background-pane failure surfaces at the workspace level too.
+    var hasCommandFailure: Bool { sidebarReadout.hasCommandFailure }
 
     private func walk(_ node: PaneNode, visit: (Pane) -> Void, shouldStop: () -> Bool) {
         switch node.content {
