@@ -57,6 +57,34 @@ cp .build/release/KookyHook "${APP}/Contents/MacOS/KookyHook"
 # the running .app will silently fall back to .build/release/ on disk.
 cp -R .build/release/Kooky_KookyKit.bundle "${APP}/Contents/Resources/"
 
+# App icon — generated from branding/AppIcon.png if present. macOS reads
+# .icns from CFBundleIconFile in Info.plist; we synthesize the multi-size
+# .iconset via sips, then iconutil packs it. Without a source PNG we ship
+# without an icon and the OS falls back to the generic blank-document.
+ICON_SOURCE="branding/AppIcon.png"
+if [ -f "$ICON_SOURCE" ]; then
+    echo "==> Building AppIcon.icns from ${ICON_SOURCE}"
+    ICONSET="$(mktemp -d)/AppIcon.iconset"
+    mkdir -p "$ICONSET"
+    # Apple's required sizes for an .icns: 16/32/128/256/512 in @1x and @2x.
+    # sips resamples cleanly enough for a flat brand mark; for fine detail
+    # design, hand-export from Figma/Sketch is preferred.
+    for spec in "16:icon_16x16.png" "32:icon_16x16@2x.png" \
+                "32:icon_32x32.png" "64:icon_32x32@2x.png" \
+                "128:icon_128x128.png" "256:icon_128x128@2x.png" \
+                "256:icon_256x256.png" "512:icon_256x256@2x.png" \
+                "512:icon_512x512.png" "1024:icon_512x512@2x.png"; do
+        size="${spec%%:*}"
+        name="${spec##*:}"
+        sips -z "$size" "$size" "$ICON_SOURCE" --out "${ICONSET}/${name}" >/dev/null
+    done
+    iconutil -c icns -o "${APP}/Contents/Resources/AppIcon.icns" "$ICONSET"
+    rm -rf "$(dirname "$ICONSET")"
+    APPLE_ICON_PLIST_KEYS="<key>CFBundleIconFile</key><string>AppIcon</string><key>CFBundleIconName</key><string>AppIcon</string>"
+else
+    APPLE_ICON_PLIST_KEYS=""
+fi
+
 # SPM ships the resource bundle as a flat directory, but its `.bundle` suffix
 # triggers codesign's bundle validator → "bundle format invalid". Promote it
 # to the canonical macOS bundle layout (Contents/Info.plist +
@@ -126,6 +154,7 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
     <false/>
     <key>NSSupportsSuddenTermination</key>
     <false/>
+    ${APPLE_ICON_PLIST_KEYS}
 </dict>
 </plist>
 PLIST
