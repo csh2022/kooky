@@ -7,6 +7,7 @@ import Foundation
 struct PersistedState: Codable, Equatable {
     var workspaces: [PersistedWorkspace]
     var activeWorkspaceId: UUID?
+    var sidebarMode: SidebarMode?
 }
 
 struct PersistedWorkspace: Codable, Equatable {

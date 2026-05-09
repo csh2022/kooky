@@ -36,7 +36,7 @@ struct ContentView: View {
                 help: sidebarTooltip
             ) {
                 withAnimation(Theme.chromeTransition) {
-                    store.sidebarMode = store.sidebarMode.next
+                    store.setSidebarMode(store.sidebarMode.next)
                 }
             }
             WindowDragHandle()

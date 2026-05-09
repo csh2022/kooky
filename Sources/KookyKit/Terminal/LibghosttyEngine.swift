@@ -58,6 +58,22 @@ private let kookyWakeupCb: ghostty_runtime_wakeup_cb = { _ in
     }
 }
 
+/// Hops to main + recovers the originating `GhosttySurfaceView` from libghostty's
+/// userdata pointer. Action_cb runs on whichever thread libghostty signals
+/// from; SwiftUI / our @MainActor state requires main, hence the bounce.
+/// The pointer transits as an `Int` bit pattern because Swift 6 concurrency
+/// flags `UnsafeMutableRawPointer` capture across the dispatch boundary.
+private func dispatchToView(_ userdata: UnsafeMutableRawPointer, _ work: @MainActor @escaping (GhosttySurfaceView) -> Void) {
+    let bits = Int(bitPattern: userdata)
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+            guard let pointer = UnsafeMutableRawPointer(bitPattern: bits) else { return }
+            let view = Unmanaged<GhosttySurfaceView>.fromOpaque(pointer).takeUnretainedValue()
+            work(view)
+        }
+    }
+}
+
 private let kookyActionCb: ghostty_runtime_action_cb = { _, target, action in
     guard target.tag == GHOSTTY_TARGET_SURFACE,
           let surface = target.target.surface,
@@ -67,22 +83,29 @@ private let kookyActionCb: ghostty_runtime_action_cb = { _, target, action in
     switch action.tag {
     case GHOSTTY_ACTION_SCROLLBAR:
         let bar = action.action.scrollbar
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
-                view.applyScrollbar(total: bar.total, offset: bar.offset, len: bar.len)
-            }
-        }
+        dispatchToView(userdata) { $0.applyScrollbar(total: bar.total, offset: bar.offset, len: bar.len) }
         return true
     case GHOSTTY_ACTION_PWD:
         guard let cstr = action.action.pwd.pwd else { return true }
         let pwd = String(cString: cstr)
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
-                view.onPwdChange?(pwd)
-            }
-        }
+        dispatchToView(userdata) { $0.onPwdChange?(pwd) }
+        return true
+    case GHOSTTY_ACTION_OPEN_URL:
+        // libghostty resolves ⌘+click hits and hands us the URL string. We
+        // route it to the default browser, but return `false` when we can't
+        // parse the string so libghostty falls back to its own opener — some
+        // OSC 8 / unescaped `file://` shapes that `URL(string:)` rejects can
+        // still be opened by ghostty's built-in path.
+        let urlAction = action.action.open_url
+        guard let cstr = urlAction.url, urlAction.len > 0 else { return false }
+        let buffer = UnsafeRawBufferPointer(start: cstr, count: Int(urlAction.len))
+        let urlString = String(decoding: buffer, as: UTF8.self)
+        guard let url = URL(string: urlString) else { return false }
+        DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+        return true
+    case GHOSTTY_ACTION_MOUSE_SHAPE:
+        let shape = action.action.mouse_shape
+        dispatchToView(userdata) { $0.applyMouseShape(shape) }
         return true
     default:
         return false
@@ -151,6 +174,14 @@ final class LibghosttyEngine: TerminalEngine {
     func terminate() {
         surfaceView.releaseSurface()
     }
+
+    @discardableResult
+    func performAction(_ name: String) -> Bool {
+        guard let surface = surfaceView.surface else { return false }
+        return name.withCString { cstr in
+            ghostty_surface_binding_action(surface, cstr, UInt(name.utf8.count))
+        }
+    }
 }
 
 // MARK: - GhosttySurfaceView
@@ -209,8 +240,47 @@ final class GhosttySurfaceView: NSView {
         trackingAreas.forEach { removeTrackingArea($0) }
         // `.activeWhenFirstResponder` keeps non-focused panes from receiving
         // mouseMoved and stomping on the focused surface's hover.
-        let options: NSTrackingArea.Options = [.activeWhenFirstResponder, .mouseMoved, .inVisibleRect]
+        // `.cursorUpdate` lets us re-apply `currentCursor` whenever the mouse
+        // re-enters the surface — libghostty's `MOUSE_SHAPE` action only fires
+        // when the shape *changes*, so without this the I-beam → pointer
+        // transition wouldn't recover after the cursor briefly leaves.
+        let options: NSTrackingArea.Options = [
+            .activeWhenFirstResponder, .mouseMoved, .cursorUpdate, .inVisibleRect,
+        ]
         addTrackingArea(NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil))
+    }
+
+    private var currentCursor: NSCursor = .iBeam
+
+    override func cursorUpdate(with event: NSEvent) {
+        currentCursor.set()
+    }
+
+    /// Map libghostty's `ghostty_action_mouse_shape_e` to an `NSCursor` and
+    /// apply it. Skip the `.set()` syscall when the cursor hasn't changed —
+    /// libghostty's contract is "fires on shape change" but defensive callers
+    /// can repeat the same shape and we shouldn't churn AppKit.
+    func applyMouseShape(_ shape: ghostty_action_mouse_shape_e) {
+        let cursor: NSCursor
+        switch shape {
+        case GHOSTTY_MOUSE_SHAPE_POINTER: cursor = .pointingHand
+        case GHOSTTY_MOUSE_SHAPE_TEXT, GHOSTTY_MOUSE_SHAPE_DEFAULT: cursor = .iBeam
+        case GHOSTTY_MOUSE_SHAPE_VERTICAL_TEXT: cursor = .iBeamCursorForVerticalLayout
+        case GHOSTTY_MOUSE_SHAPE_CROSSHAIR, GHOSTTY_MOUSE_SHAPE_CELL: cursor = .crosshair
+        case GHOSTTY_MOUSE_SHAPE_GRAB: cursor = .openHand
+        case GHOSTTY_MOUSE_SHAPE_GRABBING, GHOSTTY_MOUSE_SHAPE_MOVE: cursor = .closedHand
+        case GHOSTTY_MOUSE_SHAPE_NOT_ALLOWED, GHOSTTY_MOUSE_SHAPE_NO_DROP: cursor = .operationNotAllowed
+        case GHOSTTY_MOUSE_SHAPE_COPY: cursor = .dragCopy
+        case GHOSTTY_MOUSE_SHAPE_ALIAS: cursor = .dragLink
+        case GHOSTTY_MOUSE_SHAPE_COL_RESIZE, GHOSTTY_MOUSE_SHAPE_EW_RESIZE,
+             GHOSTTY_MOUSE_SHAPE_E_RESIZE, GHOSTTY_MOUSE_SHAPE_W_RESIZE: cursor = .resizeLeftRight
+        case GHOSTTY_MOUSE_SHAPE_ROW_RESIZE, GHOSTTY_MOUSE_SHAPE_NS_RESIZE,
+             GHOSTTY_MOUSE_SHAPE_N_RESIZE, GHOSTTY_MOUSE_SHAPE_S_RESIZE: cursor = .resizeUpDown
+        default: cursor = .arrow
+        }
+        guard currentCursor !== cursor else { return }
+        currentCursor = cursor
+        cursor.set()
     }
 
     required init?(coder: NSCoder) {

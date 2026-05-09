@@ -39,4 +39,9 @@ protocol TerminalEngine: AnyObject {
     var onFocus: (() -> Void)? { get set }
     func start(config: TerminalSessionConfig)
     func terminate()
+    /// Trigger a libghostty named action (e.g. `increase_font_size:1`,
+    /// `decrease_font_size:1`, `reset_font_size`, `clear_screen`). Returns
+    /// `true` when the engine recognised and dispatched the action.
+    @discardableResult
+    func performAction(_ name: String) -> Bool
 }

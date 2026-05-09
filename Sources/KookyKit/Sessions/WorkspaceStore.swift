@@ -2,7 +2,7 @@ import Foundation
 
 /// Three-state sidebar visibility. `next` cycles full → compact → hidden →
 /// full so each toggle hides more and eventually wraps around.
-enum SidebarMode: Equatable, Sendable {
+enum SidebarMode: String, Codable, Equatable, Sendable {
     case full
     case compact
     case hidden
@@ -25,9 +25,14 @@ final class WorkspaceStore {
     /// all `TabBarView` instances so target panes can show drop indicators
     /// even when the source lives in a different pane.
     var draggingTabId: UUID?
-    /// Sidebar visibility mode. Transient — fresh each launch so a returning
-    /// user doesn't get stuck in a state they don't recognize.
     var sidebarMode: SidebarMode = .full
+
+    /// Mutate + schedule save. UI sites wrap in `withAnimation(Theme.chromeTransition)`.
+    func setSidebarMode(_ mode: SidebarMode) {
+        guard sidebarMode != mode else { return }
+        sidebarMode = mode
+        scheduleSave()
+    }
 
     private let engineFactory: @MainActor () -> any TerminalEngine
     private let persistence: any Persistence
@@ -390,6 +395,7 @@ final class WorkspaceStore {
         activeWorkspaceId = workspaces.contains(where: { $0.id == state.activeWorkspaceId })
             ? state.activeWorkspaceId
             : workspaces.first?.id
+        sidebarMode = state.sidebarMode ?? .full
     }
 
     private func restorePane(_ persisted: PersistedPaneNode, fm: FileManager) -> PaneNode? {
@@ -466,7 +472,8 @@ final class WorkspaceStore {
     private func snapshot() -> PersistedState {
         PersistedState(
             workspaces: workspaces.map(PersistedWorkspace.init),
-            activeWorkspaceId: activeWorkspaceId
+            activeWorkspaceId: activeWorkspaceId,
+            sidebarMode: sidebarMode
         )
     }
 }

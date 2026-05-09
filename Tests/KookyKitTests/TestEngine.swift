@@ -21,6 +21,13 @@ final class TestEngine: TerminalEngine {
         terminateCount += 1
     }
 
+    private(set) var performedActions: [String] = []
+    @discardableResult
+    func performAction(_ name: String) -> Bool {
+        performedActions.append(name)
+        return true
+    }
+
     func emitPwd(_ path: String) {
         onPwdChange?(path)
     }

@@ -115,6 +115,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         let viewEntries: [MenuEntry] = [
             selfRow("Toggle Sidebar", #selector(handleToggleSidebar), "s", modifiers: [.command, .control]),
             .separator,
+            selfRow("Increase Font Size", #selector(handleIncreaseFontSize), "="),
+            selfRow("Decrease Font Size", #selector(handleDecreaseFontSize), "-"),
+            selfRow("Default Font Size", #selector(handleResetFontSize), "0"),
+            .separator,
+            selfRow("Clear Pane", #selector(handleClearScrollback), "k"),
+            .separator,
             selfRow("Split Right", #selector(handleSplitRight), "d"),
             selfRow("Split Down", #selector(handleSplitDown), "d", modifiers: [.command, .shift]),
             selfRow("Focus Previous Pane", #selector(handleFocusPreviousPane), "["),
@@ -281,9 +287,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
     }
 
+    @objc private func handleIncreaseFontSize() {
+        store.active?.activeSession?.engine.performAction("increase_font_size:1")
+    }
+
+    @objc private func handleDecreaseFontSize() {
+        store.active?.activeSession?.engine.performAction("decrease_font_size:1")
+    }
+
+    @objc private func handleResetFontSize() {
+        store.active?.activeSession?.engine.performAction("reset_font_size")
+    }
+
+    @objc private func handleClearScrollback() {
+        store.active?.activeSession?.engine.performAction("clear_screen")
+    }
+
     @objc private func handleToggleSidebar() {
         withAnimation(Theme.chromeTransition) {
-            store.sidebarMode = store.sidebarMode.next
+            store.setSidebarMode(store.sidebarMode.next)
         }
     }
 
