@@ -103,6 +103,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             responderRow("Copy", #selector(NSText.copy(_:)), "c"),
             responderRow("Paste", #selector(NSText.paste(_:)), "v"),
             responderRow("Select All", #selector(NSText.selectAll(_:)), "a"),
+            .separator,
+            selfRow("Find…", #selector(handleFind), "f"),
+            selfRow("Find Next", #selector(handleFindNext), "g"),
+            selfRow("Find Previous", #selector(handleFindPrevious), "g", modifiers: [.command, .shift]),
         ])))
 
         let tabSwitchRows: [MenuEntry] = MenuTag.tabRange.map { n in
@@ -322,6 +326,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         withAnimation(Theme.chromeTransition) {
             store.setSidebarMode(store.sidebarMode.next)
         }
+    }
+
+    @objc private func handleFind() {
+        guard let session = store.active?.activeSession else { return }
+        // ⌘F is a toggle on the active tab. Search state is per-session, so
+        // ⌘F in pane A doesn't affect pane B's open search bar — both can
+        // be active simultaneously, each with their own needle / count.
+        if session.searchActive {
+            session.engine.performAction("end_search")
+        } else {
+            session.engine.performAction("start_search")
+        }
+    }
+
+    @objc private func handleFindNext() {
+        store.active?.activeSession?.engine.performAction("navigate_search:next")
+    }
+
+    @objc private func handleFindPrevious() {
+        store.active?.activeSession?.engine.performAction("navigate_search:previous")
     }
 
     @objc private func handleAbout() {

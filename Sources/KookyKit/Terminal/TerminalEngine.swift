@@ -41,6 +41,15 @@ protocol TerminalEngine: AnyObject {
     /// most-recent command's exit code and run duration. `exitCode` is `nil`
     /// when the shell omitted it from the OSC sequence.
     var onCommandFinished: ((Int?, TimeInterval) -> Void)? { get set }
+    /// Search lifecycle from libghostty's `start_search` / `end_search` /
+    /// `navigate_search` keybinds. While `onSearchStart` is the most recent
+    /// signal, libghostty owns the input loop and reports the current needle
+    /// + total / selected match index back through these callbacks. The UI
+    /// is a passive mirror — kooky doesn't push the needle string itself.
+    var onSearchStart: ((String) -> Void)? { get set }
+    var onSearchEnd: (() -> Void)? { get set }
+    var onSearchTotal: ((Int) -> Void)? { get set }
+    var onSearchSelected: ((Int) -> Void)? { get set }
     func start(config: TerminalSessionConfig)
     func terminate()
     /// Trigger a libghostty named action (e.g. `increase_font_size:1`,

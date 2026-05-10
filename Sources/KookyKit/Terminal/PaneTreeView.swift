@@ -26,7 +26,7 @@ struct PaneTreeView: View {
 private struct PaneView: View {
     @Bindable var pane: Pane
     @Bindable var workspace: Workspace
-    let store: WorkspaceStore
+    @Bindable var store: WorkspaceStore
     let isFocused: Bool
 
     var body: some View {
@@ -37,10 +37,121 @@ private struct PaneView: View {
                 TerminalView(engine: active.engine)
                     .id(active.id)
                     .padding(8)
+                    .overlay(alignment: .topTrailing) {
+                        // Per-pane: multiple panes can search simultaneously,
+                        // each with their own needle and result count.
+                        if active.searchActive {
+                            PaneSearchBar(
+                                session: active,
+                                onFocusGained: { store.activateTab(active, in: workspace) }
+                            )
+                            .padding(.top, Theme.space3)
+                            .padding(.trailing, Theme.space3)
+                        }
+                    }
             } else {
                 Color.clear
             }
         }
+    }
+}
+
+/// Editable search field overlaying the active pane's terminal area.
+/// Each keystroke pushes `search:<text>` to libghostty (the named action
+/// that updates the needle and re-runs the search). Auto-focuses when
+/// search activates so Esc / Enter route here instead of to the terminal
+/// NSView. Lives in `PaneTreeView` because search state belongs visually
+/// next to the content it filters — not in the global window chrome.
+private struct PaneSearchBar: View {
+    @Bindable var session: Session
+    /// Called when the TextField gains focus so the parent can promote this
+    /// pane to active. Without this, clicking a non-active pane's search bar
+    /// leaves `WorkspaceStore.activePaneId` unchanged, and ⌘G / ⌘⇧G route
+    /// `navigate_search` to the wrong session.
+    let onFocusGained: () -> Void
+    @State private var needle = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.space2) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.chromeMuted)
+            TextField("Search…", text: $needle)
+                .textFieldStyle(.plain)
+                .font(Theme.mono(11.5))
+                .foregroundStyle(Theme.chromeForeground)
+                .focused($focused)
+                .onChange(of: needle) { _, new in
+                    // Persist the needle on the session so it survives a tab
+                    // switch (which destroys this view; `onAppear` re-seeds
+                    // from `session.searchNeedle`). libghostty's `START_SEARCH`
+                    // action_cb writes the same field but only fires on initial
+                    // start_search, not on per-keystroke updates.
+                    session.searchNeedle = new
+                    // `search:<text>` is libghostty's "update the search needle"
+                    // action. Empty cancels matches but keeps the GUI open per
+                    // libghostty's docs — we end_search explicitly on Esc / X.
+                    session.engine.performAction("search:\(new)")
+                }
+                .onSubmit {
+                    session.engine.performAction("navigate_search:next")
+                }
+                .onKeyPress(.escape) {
+                    end()
+                    return .handled
+                }
+            if session.searchTotal > 0 {
+                Text(counterText)
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle(Theme.chromeMuted)
+                    .frame(minWidth: 50, alignment: .trailing)
+            }
+            HoverableIconButton(systemName: "chevron.up", fontSize: 10, size: 20, help: "Previous match (⌘⇧G)") {
+                session.engine.performAction("navigate_search:previous")
+            }
+            HoverableIconButton(systemName: "chevron.down", fontSize: 10, size: 20, help: "Next match (⌘G)") {
+                session.engine.performAction("navigate_search:next")
+            }
+            HoverableIconButton(systemName: "xmark", fontSize: 10, size: 20, help: "End search (Esc)") {
+                end()
+            }
+        }
+        .padding(.horizontal, Theme.space3)
+        .padding(.vertical, 5)
+        .frame(width: 340)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.chromeBackground.opacity(0.96))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.chromeHairline, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
+        )
+        .onAppear {
+            // Seed from libghostty's start-search needle so a future
+            // `start_search:<text>` keybind (or selected-text seeding) carries
+            // through to the visible TextField. Empty in the common case.
+            needle = session.searchNeedle
+            focused = true
+        }
+        .onChange(of: focused) { _, isFocused in
+            if isFocused { onFocusGained() }
+        }
+    }
+
+    private func end() {
+        focused = false
+        session.engine.performAction("end_search")
+    }
+
+    /// "i / total" once the user has navigated to a specific match;
+    /// the bare match count while libghostty's `selected = -1` (no current
+    /// match highlighted yet).
+    private var counterText: String {
+        guard session.searchSelected >= 0 else { return "\(session.searchTotal)" }
+        return "\(session.searchSelected + 1) / \(session.searchTotal)"
     }
 }
 

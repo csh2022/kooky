@@ -36,6 +36,17 @@ final class Session: Identifiable {
     /// as `lastCommandExit`; `nil` until first OSC 133;D arrives.
     var lastCommandDuration: TimeInterval?
 
+    /// Per-session search state mirrored from libghostty's `start_search` /
+    /// `search:<text>` / `navigate_search` / `end_search` action_cbs. Each
+    /// surface owns its own search internally, so kooky tracks the state per
+    /// session — multiple panes can be in search mode at the same time, each
+    /// with its own needle and result count. `searchSelected = -1` is
+    /// libghostty's "no current match" sentinel.
+    var searchActive = false
+    var searchNeedle = ""
+    var searchTotal = 0
+    var searchSelected = -1
+
     /// `lastPathComponent` of the cwd, with `~` for $HOME — unless `customTitle`
     /// is set, which always wins. Empty cwd path falls back to the agent name
     /// so a degenerate URL doesn't render as blank.

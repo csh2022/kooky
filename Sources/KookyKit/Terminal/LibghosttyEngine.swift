@@ -116,6 +116,24 @@ private let kookyActionCb: ghostty_runtime_action_cb = { _, target, action in
         let duration = TimeInterval(finished.duration) / 1_000_000_000
         dispatchToView(userdata) { $0.onCommandFinished?(exit, duration) }
         return true
+    case GHOSTTY_ACTION_START_SEARCH:
+        // libghostty entered search mode (or updated the needle). The needle
+        // pointer is a libghostty-owned C string — copy into Swift before
+        // hopping main, so we don't read freed memory after dispatch.
+        let needle = action.action.start_search.needle.map { String(cString: $0) } ?? ""
+        dispatchToView(userdata) { $0.onSearchStart?(needle) }
+        return true
+    case GHOSTTY_ACTION_END_SEARCH:
+        dispatchToView(userdata) { $0.onSearchEnd?() }
+        return true
+    case GHOSTTY_ACTION_SEARCH_TOTAL:
+        let total = Int(action.action.search_total.total)
+        dispatchToView(userdata) { $0.onSearchTotal?(total) }
+        return true
+    case GHOSTTY_ACTION_SEARCH_SELECTED:
+        let selected = Int(action.action.search_selected.selected)
+        dispatchToView(userdata) { $0.onSearchSelected?(selected) }
+        return true
     default:
         return false
     }
@@ -171,6 +189,22 @@ final class LibghosttyEngine: TerminalEngine {
         get { surfaceView.onCommandFinished }
         set { surfaceView.onCommandFinished = newValue }
     }
+    var onSearchStart: ((String) -> Void)? {
+        get { surfaceView.onSearchStart }
+        set { surfaceView.onSearchStart = newValue }
+    }
+    var onSearchEnd: (() -> Void)? {
+        get { surfaceView.onSearchEnd }
+        set { surfaceView.onSearchEnd = newValue }
+    }
+    var onSearchTotal: ((Int) -> Void)? {
+        get { surfaceView.onSearchTotal }
+        set { surfaceView.onSearchTotal = newValue }
+    }
+    var onSearchSelected: ((Int) -> Void)? {
+        get { surfaceView.onSearchSelected }
+        set { surfaceView.onSearchSelected = newValue }
+    }
 
     init() {
         surfaceView = GhosttySurfaceView()
@@ -214,6 +248,10 @@ final class GhosttySurfaceView: NSView {
     var onPwdChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
     var onCommandFinished: ((Int?, TimeInterval) -> Void)?
+    var onSearchStart: ((String) -> Void)?
+    var onSearchEnd: (() -> Void)?
+    var onSearchTotal: ((Int) -> Void)?
+    var onSearchSelected: ((Int) -> Void)?
     private(set) var surface: ghostty_surface_t? {
         didSet {
             if surface != nil { propagateSizeToSurface() }

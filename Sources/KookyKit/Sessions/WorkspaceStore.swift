@@ -68,7 +68,7 @@ final class WorkspaceStore {
         let root = PaneNode(pane: pane)
         let workspace = Workspace(workingDirectory: dir, root: root)
         let session = spawnSession(template: .terminal, initialCwd: dir)
-        wirePwdSync(engine: session.engine, session: session, workspace: workspace)
+        wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
         pane.tabs.append(session)
         pane.activeTabId = session.id
         workspaces.append(workspace)
@@ -143,7 +143,7 @@ final class WorkspaceStore {
         }
         let cwd = initialCwd ?? workspace.workingDirectory
         let session = spawnSession(template: template, initialCwd: cwd)
-        wirePwdSync(engine: session.engine, session: session, workspace: workspace)
+        wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
         target.tabs.append(session)
         target.activeTabId = session.id
         if workspace.activePaneId != target.id {
@@ -289,7 +289,7 @@ final class WorkspaceStore {
         let template = existing.activeTab?.agent ?? .terminal
         let cwd = existing.activeTab?.currentDirectory ?? workspace.workingDirectory
         let newSession = spawnSession(template: template, initialCwd: cwd)
-        wirePwdSync(engine: newSession.engine, session: newSession, workspace: workspace)
+        wireSessionCallbacks(engine: newSession.engine, session: newSession, workspace: workspace)
         let newPane = Pane(tabs: [newSession], activeTabId: newSession.id)
         let firstChild = PaneNode(pane: existing)
         let secondChild = PaneNode(pane: newPane)
@@ -403,7 +403,7 @@ final class WorkspaceStore {
             // the workspace ref for cwd-sync callbacks).
             for pane in workspace.root.allPanes {
                 for session in pane.tabs {
-                    wirePwdSync(engine: session.engine, session: session, workspace: workspace)
+                    wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
                 }
             }
             if let id = ws.activePaneId, workspace.root.allPanes.contains(where: { $0.id == id }) {
@@ -465,7 +465,7 @@ final class WorkspaceStore {
         return Session(id: sessionId, engine: engine, currentDirectory: initialCwd, agent: template)
     }
 
-    private func wirePwdSync(engine: any TerminalEngine, session: Session, workspace: Workspace) {
+    private func wireSessionCallbacks(engine: any TerminalEngine, session: Session, workspace: Workspace) {
         engine.onPwdChange = { [weak self, weak session, weak workspace] pwd in
             guard let session else { return }
             let url = URL(fileURLWithPath: pwd)
@@ -485,6 +485,28 @@ final class WorkspaceStore {
             guard let session else { return }
             session.lastCommandExit = exit
             session.lastCommandDuration = duration
+        }
+        engine.onSearchStart = { [weak session] needle in
+            guard let session else { return }
+            session.searchActive = true
+            session.searchNeedle = needle
+            session.searchTotal = 0
+            session.searchSelected = -1
+        }
+        engine.onSearchEnd = { [weak session] in
+            guard let session else { return }
+            session.searchActive = false
+            session.searchNeedle = ""
+            session.searchTotal = 0
+            session.searchSelected = -1
+        }
+        engine.onSearchTotal = { [weak session] total in
+            guard let session, session.searchTotal != total else { return }
+            session.searchTotal = total
+        }
+        engine.onSearchSelected = { [weak session] selected in
+            guard let session, session.searchSelected != selected else { return }
+            session.searchSelected = selected
         }
     }
 

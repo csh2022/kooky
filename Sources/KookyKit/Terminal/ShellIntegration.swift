@@ -24,10 +24,39 @@ enum KookyShellIntegration {
     /// Path to the generated Claude Code hooks JSON. Passed to `claude` via
     /// `--settings <path>` by the wrapper script when `KOOKY_SURFACE_ID` is set.
     static let claudeHooksPath: String = {
+        hooksDirectory.appendingPathComponent("claude.json").path
+    }()
+
+    /// Path to the kooky-managed Gemini system-defaults file. Surfaced to
+    /// gemini-cli via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`. Hook arrays merge
+    /// with CONCAT semantics across tiers (verified in google-gemini/gemini-cli
+    /// `settingsSchema.ts`), so this layers on top of user hooks instead of
+    /// replacing them — non-intrusive.
+    static let geminiDefaultsPath: String = {
+        hooksDirectory.appendingPathComponent("gemini-defaults.json").path
+    }()
+
+    /// XDG plugin directory OpenCode auto-loads at startup. Honors
+    /// `XDG_CONFIG_HOME` when set (the OpenCode launch is a child of the same
+    /// shell, so a user-relocated config dir routes consistently between us
+    /// and OpenCode); falls back to `~/.config`.
+    static let opencodePluginPath: String = {
+        let base: URL
+        if let xdg = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
+            base = URL(fileURLWithPath: xdg, isDirectory: true)
+        } else {
+            base = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config")
+        }
+        let dir = base.appendingPathComponent("opencode/plugin", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("kooky.ts").path
+    }()
+
+    private static let hooksDirectory: URL = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = support.appendingPathComponent("kooky/hooks", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("claude.json").path
+        return dir
     }()
 
     /// Absolute path to the bundled `KookyHook` helper binary. Lives next to
@@ -39,9 +68,6 @@ enum KookyShellIntegration {
         return (dir as NSString).appendingPathComponent("KookyHook")
     }()
 
-    /// Writes the `claude` wrapper script and the hooks JSON to disk. Idempotent
-    /// — call on every app launch so the hook command tracks the latest
-    /// `KookyHook` location.
     /// Per-session env vars our wrappers + hook helper read. Caller supplies
     /// the surface UUID; everything else is process-wide. PATH prepends
     /// `kookyBinDirectory` so wrapper shims resolve before the real binaries.
@@ -53,6 +79,11 @@ enum KookyShellIntegration {
             "KOOKY_BIN_DIR": kookyBinDirectory,
             "KOOKY_HOOK_BIN": kookyHookBinaryPath,
             "PATH": "\(kookyBinDirectory):\(parentPath)",
+            // Gemini CLI loads this as the lowest-precedence settings tier,
+            // but its hooks arrays use CONCAT-merge — so our entries fire
+            // alongside whatever the user has in `~/.gemini/settings.json`,
+            // not instead of. The file is ours, regenerated each launch.
+            "GEMINI_CLI_SYSTEM_SETTINGS_PATH": geminiDefaultsPath,
             // libghostty defaults TERM to "xterm-ghostty"; not every system
             // ships its terminfo. Pinning to xterm-256color gives all TUIs a
             // well-known capability profile.
@@ -60,29 +91,89 @@ enum KookyShellIntegration {
         ]
     }
 
+    /// Writes wrapper shims, hook configs, and the OpenCode plugin to disk.
+    /// Idempotent — call on every app launch so each agent's hook command
+    /// tracks the latest `KookyHook` location.
     static func installAgentHooks() {
         writeWrapper(name: "claude", script: claudeWrapperScript)
         writeWrapper(name: "codex", script: codexWrapperScript)
+        // Gemini doesn't need a wrapper — `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
+        // in the spawned shell is enough for hooks to fire from gemini itself.
+        writeWrapper(name: "opencode", script: bracketWrapperScript(slug: "opencode"))
+        writeWrapper(name: "amp", script: bracketWrapperScript(slug: "amp"))
 
-        // Claude Code hooks JSON — fully event-aware (running / attention / idle).
-        // Each command also reports the agent name so the app can upgrade a
-        // session's icon when the user runs `claude` inside a plain terminal.
         let hookCmd = kookyHookBinaryPath
-        // No SessionStart hook on purpose: the agent template is either set
-        // upfront (+ menu spawn) or promoted on the first real event below.
-        // SessionEnd uses a distinct `ended` so the app can also revert the
-        // session back to .terminal — agent's gone, the icon should reflect.
-        let hooks: [String: Any] = [
-            "hooks": [
-                "UserPromptSubmit": [["hooks": [["type": "command", "command": "\(hookCmd) claude running"]]]],
-                "Stop":             [["hooks": [["type": "command", "command": "\(hookCmd) claude attention"]]]],
-                "Notification":     [["hooks": [["type": "command", "command": "\(hookCmd) claude attention"]]]],
-                "SessionEnd":       [["hooks": [["type": "command", "command": "\(hookCmd) claude ended"]]]],
-            ]
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: hooks, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: URL(fileURLWithPath: claudeHooksPath), options: .atomic)
+        writeJSON(at: claudeHooksPath, object: claudeHooksObject(hookCmd: hookCmd))
+        writeJSON(at: geminiDefaultsPath, object: geminiDefaultsObject(hookCmd: hookCmd))
+        writeManagedFile(at: opencodePluginPath, contents: opencodePluginScript)
+    }
+
+    /// Claude Code's settings JSON. Wired via `claude --settings <path>`. No
+    /// SessionStart on purpose: the agent template is either set upfront (+
+    /// menu spawn) or promoted on the first real event below. SessionEnd uses
+    /// a distinct `ended` so the app can also revert the session back to
+    /// `.terminal` — agent's gone, the icon should reflect.
+    static func claudeHooksObject(hookCmd: String) -> [String: Any] {
+        hooksObject(slug: "claude", hookCmd: hookCmd, events: [
+            "UserPromptSubmit": .running,
+            "Stop":              .attention,
+            "Notification":      .attention,
+            "SessionEnd":        .ended,
+        ])
+    }
+
+    /// Gemini's hook event names diverge from Claude's (BeforeAgent / AfterAgent
+    /// instead of UserPromptSubmit / Stop). Hook scripts must not write to
+    /// stdout — `KookyHook` only writes to its socket so this is safe.
+    static func geminiDefaultsObject(hookCmd: String) -> [String: Any] {
+        hooksObject(slug: "gemini", hookCmd: hookCmd, events: [
+            "BeforeAgent":  .running,
+            "AfterAgent":   .attention,
+            "Notification": .attention,
+            "SessionEnd":   .ended,
+        ])
+    }
+
+    /// Builds a `claude --settings`-style hooks object for any agent that
+    /// follows the `{"hooks": {<EventName>: [{"hooks": [{"type": "command",
+    /// "command": "..."}]}]}}` shape (Claude Code, Gemini CLI). Routing
+    /// `HookEvent` cases through `.rawValue` keeps the wrapper-emitted strings
+    /// in sync with the receiver in `HookServer`.
+    private static func hooksObject(
+        slug: String,
+        hookCmd: String,
+        events: [String: HookEvent]
+    ) -> [String: Any] {
+        var hooks: [String: Any] = [:]
+        for (event, state) in events {
+            hooks[event] = [["hooks": [["type": "command", "command": "\(hookCmd) \(slug) \(state.rawValue)"]]]]
         }
+        return ["hooks": hooks]
+    }
+
+    /// Marker we embed at the top of every kooky-generated user-config file
+    /// (currently the OpenCode plugin). `writeManagedFile` reads existing
+    /// files and refuses to overwrite anything that doesn't carry this tag —
+    /// so a user's same-named plugin stays untouched on upgrade.
+    private static let managedFileMarker = "kooky-managed-do-not-edit"
+
+    private static func writeJSON(at path: String, object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    /// Writes a file in user-config space (e.g. OpenCode plugin) only when
+    /// either the path is unused or the existing content carries our marker.
+    /// A user-owned file with the same name is left alone — better to skip a
+    /// feature than nuke their plugin.
+    private static func writeManagedFile(at path: String, contents: String) {
+        let url = URL(fileURLWithPath: path)
+        if let existing = try? String(contentsOf: url, encoding: .utf8),
+           !existing.contains(managedFileMarker) {
+            return
+        }
+        try? contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private static func writeWrapper(name: String, script: String) {
@@ -149,6 +240,56 @@ enum KookyShellIntegration {
         exit $status
     fi
     exec "$real" "$@"
+    """
+
+    /// Generic bracket wrapper for agents we can't drive mid-run state from
+    /// (no hook system or no installed plugin yet). Sends `running` before
+    /// exec and `ended` after exit; activity dot stays green for the whole
+    /// run, then drops to idle on quit. Used for `amp` (no plugin) and
+    /// `opencode` — opencode's plugin upgrades mid-run state once installed.
+    static func bracketWrapperScript(slug: String) -> String {
+        """
+        \(wrapperPreamble(binary: slug))
+
+        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+            "$KOOKY_HOOK_BIN" \(slug) running 2>/dev/null
+            "$real" "$@"
+            status=$?
+            "$KOOKY_HOOK_BIN" \(slug) ended 2>/dev/null
+            exit $status
+        fi
+        exec "$real" "$@"
+        """
+    }
+
+    /// OpenCode auto-loads any `.ts`/`.js` file in
+    /// `$XDG_CONFIG_HOME/opencode/plugin/` (or `~/.config/opencode/plugin/`)
+    /// at startup. The plugin runs in opencode's own Bun runtime, inherits
+    /// KOOKY_SURFACE_ID + KOOKY_HOOK_BIN from the shell, and shells out to
+    /// KookyHook on each lifecycle event. The first-line marker
+    /// (`managedFileMarker`) lets `writeManagedFile` recognise the file as
+    /// kooky-generated on upgrade — a user's own `kooky.ts` plugin would
+    /// not carry the marker and stays untouched.
+    static let opencodePluginScript = """
+    // \(managedFileMarker) — pings KookyHook on prompt-submit and turn-end so
+    // the sidebar agent dot tracks per-session activity. Safe to delete; will
+    // be regenerated next time kooky launches.
+    export const KookyPlugin = async ({ $ }) => {
+      const surface = process.env.KOOKY_SURFACE_ID
+      const hookBin = process.env.KOOKY_HOOK_BIN
+      if (!surface || !hookBin) return {}
+
+      const ping = async (state) => {
+        try { await $`${hookBin} opencode ${state}`.quiet() } catch {}
+      }
+
+      return {
+        "chat.message": async () => { await ping("running") },
+        event: async ({ event }) => {
+          if (event?.type === "session.idle") await ping("attention")
+        },
+      }
+    }
     """
 
     enum DetectedUserShell { case zsh, bash, other }

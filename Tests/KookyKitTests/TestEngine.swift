@@ -10,6 +10,10 @@ final class TestEngine: TerminalEngine {
     var onPwdChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
     var onCommandFinished: ((Int?, TimeInterval) -> Void)?
+    var onSearchStart: ((String) -> Void)?
+    var onSearchEnd: (() -> Void)?
+    var onSearchTotal: ((Int) -> Void)?
+    var onSearchSelected: ((Int) -> Void)?
 
     private(set) var startedConfigs: [TerminalSessionConfig] = []
     private(set) var terminateCount = 0
