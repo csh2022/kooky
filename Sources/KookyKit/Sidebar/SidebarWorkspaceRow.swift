@@ -55,6 +55,11 @@ struct SidebarWorkspaceRow: View {
                     isContextMenuOpen = false
                     onDuplicate()
                 }
+                KookyMenuDivider()
+                KookyMenuRow(title: "Reveal in Finder") {
+                    isContextMenuOpen = false
+                    NSWorkspace.shared.activateFileViewerSelecting([workspace.workingDirectory])
+                }
             }
             .padding(Theme.space1)
             .frame(minWidth: 240)

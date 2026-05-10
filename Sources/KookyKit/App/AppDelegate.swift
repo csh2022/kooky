@@ -98,6 +98,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             selfRow("New Workspace", #selector(handleNewWorkspace), "n"),
             .separator,
             selfRow("Close Tab", #selector(handleCloseTab), "w"),
+            selfRow("Reopen Closed Tab", #selector(handleReopenClosedTab), "t", modifiers: [.command, .shift]),
             selfRow("Close Workspace", #selector(handleCloseWorkspace), "w", modifiers: [.command, .shift]),
         ])))
 
@@ -141,6 +142,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             selfRow("Split Down", #selector(handleSplitDown), "d", modifiers: [.command, .shift]),
             selfRow("Focus Previous Pane", #selector(handleFocusPreviousPane), "["),
             selfRow("Focus Next Pane", #selector(handleFocusNextPane), "]"),
+            .separator,
+            // ⌃⇥ / ⌃⇧⇥ cycle within the focused pane's tab list — same gesture
+            // browsers use. Discrete from ⌘1-⌘9 below which jumps to a tab by
+            // ordinal; cycle wraps at the ends and doesn't need a digit key.
+            selfRow("Next Tab", #selector(handleNextTab), "\t", modifiers: [.control]),
+            selfRow("Previous Tab", #selector(handlePreviousTab), "\t", modifiers: [.control, .shift]),
             .separator,
         ]
         + tabSwitchRows
@@ -254,6 +261,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         store.closeTab(session, in: workspace)
     }
 
+    @objc private func handleReopenClosedTab() {
+        store.reopenLastClosedTab()
+    }
+
+    @objc private func handleNextTab() {
+        guard let workspace = store.active else { return }
+        store.cycleTab(in: workspace, direction: 1)
+    }
+
+    @objc private func handlePreviousTab() {
+        guard let workspace = store.active else { return }
+        store.cycleTab(in: workspace, direction: -1)
+    }
+
     @objc private func handleSplitRight() {
         guard let workspace = store.active, let pane = workspace.activePane else { return }
         store.splitPane(pane, orientation: .horizontal, in: workspace)
@@ -278,8 +299,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         guard panes.count > 1 else { return }
         let currentId = workspace.activePaneId ?? panes.first?.id
         let idx = panes.firstIndex(where: { $0.id == currentId }) ?? 0
-        let nextIdx = forward ? (idx + 1) % panes.count : (idx - 1 + panes.count) % panes.count
-        store.focusPane(panes[nextIdx], in: workspace)
+        store.focusPane(panes[panes.cyclicIndex(from: idx, step: forward ? 1 : -1)], in: workspace)
     }
 
     @objc private func handleCloseWorkspace() {

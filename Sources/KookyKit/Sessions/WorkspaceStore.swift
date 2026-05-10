@@ -1,5 +1,30 @@
 import Foundation
 
+extension Array {
+    /// Step `direction` from `current`, wrapping at both ends. Used by tab
+    /// and pane cycling. Direction can be any non-zero `Int`; positive walks
+    /// forward, negative walks backward. Returns 0 for an empty array so
+    /// callers can index without bounds checks (subscripting into an empty
+    /// array would still trap, so guard `!isEmpty` before subscripting).
+    func cyclicIndex(from current: Int, step direction: Int) -> Int {
+        guard !isEmpty else { return 0 }
+        return ((current + direction) % count + count) % count
+    }
+}
+
+/// Returns `path` as a directory URL if it exists, otherwise the user's
+/// home dir. The fallback prevents kooky from spawning a shell at a deleted
+/// project path (deleted between sessions, externally unmounted disk),
+/// which manifests as the new tab dying with a confusing one-line error.
+func resolvedSpawnCwd(_ path: String) -> URL {
+    var isDir: ObjCBool = false
+    if FileManager.default.fileExists(atPath: path, isDirectory: &isDir),
+       isDir.boolValue {
+        return URL(fileURLWithPath: path)
+    }
+    return URL(fileURLWithPath: NSHomeDirectory())
+}
+
 /// Three-state sidebar visibility. `next` cycles full → compact → hidden →
 /// full so each toggle hides more and eventually wraps around.
 enum SidebarMode: String, Codable, Equatable, Sendable {
@@ -37,6 +62,24 @@ final class WorkspaceStore {
     private let engineFactory: @MainActor () -> any TerminalEngine
     private let persistence: any Persistence
     private let gitStatusFetcher = GitStatusFetcher()
+
+    /// Snapshot of a closed tab's reopenable state. Workspace + pane IDs
+    /// are best-effort routing — if either is gone by the time the user
+    /// hits ⌘⇧T, `reopenLastClosedTab` falls back to the active workspace
+    /// / pane.
+    private struct ClosedTabState {
+        let agent: AgentTemplate
+        let cwd: URL
+        let customTitle: String?
+        let workspaceId: UUID
+        let paneId: UUID
+    }
+
+    /// LIFO stack of recently-closed tabs for ⌘⇧T (reopen). Capped at
+    /// `closedTabHistoryLimit` so a long session doesn't unbounded-grow.
+    /// Runtime-only — closed tabs do not survive an app restart.
+    private var recentlyClosed: [ClosedTabState] = []
+    private static let closedTabHistoryLimit = 50
 
     private var pendingSave: Task<Void, Never>?
     private static let saveDebounce: UInt64 = 1_000_000_000
@@ -243,6 +286,7 @@ final class WorkspaceStore {
     func closeTab(_ session: Session, in workspace: Workspace) {
         guard let pane = pane(containing: session, in: workspace),
               let idx = pane.tabs.firstIndex(where: { $0.id == session.id }) else { return }
+        recordClosedTab(session, pane: pane, workspace: workspace)
         session.engine.terminate()
         pane.tabs.remove(at: idx)
         if pane.tabs.isEmpty {
@@ -257,6 +301,55 @@ final class WorkspaceStore {
             }
         }
         scheduleSave()
+    }
+
+    private func recordClosedTab(_ session: Session, pane: Pane, workspace: Workspace) {
+        recentlyClosed.append(ClosedTabState(
+            agent: session.agent,
+            cwd: session.currentDirectory,
+            customTitle: session.customTitle,
+            workspaceId: workspace.id,
+            paneId: pane.id
+        ))
+        if recentlyClosed.count > Self.closedTabHistoryLimit {
+            recentlyClosed.removeFirst(recentlyClosed.count - Self.closedTabHistoryLimit)
+        }
+    }
+
+    /// Pops the most recently closed tab off the history stack and re-spawns
+    /// it. Routes back to the original workspace + pane when both still
+    /// exist, falling back to the current workspace's active pane otherwise
+    /// (a tab closed under a since-deleted workspace lands wherever the user
+    /// is now). Returns the new session, or nil when the stack is empty.
+    @discardableResult
+    func reopenLastClosedTab() -> Session? {
+        guard let state = recentlyClosed.popLast() else { return nil }
+        guard let workspace = workspaces.first(where: { $0.id == state.workspaceId }) ?? active else {
+            return nil
+        }
+        let pane = workspace.root.allPanes.first { $0.id == state.paneId }
+            ?? workspace.activePane
+            ?? workspace.root.firstPane
+        let cwd = resolvedSpawnCwd(state.cwd.path)
+        let session = addTab(in: workspace, pane: pane, template: state.agent, initialCwd: cwd)
+        if let custom = state.customTitle, !custom.isEmpty {
+            session.customTitle = custom
+        }
+        activateWorkspace(workspace)
+        activateTab(session, in: workspace)
+        return session
+    }
+
+    /// Cycle the active pane's tab selection. `direction` of `+1` advances
+    /// to the next tab, `-1` to the previous; both wrap at the end. Per-pane,
+    /// not workspace-wide — focus shouldn't jump panes when the user is
+    /// asking to step through tabs in the pane they're looking at.
+    func cycleTab(in workspace: Workspace, direction: Int) {
+        guard let pane = workspace.activePane,
+              let active = pane.activeTab,
+              let currentIdx = pane.tabs.firstIndex(where: { $0 === active })
+        else { return }
+        activateTab(pane.tabs[pane.tabs.cyclicIndex(from: currentIdx, step: direction)], in: workspace)
     }
 
     func activateTab(_ session: Session, in workspace: Workspace) {
@@ -432,12 +525,7 @@ final class WorkspaceStore {
             let pane = Pane(id: p.id)
             for tab in p.tabs {
                 let agent = AgentTemplate.all.first { $0.id == tab.agentId } ?? .terminal
-                // Saved cwd may have vanished between launches; an unreachable
-                // working directory makes the spawned shell hang confusingly.
-                let cwd = fm.fileExists(atPath: tab.currentDirectoryPath)
-                    ? URL(fileURLWithPath: tab.currentDirectoryPath)
-                    : URL(fileURLWithPath: NSHomeDirectory())
-                let session = spawnSession(template: agent, initialCwd: cwd, sessionId: tab.id)
+                let session = spawnSession(template: agent, initialCwd: resolvedSpawnCwd(tab.currentDirectoryPath), sessionId: tab.id)
                 session.customTitle = tab.customTitle
                 pane.tabs.append(session)
             }

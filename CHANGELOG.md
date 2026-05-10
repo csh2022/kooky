@@ -1,6 +1,13 @@
 # Changelog
 
-Notable changes per release. Tagged commits use `vX.Y` shortform.
+Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
+
+## v0.9.1 — 2026-05-11
+
+- **Reveal in Finder.** Right-click any tab pill or sidebar workspace row → new menu item opens Finder selecting the tab's / workspace's working directory. Both reuse `NSWorkspace.activateFileViewerSelecting` inline; one line per call site, no helper indirection.
+- **Reopen Closed Tab (`⌘⇧T`).** New File menu item + LIFO history stack on `WorkspaceStore` (capped at 50). Closed-tab snapshot captures `agent`, `cwd`, `customTitle`, plus `workspaceId` + `paneId` for best-effort routing. Reopen lands the tab back in its original workspace + pane when both still exist; falls back to active workspace's active pane otherwise. Cwd that no longer exists (project deleted, external disk unmounted) drops to `$HOME` so the spawned shell doesn't die at startup. Runtime-only — closed-tab history doesn't survive an app restart.
+- **`⌃⇥` / `⌃⇧⇥` tab cycling.** Per-pane next / previous tab, wraps at both ends. Different from `⌘1`–`⌘9` (which jumps by ordinal); cycle gestures don't need a digit key, you can just hold `⌃` and tap `⇥` to walk through. Per-pane on purpose — focus shouldn't jump panes when you're asking to step through the pane you're in.
+- **Internals.** `Array.cyclicIndex(from:step:)` extension shared between `WorkspaceStore.cycleTab` and `AppDelegate.cyclePaneFocus` (both sites previously hand-rolled the negative-modulo wrap). `resolvedSpawnCwd(_:)` free function shared between the reopen path and `restorePane` for "fall back to `$HOME` when the cwd is gone." `_kooky_env_status` and `__kooky_133_precmd` end with explicit `return 0` so the internal IPC's success / failure status doesn't leak into user precmd hooks downstream in zsh's `precmd_functions` chain (Codex caught a `print $?` user prompt rendering our IPC status as `0` / `1` in the terminal). `KOOKY_NODE_VERSION` cached against resolved `node` path + `NVM_BIN` so V8 cold-start (50–200ms) doesn't fire on every prompt; the whole `kooky-hook` IPC fork is also skipped when no env key has changed since the previous send.
 
 ## v0.9.0 — 2026-05-10
 
@@ -60,7 +67,7 @@ Notable changes per release. Tagged commits use `vX.Y` shortform.
 - **About panel version catch-up.** `KookyApp.displayVersion` was still `"0.6"` in v0.7 because the release ritual forgot the bump. CLAUDE.md got a checklist amendment last release; this release proves the gap and corrects to `"0.7.1"`. About panel now matches the actual binary.
 - **Internals.** `dispatchToView(_:work:)` helper folds the three action_cb sites (`SCROLLBAR` / `PWD` / `MOUSE_SHAPE`) that all needed `DispatchQueue.main.async` + `MainActor.assumeIsolated` + `Unmanaged.fromOpaque`. URL byte buffer uses `String(decoding: UnsafeRawBufferPointer, as: UTF8.self)` instead of a `.map { UInt8(bitPattern:) }` allocation. `applyMouseShape` early-returns when the shape resolves to the same NSCursor instance — libghostty re-firing the same shape doesn't burn AppKit syscalls. `Pane fraction` persistence verified end-to-end via the existing drag-end → `flushPersistence` path; no schema change needed.
 
-## v0.7 — 2026-05-09
+## v0.7.0 — 2026-05-09
 
 - **Window drag, finally honest.** Hidden title bar + `fullSizeContentView` was racing tab DnD inside the implicit ~22pt drag region; SwiftUI's `.onDrag` lost half the time. Now `window.isMovable = false` everywhere, and a single `WindowDragHandle` (`Sources/KookyKit/App/WindowDragHandle.swift`) is the only thing that can move the window. The NSView subclass overrides `mouseDownCanMoveWindow = false`, hit-tests only left-mouse events (so right-clicks / scroll still pass through), and on `mouseDown` flips `isMovable` true → calls `window.performDrag(with: event)` → flips back via `defer`. Double-click on the handle calls `performZoom(nil)` (system green-button default). Codex landed this — the right shape only became obvious after going through three failed alternatives that all leaked into other gestures.
 - **Three-state sidebar.** `WorkspaceStore.sidebarMode: SidebarMode { .full, .compact, .hidden }`, advanced via `.next` cycle. `compact` collapses each row to icon-only inside a 52pt column (full is 220pt, hidden removes the sidebar entirely). `SidebarWorkspaceRow` branches on `isCompact` between `fullBody` (icon + title + path + activity dot + close button) and `compactBody` (icon + activity badge floating top-trailing, hover for path tooltip). Cycle via the toggle button in the top strip or `⌘⌃S` (View > Toggle Sidebar). Tooltip flips between Compact / Hide / Show per current state. Width and content transition with `Theme.chromeTransition` (a new shared `Animation` token = `.easeInOut(duration: 0.2)` so both call sites can't drift on timing).
@@ -71,7 +78,7 @@ Notable changes per release. Tagged commits use `vX.Y` shortform.
 - **`KookyApp` metadata.** New `Sources/KookyKit/App/AppInfo.swift` consolidates app metadata (`name`, `displayVersion`, `tagline`, `author`, `copyrightYear`, `license`, `repositoryURL`, `issuesURL`). `repositoryDisplay` is derived from `repositoryURL` so the user-visible string can't desync from the URL. Bumping `displayVersion` on each release is the only place About + window title need to change.
 - **Pane padding.** `TerminalView` inside `PaneView` gets `.padding(8)` so terminal text doesn't sit flush against the chrome edges. Splits get 17pt visual gap between panes (8pt each side + 1pt hairline), much cleaner separation than the v0.6 zero-padding "rams against divider" look.
 
-## v0.6 — 2026-05-09
+## v0.6.0 — 2026-05-09
 
 - **Drag-reorder.** Pull a workspace up or down in the sidebar to reorder; drop another workspace on top to swap places. Same gesture works on tabs inside a pane's tab strip. The 2pt indicator follows drag direction (top/bottom for sidebar, leading/trailing for tabs) so the line always shows where the dropped row will land. Reorder animates on drop (`withAnimation(.easeInOut(duration: 0.18))`) instead of snapping.
 - **Cross-pane tab move.** Drag a tab from one pane's strip onto a tab in another pane to move the session over — same engine, same scrollback, same agent state. If the source pane runs out of tabs, it collapses (sibling pane takes its place in the split tree). The `+` button doubles as a drop-at-end target so you can append after the last tab inside a horizontal `ScrollView` that has no flex space for a trailing drop zone. `WorkspaceStore.handleTabDrop(droppedId:to:at:in:)` is the single store-level entry point — same-pane reorders go through `moveTab(from:to:in:)`, cross-pane moves through `moveTab(_:to:at:in:)`, both wrapped in one animation transaction.
@@ -85,7 +92,7 @@ Notable changes per release. Tagged commits use `vX.Y` shortform.
   - **Cross-pane move syncs `workspace.workingDirectory`.** Promoting the dragged session to active without updating the workspace cwd left the sidebar title and next-spawned tab inheriting the old path until the next OSC 7. Fixed alongside the existing `activateTab` cwd-sync logic.
 - **Tests.** 28 XCTest cases (was 26). New: cross-pane move of root pane's sole tab keeps the workspace alive (regression for the id-collision bug), cross-pane move syncs `workspace.workingDirectory`.
 
-## v0.5 — 2026-05-08
+## v0.5.0 — 2026-05-08
 
 - **Splits, .** Each workspace now owns a recursive `PaneNode` tree (`.pane(Pane)` or `.split(orientation, first, second, fraction)`) instead of a flat tab list. Splitting slices the entire pane region — tab strip and content together — so two halves each get their own independent tab bar, like . Tabs live inside `Pane`, not `Workspace`. ⌘D splits right, ⌘⇧D splits down, ⌘[ / ⌘] cycles pane focus, ⌘W closes the focused tab and collapses an empty pane up into its sibling. Drag the 1pt hairline between panes to resize; cursor hint flips to `resizeLeftRight` / `resizeUpDown`. Persistence migrates the v0.4 flat schema into a single `.pane` with the original tabs so `state.json` doesn't break.
 - **Right-click context menus.** Tab pills and sidebar workspace rows get custom `.popover`-based menus styled to match the chrome (Onest + `Theme.chromeBackground` + `menuRowHover` 0.10 alpha) instead of the system NSMenu, which was visually orthogonal to everything else. Tab menu: Close Tab / Close Other Tabs / Close Tabs to the Right / Split Right / Split Down / Duplicate Tab. Sidebar menu: Close Workspace / Close Other Workspaces / Duplicate Workspace. Bound shortcuts render right-aligned in SF Pro 11.5pt with 0.5pt tracking — `⌘W`/`⌘D`/`⌘⇧D`/`⌘⇧W` show next to their item. JetBrains Mono had wrong glyphs for ⌘⇧⌥⌃; system font matches native menu rendering.
@@ -96,7 +103,7 @@ Notable changes per release. Tagged commits use `vX.Y` shortform.
 - **De-duplication.** `startSession` / `restoreSession` collapsed into one `spawnSession`; callers wire `onPwdChange` / `onFocus` explicitly (`restore` builds sessions before the workspace ref exists, so it can't capture it inside `spawnSession`). `applyHookEvent` flattened from a 4-level nest to a single-pass + `findSession(id:)` helper.
 - **Tests.** 26 XCTest cases (was 20). New: split creates sibling pane and focuses it, split inherits active-tab agent + cwd, close pane collapses sibling up, closing the only tab in a second pane collapses the split, focus pane switches active pane, restore single-pane workspace, restore split tree reconstructs both panes and fraction.
 
-## v0.4 — 2026-05-08
+## v0.4.0 — 2026-05-08
 
 - **Codex integration.** Bundled `codex` wrapper injects `-c notify=[<KookyHook>,"codex","attention"]` and brackets the run with `running` / `ended` hooks so the sidebar shows the codex icon while it's active and reverts when the user `/exit`s. (Codex doesn't expose Claude-style SessionStart / SessionEnd hooks; the wrapper bracket fills the gap.)
 - **Auto-promote agent on hook.** Plain Terminal tabs that report a `claude` or `codex` hook get upgraded to the matching template, sidebar leading icon + `Workspace.distinctAgents` follow. `.ended` reverts only when the reporting agent matches the current session agent — running Codex inside a Claude tab no longer wipes the Claude icon.
@@ -110,14 +117,14 @@ Notable changes per release. Tagged commits use `vX.Y` shortform.
 - **Env injection.** `KookyShellIntegration.kookyEnvironment(for:)` now produces a single dict (`KOOKY_SURFACE_ID` / `KOOKY_HOOKS_PATH` / `KOOKY_BIN_DIR` / `KOOKY_HOOK_BIN` / `PATH` / `TERM`); `WorkspaceStore.startSession` merges it in one line. zsh + bash wrapper rcs re-prepend `KOOKY_BIN_DIR` to `PATH` after sourcing the user's rc so the wrappers always resolve first.
 - **Cleanup.** `applyHookEvent` only persists when the agent template actually changed (activityState is runtime-only, was triggering disk writes per prompt); `markedTextBuffer` collapsed to a `Bool isComposing`; bash wrapper preamble (path lookup loop) extracted to one shared snippet.
 
-## v0.3 — 2026-05-08
+## v0.3.0 — 2026-05-08
 
 - **Agent activity state in the sidebar.** Each workspace row shows a small status dot in the close-button slot — blue while an agent is processing, amber when it's waiting on user input, hidden when idle. Aggregated across the workspace's tabs (`attention` > `running` > `idle`).
 - **Real Claude Code integration.** App ships a `KookyHook` CLI helper next to the main binary plus a generated wrapper at `~/Library/Application Support/kooky/bin/claude`. Inside a kooky session (`$KOOKY_SURFACE_ID` set) the wrapper invokes the real `claude` with `--settings <hooks.json>`; Claude Code's `UserPromptSubmit` / `Stop` / `Notification` / `SessionEnd` hooks `exec` the `KookyHook` helper, which opens the unix socket the app listens on (`~/Library/Application Support/kooky/socket`), writes one JSON line, and exits. App routes the event to the matching session's `activityState`.
 - **Env injection for new sessions.** `KOOKY_SURFACE_ID`, `KOOKY_HOOKS_PATH`, `KOOKY_BIN_DIR` injected at spawn; wrapper rc files (`.zshrc` / `.bashrc`) re-prepend `KOOKY_BIN_DIR` to `PATH` after sourcing the user's rc so the `claude` wrapper resolves first regardless of what the user's shell config does to `PATH`.
 - **Codex / Gemini / OpenCode / Amp** still use the inline-launch path from v0.1 but don't yet drive `activityState` — their wrappers + per-agent hook protocols are the next slice.
 
-## v0.2 — 2026-05-08
+## v0.2.0 — 2026-05-08
 
 - **Keyboard shortcuts.** `⌘T` new tab, `⌘N` new workspace, `⌘W` close tab, `⌘⇧W` close workspace, `⌘1`-`⌘9` switch tab in active workspace, plus standard `⌘C` / `⌘V` / `⌘X` / `⌘A` routed through first-responder selectors so libghostty handles them inside the surface. Wired via `NSMenu` so keyEquivalents fire even with libghostty's `keyDown` intercept.
 - **Persistence.** Workspaces, tabs, agent type, per-tab and per-workspace cwd survive relaunch. JSON snapshot under `~/Library/Application Support/kooky/state.json`, debounced 1s on mutation and flushed on `applicationWillTerminate`. PTY state itself doesn't persist — restored tabs spawn fresh sessions in the saved cwd; cwd that no longer exists falls back to `$HOME`. `WorkspaceStore.engineFactory` + the new `Persistence` protocol both inject through the initializer for tests.
@@ -126,7 +133,7 @@ Notable changes per release. Tagged commits use `vX.Y` shortform.
 - **SwiftTerm dropped.** libghostty has carried every active session since M2; the fallback's `onPwdChange` was a stub anyway. `TerminalEngine` protocol stays so future engine swaps don't touch the UI layer; `TestEngine` continues to validate the seam.
 - **Tests.** Three new persistence cases (restore from disk, restore spawns engines with saved cwd, flushPersistence writes snapshot). 20 total.
 
-## v0.1 — 2026-05-08
+## v0.1.0 — 2026-05-08
 
 First public release. Native macOS terminal with vertical-tab workspaces and one-click AI agent sessions.
 

@@ -167,6 +167,77 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(engine(session).startedConfigs.first?.environment["KOOKY_AGENT"], "claude")
     }
 
+    func testReopenLastClosedTabRestoresAgentAndCwd() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let session = store.addTab(in: ws, template: .claudeCode, initialCwd: projectB)
+        session.customTitle = "release prep"
+        XCTAssertEqual(firstPane(ws).tabs.count, 2)
+
+        store.closeTab(session, in: ws)
+        XCTAssertEqual(firstPane(ws).tabs.count, 1)
+
+        let reopened = store.reopenLastClosedTab()
+        let pane = firstPane(ws)
+        XCTAssertNotNil(reopened)
+        XCTAssertEqual(pane.tabs.count, 2)
+        XCTAssertEqual(reopened?.agent.id, "claude-code")
+        XCTAssertEqual(reopened?.currentDirectory.path, projectB.path)
+        XCTAssertEqual(reopened?.customTitle, "release prep")
+        XCTAssertEqual(pane.activeTabId, reopened?.id)
+    }
+
+    func testReopenIsLifoStack() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let a = store.addTab(in: ws)
+        let b = store.addTab(in: ws)
+        store.closeTab(a, in: ws)
+        store.closeTab(b, in: ws)
+
+        let firstReopen = store.reopenLastClosedTab()
+        let secondReopen = store.reopenLastClosedTab()
+
+        // LIFO: most-recently-closed (`b`) comes back first.
+        XCTAssertEqual(firstReopen?.currentDirectory.path, b.currentDirectory.path)
+        XCTAssertEqual(secondReopen?.currentDirectory.path, a.currentDirectory.path)
+        XCTAssertEqual(pane.tabs.count, 3)
+    }
+
+    func testReopenWithEmptyStackReturnsNil() {
+        let store = makeStore()
+        XCTAssertNil(store.reopenLastClosedTab())
+    }
+
+    func testCycleTabAdvancesAndWrapsAroundEnd() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let a = pane.tabs[0]
+        let b = store.addTab(in: ws)
+        let c = store.addTab(in: ws)
+        XCTAssertEqual(pane.activeTabId, c.id)
+
+        store.cycleTab(in: ws, direction: 1)  // c → a (wrap)
+        XCTAssertEqual(pane.activeTabId, a.id)
+
+        store.cycleTab(in: ws, direction: 1)  // a → b
+        XCTAssertEqual(pane.activeTabId, b.id)
+    }
+
+    func testCycleTabBackwardsWrapsAtStart() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let a = pane.tabs[0]
+        let b = store.addTab(in: ws)
+        store.activateTab(a, in: ws)
+
+        store.cycleTab(in: ws, direction: -1)  // a → b (wrap backward)
+        XCTAssertEqual(pane.activeTabId, b.id)
+    }
+
     func testClosingActiveTabActivatesNeighbor() {
         let store = makeStore()
         let ws = store.workspaces[0]
