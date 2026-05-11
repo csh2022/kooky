@@ -2,6 +2,15 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.2 — 2026-05-11
+
+- **`exit` / `logout` closes the tab.** Shell exits cleanly (code 0) → tab terminates automatically. Non-zero exits still show libghostty's "press any key to close" so you can read crash output before dismissing. Wired via `GHOSTTY_ACTION_SHOW_CHILD_EXITED` → new `engine.onProcessExitedCleanly` callback → `WorkspaceStore.closeTab`.
+- **Reveal in Finder.** Right-click any tab pill or sidebar workspace row → new menu entry opens Finder selecting the cwd. Both call sites use `NSWorkspace.activateFileViewerSelecting` inline.
+- **Reopen Closed Tab (`⌘⇧T`).** Browser-style. LIFO history stack capped at 50 entries on `WorkspaceStore` — restores agent + cwd + customTitle, routes back to original workspace + pane when both still exist, falls back to the active workspace's pane otherwise. cwd that was deleted between close and reopen drops to `$HOME` so the spawned shell doesn't die at startup.
+- **`⌃⇥` / `⌃⇧⇥` tab cycling.** Per-pane next / previous tab with wrap-around at both ends. Different from `⌘1`–`⌘9` (jump by ordinal) — cycle gestures don't need a digit key.
+- **README rewrite.** Tighter intro, slogan reset, on-device feature surfaced as its own bullet.
+- **Internals.** New shared `Array.cyclicIndex(from:step:)` extension replacing the two hand-rolled wrap-arounds in `WorkspaceStore.cycleTab` + `AppDelegate.cyclePaneFocus`. `resolvedSpawnCwd(_:)` free function shared between reopen-tab and persistence-restore for "if cwd is gone, fall back to $HOME". Zsh precmd hooks (`_kooky_env_status`, `__kooky_133_precmd`) end with explicit `return 0` so internal IPC status doesn't bleed into user prompts via `$?`. `KOOKY_NODE_VERSION` cached against resolved `node` path + `NVM_BIN` so V8 cold-start doesn't fire every prompt.
+
 ## v0.9.1 — 2026-05-11
 
 - **Reveal in Finder.** Right-click any tab pill or sidebar workspace row → new menu item opens Finder selecting the tab's / workspace's working directory. Both reuse `NSWorkspace.activateFileViewerSelecting` inline; one line per call site, no helper indirection.
@@ -64,7 +73,7 @@ Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 - **Font size shortcuts.** `⌘=` Increase Font Size, `⌘-` Decrease Font Size, `⌘0` Default Font Size. Routed through libghostty's named-action API (`increase_font_size:1` / `decrease_font_size:1` / `reset_font_size`). New `TerminalEngine.performAction(_:)` protocol method wraps `ghostty_surface_binding_action` so any libghostty binding can be invoked from the menu without growing the protocol surface for every new shortcut.
 - **Clear Pane (`⌘K`).** Wipes the active session's scrollback + screen via libghostty's `clear_screen` named action. Standard terminal muscle memory.
 - **Sidebar mode persists across launches.** `SidebarMode` becomes `String, Codable`; `PersistedState` carries the last layout so `compact` / `hidden` choices survive quit + relaunch. New `WorkspaceStore.setSidebarMode(_:)` mutator wraps the state change + `scheduleSave` in one call so the keyboard and toggle-button paths can't drift.
-- **About panel version catch-up.** `KookyApp.displayVersion` was still `"0.6"` in v0.7 because the release ritual forgot the bump. CLAUDE.md got a checklist amendment last release; this release proves the gap and corrects to `"0.7.1"`. About panel now matches the actual binary.
+- **About panel version catch-up.** `KookyApp.displayVersion` was still `"0.6"` in v0.7 because the release ritual forgot the bump. Corrected to `"0.7.1"`. About panel now matches the actual binary.
 - **Internals.** `dispatchToView(_:work:)` helper folds the three action_cb sites (`SCROLLBAR` / `PWD` / `MOUSE_SHAPE`) that all needed `DispatchQueue.main.async` + `MainActor.assumeIsolated` + `Unmanaged.fromOpaque`. URL byte buffer uses `String(decoding: UnsafeRawBufferPointer, as: UTF8.self)` instead of a `.map { UInt8(bitPattern:) }` allocation. `applyMouseShape` early-returns when the shape resolves to the same NSCursor instance — libghostty re-firing the same shape doesn't burn AppKit syscalls. `Pane fraction` persistence verified end-to-end via the existing drag-end → `flushPersistence` path; no schema change needed.
 
 ## v0.7.0 — 2026-05-09
