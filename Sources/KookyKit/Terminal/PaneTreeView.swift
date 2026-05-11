@@ -70,101 +70,102 @@ private struct PaneStatusBar: View {
     @Bindable var session: Session
 
     var body: some View {
-        // Order: project context (changes rarely) on the left, working-tree
-        // state (changes per save / commit) on the right. Eyes scanning
-        // right-to-left hit "what changed" first, then "what project context".
-        // ViewThatFits picks the first variant whose intrinsic width fits the
-        // pane — when splits get narrow, slots drop by priority instead of
-        // truncating mid-glyph or wrapping into a second row.
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            ViewThatFits(in: .horizontal) {
-                segmentRow([pythonSegment, nodeSegment, proxySegment, branchSegment, diffSegment])
-                segmentRow([nodeSegment, proxySegment, branchSegment, diffSegment])
-                segmentRow([proxySegment, branchSegment, diffSegment])
-                segmentRow([branchSegment, diffSegment])
-                segmentRow([diffSegment])
-                segmentRow([branchSegment])
-            }
+        // Flow wraps overflowing segments to a new row instead of hiding
+        // them — narrow panes still surface every status (branch / proxy /
+        // env) at the cost of a taller chrome row. Each row is right-aligned
+        // so the visual matches the single-row layout when nothing wraps.
+        FlowLayout(alignment: .trailing, spacing: 8, rowSpacing: 4) {
+            pythonSegment
+            nodeSegment
+            proxySegment
+            branchSegment
+            diffSegment
         }
+        .frame(maxWidth: .infinity)
         .font(Theme.mono(11))
         .padding(.horizontal, Theme.space4)
         .padding(.vertical, 5)
         .background(Theme.chromeBackground)
     }
 
-    private func segmentRow(_ segments: [AnyView]) -> some View {
-        HStack(spacing: 8) { ForEach(0..<segments.count, id: \.self) { segments[$0] } }
+    @ViewBuilder
+    private var pythonSegment: some View {
+        if let venv = session.environment.pythonVenv {
+            StatusSegment(systemImage: "p.circle.fill") {
+                Text(venv).foregroundStyle(Theme.chromeForeground)
+            }
+        }
     }
 
-    private var pythonSegment: AnyView {
-        guard let venv = session.environment.pythonVenv else { return AnyView(EmptyView()) }
-        return AnyView(StatusSegment(systemImage: "p.circle.fill") {
-            Text(venv).foregroundStyle(Theme.chromeForeground)
-        })
+    @ViewBuilder
+    private var nodeSegment: some View {
+        if let version = session.environment.nodeVersion {
+            let nvmDir = session.environment.nvmDirectory
+            SwitchableStatusSegment<String>(
+                systemImage: "n.circle.fill",
+                label: version,
+                helpText: "Switch Node version",
+                popoverWidth: 190,
+                popoverMaxHeight: 280,
+                emptyMessage: "No nvm versions found",
+                loadItems: { NodeVersionInventory.installedVersions(nvmDirectory: nvmDir) },
+                isCurrent: { NodeVersionInventory.isSameVersion($0, version) },
+                titleFor: { $0 },
+                commandFor: NodeVersionInventory.shellUseCommand,
+                session: session
+            )
+        }
     }
 
-    private var nodeSegment: AnyView {
-        guard let version = session.environment.nodeVersion else { return AnyView(EmptyView()) }
-        let nvmDir = session.environment.nvmDirectory
-        return AnyView(SwitchableStatusSegment<String>(
-            systemImage: "n.circle.fill",
-            label: version,
-            helpText: "Switch Node version",
-            popoverWidth: 190,
-            popoverMaxHeight: 280,
-            emptyMessage: "No nvm versions found",
-            loadItems: { NodeVersionInventory.installedVersions(nvmDirectory: nvmDir) },
-            isCurrent: { NodeVersionInventory.isSameVersion($0, version) },
-            titleFor: { $0 },
-            commandFor: NodeVersionInventory.shellUseCommand,
-            session: session
-        ))
+    @ViewBuilder
+    private var proxySegment: some View {
+        if let info = session.environment.proxy {
+            ProxyStatusSegment(info: info, session: session)
+        }
     }
 
-    private var proxySegment: AnyView {
-        guard let info = session.environment.proxy else { return AnyView(EmptyView()) }
-        return AnyView(ProxyStatusSegment(info: info))
+    @ViewBuilder
+    private var branchSegment: some View {
+        if let branch = session.gitStatus.branch {
+            let cwd = session.currentDirectory
+            SwitchableStatusSegment<String>(
+                systemImage: "arrow.triangle.branch",
+                label: branch,
+                helpText: "Switch Git branch",
+                popoverWidth: 230,
+                popoverMaxHeight: 320,
+                emptyMessage: "No local branches found",
+                loadItems: { GitBranchInventory.localBranches(cwd: cwd) },
+                isCurrent: { $0 == branch },
+                titleFor: { $0 },
+                commandFor: GitBranchInventory.shellSwitchCommand,
+                session: session
+            )
+        }
     }
 
-    private var branchSegment: AnyView {
-        guard let branch = session.gitStatus.branch else { return AnyView(EmptyView()) }
-        let cwd = session.currentDirectory
-        return AnyView(SwitchableStatusSegment<String>(
-            systemImage: "arrow.triangle.branch",
-            label: branch,
-            helpText: "Switch Git branch",
-            popoverWidth: 230,
-            popoverMaxHeight: 320,
-            emptyMessage: "No local branches found",
-            loadItems: { GitBranchInventory.localBranches(cwd: cwd) },
-            isCurrent: { $0 == branch },
-            titleFor: { $0 },
-            commandFor: GitBranchInventory.shellSwitchCommand,
-            session: session
-        ))
-    }
-
-    private var diffSegment: AnyView {
+    @ViewBuilder
+    private var diffSegment: some View {
         let s = session.gitStatus
-        guard s.branch != nil, s.filesChanged > 0 else { return AnyView(EmptyView()) }
-        return AnyView(StatusSegment(systemImage: "line.3.horizontal.button.angledtop.vertical.right") {
-            // Order mirrors `git diff --shortstat` itself: files → +N → −N.
-            // File count in chromeMuted (it's a count, not a delta) so the
-            // saturated +/- pair pops as the actual change signal.
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(s.filesChanged)")
-                    .foregroundStyle(Theme.chromeMuted)
-                if s.insertions > 0 {
-                    SignedNumber(sign: "+", value: s.insertions, color: Theme.gitInsertion)
-                }
-                if s.deletions > 0 {
-                    // Unicode minus (U+2212), not hyphen — balanced
-                    // typographic pair with `+`.
-                    SignedNumber(sign: "−", value: s.deletions, color: Theme.gitDeletion)
+        if s.branch != nil, s.filesChanged > 0 {
+            StatusSegment(systemImage: "line.3.horizontal.button.angledtop.vertical.right") {
+                // Order mirrors `git diff --shortstat` itself: files → +N → −N.
+                // File count in chromeMuted (it's a count, not a delta) so the
+                // saturated +/- pair pops as the actual change signal.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(s.filesChanged)")
+                        .foregroundStyle(Theme.chromeMuted)
+                    if s.insertions > 0 {
+                        SignedNumber(sign: "+", value: s.insertions, color: Theme.gitInsertion)
+                    }
+                    if s.deletions > 0 {
+                        // Unicode minus (U+2212), not hyphen — balanced
+                        // typographic pair with `+`.
+                        SignedNumber(sign: "−", value: s.deletions, color: Theme.gitDeletion)
+                    }
                 }
             }
-        })
+        }
     }
 }
 
@@ -189,6 +190,70 @@ private struct StatusSegment<Content: View>: View {
             RoundedRectangle(cornerRadius: 4)
                 .stroke(Theme.chromeFaint, lineWidth: 1)
         )
+    }
+}
+
+/// Wrap-on-overflow flow layout. Each row picks subviews greedily; when a
+/// subview won't fit, it starts a new row. `alignment` shifts each row
+/// within the parent's available width — `.trailing` mirrors the
+/// right-aligned single-row look when nothing wraps. One pass per layout
+/// invocation (no candidate-row probing like `ViewThatFits`), so this stays
+/// cheap during animated parent-width changes.
+private struct FlowLayout: Layout {
+    var alignment: HorizontalAlignment = .leading
+    var spacing: CGFloat = 8
+    var rowSpacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let plan = plan(width: width, subviews: subviews)
+        return CGSize(width: proposal.width ?? plan.contentWidth, height: plan.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let plan = plan(width: bounds.width, subviews: subviews)
+        for (i, p) in plan.positions.enumerated() {
+            subviews[i].place(at: CGPoint(x: bounds.minX + p.x, y: bounds.minY + p.y), proposal: .unspecified)
+        }
+    }
+
+    private func plan(width: CGFloat, subviews: Subviews) -> (positions: [CGPoint], height: CGFloat, contentWidth: CGFloat) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        var rows: [[Int]] = [[]]
+        var rowWidth: CGFloat = 0
+        for (i, size) in sizes.enumerated() {
+            let needed = rowWidth + (rowWidth > 0 ? spacing : 0) + size.width
+            if rowWidth > 0, needed > width {
+                rows.append([i])
+                rowWidth = size.width
+            } else {
+                rows[rows.count - 1].append(i)
+                rowWidth = needed
+            }
+        }
+        var positions = [CGPoint](repeating: .zero, count: subviews.count)
+        var y: CGFloat = 0
+        var maxRowWidth: CGFloat = 0
+        for row in rows {
+            let rowContent = row.reduce(CGFloat(0)) { acc, i in
+                acc + sizes[i].width + (acc > 0 ? spacing : 0)
+            }
+            maxRowWidth = max(maxRowWidth, rowContent)
+            let rowHeight = row.map { sizes[$0].height }.max() ?? 0
+            let startX: CGFloat
+            switch alignment {
+            case .trailing: startX = max(0, width - rowContent)
+            case .center:   startX = max(0, (width - rowContent) / 2)
+            default:        startX = 0
+            }
+            var x = startX
+            for i in row {
+                positions[i] = CGPoint(x: x, y: y)
+                x += sizes[i].width + spacing
+            }
+            y += rowHeight + rowSpacing
+        }
+        return (positions, max(0, y - rowSpacing), maxRowWidth)
     }
 }
 
@@ -282,6 +347,7 @@ private struct SwitchableStatusSegment<Item: Hashable>: View {
 /// child processes, so kooky doesn't pretend to switch proxies for you.
 private struct ProxyStatusSegment: View {
     let info: ProxyInfo
+    let session: Session
 
     @State private var isPopoverOpen = false
     @State private var isHovered = false
@@ -303,19 +369,75 @@ private struct ProxyStatusSegment: View {
         }
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 4))
-        .help("Show proxy env (click row to copy)")
+        .help("Show proxy env (click text to copy)")
         .onHover { isHovered = $0 }
         .popover(isPresented: $isPopoverOpen, arrowEdge: .bottom) {
-            KookyMenuList(width: 320, maxHeight: 200) {
+            KookyMenuList(width: 380, maxHeight: 240) {
                 ForEach(info.entries, id: \.self) { entry in
-                    KookyMenuRow(title: entry) {
+                    ProxyEntryRow(entry: entry) {
+                        // Click entry text → copy raw `name=value` to clipboard.
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(entry, forType: .string)
+                        isPopoverOpen = false
+                    } onUnset: { name in
+                        // `unset` lowercase + uppercase together — corporate
+                        // shells often export both forms; clearing just one
+                        // leaves the other in effect.
+                        let upper = name.uppercased()
+                        session.engine.sendInput("unset \(name) \(upper)\r")
                         isPopoverOpen = false
                     }
                 }
             }
         }
+    }
+}
+
+private struct ProxyEntryRow: View {
+    let entry: String
+    let onCopy: () -> Void
+    let onUnset: (String) -> Void
+
+    @State private var isHovered = false
+
+    private var name: String {
+        // `name=value` — split once on first `=`. Names are well-known
+        // (https_proxy / http_proxy / all_proxy) so no escaping concern.
+        String(entry.prefix { $0 != "=" })
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onCopy) {
+                Text(entry)
+                    .font(Theme.display(12.5, weight: .regular))
+                    .foregroundStyle(Theme.chromeForeground)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Copy")
+            Button("Unset") { onUnset(name) }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.chromeForeground)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Theme.chromeFaint.opacity(0.6))
+                )
+                .help("unset \(name)")
+        }
+        .padding(.horizontal, Theme.space2 + 2)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isHovered ? Theme.chromeHover : .clear)
+        )
+        .onHover { isHovered = $0 }
     }
 }
 
