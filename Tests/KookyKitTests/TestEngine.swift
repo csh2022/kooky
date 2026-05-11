@@ -10,6 +10,7 @@ final class TestEngine: TerminalEngine {
     var onPwdChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
     var onCommandFinished: ((Int?, TimeInterval) -> Void)?
+    var onProcessExitedCleanly: (() -> Void)?
     var onSearchStart: ((String) -> Void)?
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int) -> Void)?

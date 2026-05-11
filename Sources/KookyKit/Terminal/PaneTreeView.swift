@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Recursive view for a workspace's split tree. Leaves render their own tab
-/// strip + active terminal — : a split slices the whole tab strip,
-/// not just the content area.
+/// strip + active terminal — a split slices the whole tab strip, not just
+/// the content area.
 struct PaneTreeView: View {
     @Bindable var node: PaneNode
     @Bindable var workspace: Workspace

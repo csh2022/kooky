@@ -1,28 +1,32 @@
 # kooky
 
-> *A macOS terminal built for the coding experience.*
+> *A minimal macOS terminal for AI coding.*
 
-🇬🇧 English  ·  🇨🇳 [中文](README_cn.md)
+🇬🇧 English  ·  🇨🇳 [中文](README_CN.md)
 
 ![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, the `+` menu showing the five built-in agent templates](screenshot.png)
 
-Existing terminals were built before AI agents lived in your dev loop. **kooky treats agent sessions as first-class tabs** — Claude Code, Codex, and Gemini CLI live next to your shells, and the chrome reacts to what each one is doing. Open-source, macOS-only, MIT. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
+A minimal macOS terminal built for AI coding. Sidebar workspaces; horizontal / vertical split panes; one-click agent launch; per-agent activity readout; live workspace state with one-click Node and branch switching. Open-source, MIT-licensed. No accounts, no telemetry; app state stays local. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
 
 **[Download latest](https://github.com/iAmCorey/kooky/releases/latest)**  ·  [Architecture notes](ARCHITECTURE.md)  ·  [Changelog](CHANGELOG.md)
 
 ---
 
-## What it does
+## Features
 
-**Vertical tabs that don't suck.** Sidebar workspace list with three-state collapse (`⌘⌃S`). Each pane owns its own tab strip, . Drag tabs to reorder; drag across panes to move sessions whole. State persists across launches.
+**Vertical tabs & split panes.** Sidebar workspaces with three-state collapse (`⌘⌃S`). Each pane owns its own tab strip and active tab. Drag tabs to reorder, or across panes to move sessions whole. State persists across launches.
 
-**One-click AI agent sessions.** Claude Code · Codex · Gemini CLI · OpenCode · Amp. Pick one from the `+` menu — the agent boots before your first prompt prints. Sidebar dot tracks per-agent activity (running / attention / idle).
+**One-click AI agent sessions.** Claude Code · Codex · Gemini CLI · OpenCode · Amp. Pick one from the `+` menu; the agent boots before your first prompt prints.
 
-**Knows what your shell did.** OSC 133 / FinalTerm hooks installed via a ZDOTDIR wrapper that **does not touch** your `~/.zshrc`. Per-tab + per-workspace red dot when the last command failed; hover for `exit N · 12.4s`. Pane status bars show git branch, diff stats, Node version, and Python env; click the Node or branch pill to switch. `⌘↑` / `⌘↓` jump between prompts in scrollback.
+**Agent activity readout.** Sidebar dot tracks each agent in real time — running (blue), waiting on you (amber), idle (none). Tab + workspace dots also turn red when the last command exited non-zero; hover for `exit N · 12.4s`.
 
-**Full keyboard.** `⌘T` / `⌘N` new tab / workspace · `⌘W` / `⌘⇧W` close · `⌘1-9` / `⌥⌘1-9` switch · `⌘D` / `⌘⇧D` split right / down · `⌘[` `⌘]` focus pane · `⌘=` / `⌘-` / `⌘0` font size · `⌘K` clear pane.
+**Live workspace state.** Pane status bar shows git branch + diff (`N files +X −Y`), Python venv, and Node version. Click the Node or branch pill to switch versions / branches without typing.
 
-**Real macOS chrome.** Onest + JetBrains Mono. 32pt top strip with traffic lights and a window-drag handle that wins the title-bar-vs-tab-DnD race. Custom About panel, native menus with shortcut hints, IME for 中日韩 / Vietnamese / etc. State lives in `~/Library/Application Support/kooky/`; no cloud, no telemetry, no accounts.
+**SwiftUI-native, minimal chrome.** Onest + JetBrains Mono. Custom About panel, native menus with shortcut hints, full IME support.
+
+**Local by default.** No accounts, no telemetry, no cloud sync. Kooky keeps its own state on your device.
+
+**libghostty-powered.** GPU-accelerated cell rendering, same engine as ghostty. Fast.
 
 ## Install
 
@@ -72,7 +76,7 @@ Requires Xcode 26+ and macOS 14+ (Sonoma — `@Observable` is the floor).
 ./scripts/setup-libghostty.sh        # one-time: fetch the libghostty xcframework
 swift build
 swift run                            # dev mode
-swift test                           # 67 unit tests
+swift test                           # 73 unit tests
 
 ./scripts/build-app.sh               # writes dist/Kooky.app
 ./scripts/build-dmg.sh --build       # writes dist/Kooky-vX.Y.Z.dmg

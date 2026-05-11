@@ -593,6 +593,10 @@ final class WorkspaceStore {
             self?.refreshGitStatus(for: session)
             self?.refreshEnvironment(for: session)
         }
+        engine.onProcessExitedCleanly = { [weak self, weak session, weak workspace] in
+            guard let self, let session, let workspace else { return }
+            self.closeTab(session, in: workspace)
+        }
         engine.onSearchStart = { [weak session] needle in
             guard let session else { return }
             session.searchActive = true

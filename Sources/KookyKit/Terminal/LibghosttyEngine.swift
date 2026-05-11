@@ -107,6 +107,17 @@ private let kookyActionCb: ghostty_runtime_action_cb = { _, target, action in
         let shape = action.action.mouse_shape
         dispatchToView(userdata) { $0.applyMouseShape(shape) }
         return true
+    case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
+        // exit 0 → user typed `exit` / `logout`; auto-close the kooky tab
+        // by returning `true` (suppresses libghostty's "press any key to
+        // close" message) AND dispatching the callback that fires `closeTab`.
+        // Non-zero exit (crash, segfault, bad command) returns `false` so
+        // libghostty's default UI stays — user can read the error before
+        // dismissing with a keypress.
+        let exit = action.action.child_exited.exit_code
+        guard exit == 0 else { return false }
+        dispatchToView(userdata) { $0.onProcessExitedCleanly?() }
+        return true
     case GHOSTTY_ACTION_COMMAND_FINISHED:
         // Shell emitted `OSC 133;D[;exit]` — last command done. exit=-1 means
         // the shell omitted the field; pass `nil` upward so the UI can pick a
@@ -189,6 +200,10 @@ final class LibghosttyEngine: TerminalEngine {
         get { surfaceView.onCommandFinished }
         set { surfaceView.onCommandFinished = newValue }
     }
+    var onProcessExitedCleanly: (() -> Void)? {
+        get { surfaceView.onProcessExitedCleanly }
+        set { surfaceView.onProcessExitedCleanly = newValue }
+    }
     var onSearchStart: ((String) -> Void)? {
         get { surfaceView.onSearchStart }
         set { surfaceView.onSearchStart = newValue }
@@ -257,6 +272,7 @@ final class GhosttySurfaceView: NSView {
     var onPwdChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
     var onCommandFinished: ((Int?, TimeInterval) -> Void)?
+    var onProcessExitedCleanly: (() -> Void)?
     var onSearchStart: ((String) -> Void)?
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int) -> Void)?

@@ -54,6 +54,11 @@ protocol TerminalEngine: AnyObject {
     /// initial/fallback env snapshot before the prompt hook reports live
     /// `VIRTUAL_ENV` / `NVM_BIN`.
     var foregroundPid: pid_t? { get }
+    /// Fires when the surface's child process exits cleanly (exit code 0
+    /// — `exit` / `logout` typed in the shell). Non-zero exits intentionally
+    /// don't fire this — libghostty's "press any key to close" message
+    /// stays so the user can read crash output before dismissing.
+    var onProcessExitedCleanly: (() -> Void)? { get set }
     func start(config: TerminalSessionConfig)
     func terminate()
     /// Trigger a libghostty named action (e.g. `increase_font_size:1`,
