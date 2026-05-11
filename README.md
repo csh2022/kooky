@@ -1,12 +1,12 @@
 # kooky
 
-> *A minimal macOS terminal for AI coding.*
+> *A minimal modern terminal for AI coding.*
 
 🇬🇧 English  ·  🇨🇳 [中文](README_CN.md)
 
 ![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, the `+` menu showing the five built-in agent templates](screenshot.png)
 
-A minimal macOS terminal built for AI coding. Sidebar workspaces; horizontal / vertical split panes; one-click agent launch; per-agent activity readout; live workspace state with one-click Node and branch switching. Open-source, MIT-licensed. No accounts, no telemetry; app state stays local. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
+A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / vertical split panes; one-click agent launch; per-agent activity readout; live workspace state with one-click Node and branch switching. Open-source, MIT-licensed. No accounts, no telemetry; app state stays local. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
 
 **[Download latest](https://github.com/iAmCorey/kooky/releases/latest)**  ·  [Changelog](CHANGELOG.md)
 
@@ -37,7 +37,7 @@ Download the latest `.dmg` from [Releases](https://github.com/iAmCorey/kooky/rel
 <details>
 <summary><b>Path A — System Settings <i>(recommended)</i></b></summary>
 
-1. Double-click `Kooky.app`. macOS shows the warning. Dismiss it.
+1. Double-click `Kooky.app`. If shows the warning. Dismiss it.
 2. **System Settings → Privacy & Security**, scroll to **Security**.
 3. Click **Open Anyway** next to *"Kooky was blocked to protect your Mac"*. Enter your password.
 4. Double-click `Kooky.app` again → click **Open**. Done.

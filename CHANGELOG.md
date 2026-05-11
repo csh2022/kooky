@@ -2,12 +2,17 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.5 — 2026-05-11
+
+- **Shift+Enter inserts a newline.** Previously plain Enter and Shift+Enter sent the same `\r` to the PTY, so Claude Code / Codex / shell all submitted on either. Now Shift+Enter sends `\` + `\r` — zsh treats it as line-continuation (PS2 prompt for multi-line commands); Claude Code / Ink-based REPLs honor their documented `\` + Enter → newline pattern. Plain `\n` doesn't work because ZLE binds it to accept-line, same as `\r`.
+- **About panel polish.** New tagline (`A minimal modern terminal for AI coding`). Rights line `© 2026 kooky. All rights reserved.` sits above the `Built with ❤️ by Corey Chiu` credit (name links to coreychiu.com). Repository URL replaced with a `Github ↗` link. `Version 0.9.5 (0.9.5)` collapsed to `Version 0.9.5` — `.version: ""` in the About-panel options suppresses the duplicate `CFBundleVersion` parens. Paragraph spacing rewritten with `NSMutableParagraphStyle.paragraphSpacingBefore` so the gap between the headline block (tagline + Github) and the footnote block (rights + credit) is uniform regardless of font size.
+
 ## v0.9.4 — 2026-05-11
 
 - **Status bar git state auto-refreshes during agent sessions.** Switching branches via Claude / Gemini / Codex's Bash tool — or from an external terminal — now updates the pane status bar within ~200ms. Previously the bar only refreshed on shell `cd` (OSC 7) or shell-command finish (OSC 133;D); agent subprocess shells trip neither. New per-session `GitWatcher` opens kqueue sources on `.git/HEAD` and `.git/index`; handles git's atomic-rename pattern (NOTE_DELETE → reopen) and stale-cwd rebuilds. Submodule `.git` files with relative `gitdir:` paths resolve against the file's own directory instead of the process cwd.
 - **Proxy slot in the status bar.** When `https_proxy` / `http_proxy` / `all_proxy` (or their uppercase forms) are set, a new `network` pill shows `host:port` from the highest-priority value. Click it to see all set proxy vars in full (`name=value`); each row click-copies to the system pasteboard. Credentials in summary are stripped — full form stays in the popover. IPv6 hosts bracket-wrap. New `ProxyInfo` struct on `ProjectEnvironment`; envStatusBlock hook tracks the 3 vars; `KookyHook env` mode accepts 3 more args.
 - **Tab icon promotes on manually-launched agents.** *(Folded in from v0.9.3.)* Type `claude` / `gemini` in a Terminal tab → tab pill + sidebar dot switch to the agent immediately, not just when picked from the `+` menu. SessionEnd reverts to `.terminal`. `applyHookEvent` guards `session.activityState` writes — same-value assignments no longer churn `@Observable` observers.
-- **About panel rewrite.** Bottom line is now `Built by Corey Chiu with ❤️`; "Corey Chiu" links to coreychiu.com. Dropped the © + MIT line — license info lives in README / NOTICE.md.
+- **About panel rewrite.** Bottom line is now `Built with ❤️ by Corey Chiu`; "Corey Chiu" links to coreychiu.com. Dropped the © + MIT line — license info lives in README / NOTICE.md.
 
 ## v0.9.3 — 2026-05-11
 

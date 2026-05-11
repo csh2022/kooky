@@ -377,46 +377,64 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: KookyApp.name,
             .applicationVersion: KookyApp.displayVersion,
+            // Suppress the parenthesized build number — Info.plist sets
+            // CFBundleVersion to the same string as CFBundleShortVersionString,
+            // and the default "Version X (X)" reads as a typo.
+            .version: "",
             .credits: aboutCredits,
         ])
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private var aboutCredits: NSAttributedString {
-        let centered = NSMutableParagraphStyle()
-        centered.alignment = .center
-        let body: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: centered,
-        ]
-        let credits = NSMutableAttributedString(string: "\(KookyApp.tagline)\n\n", attributes: body)
-        credits.append(NSAttributedString(
-            string: KookyApp.repositoryDisplay,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11),
-                .foregroundColor: NSColor.linkColor,
-                .link: KookyApp.repositoryURL,
-                .paragraphStyle: centered,
+        // Two paragraph styles: `tight` for adjacent lines within a block,
+        // `blockGap` for the first line of a new block (adds a uniform gap
+        // above, independent of surrounding font sizes). Without this, blank
+        // lines inherit the previous paragraph's font and the spacing wobbles
+        // as the font drops from 11pt headline to 9pt footnote.
+        let tight = NSMutableParagraphStyle()
+        tight.alignment = .center
+        tight.lineSpacing = 1
+
+        let blockGap = NSMutableParagraphStyle()
+        blockGap.alignment = .center
+        blockGap.lineSpacing = 1
+        blockGap.paragraphSpacingBefore = 12
+
+        let body = NSFont.systemFont(ofSize: 11)
+        let foot = NSFont.systemFont(ofSize: 9)
+
+        func attrs(_ font: NSFont, _ color: NSColor, _ style: NSParagraphStyle, link: URL? = nil) -> [NSAttributedString.Key: Any] {
+            var dict: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: style,
             ]
+            if let link { dict[.link] = link }
+            return dict
+        }
+
+        let credits = NSMutableAttributedString()
+        credits.append(NSAttributedString(
+            string: KookyApp.tagline,
+            attributes: attrs(body, .labelColor, tight)
         ))
-        let footnoteFont = NSFont.systemFont(ofSize: 9)
-        let footnoteBase: [NSAttributedString.Key: Any] = [
-            .font: footnoteFont,
-            .foregroundColor: NSColor.secondaryLabelColor,
-            .paragraphStyle: centered,
-        ]
-        credits.append(NSAttributedString(string: "\n\nBuilt by ", attributes: footnoteBase))
+        credits.append(NSAttributedString(
+            string: "\nGithub ↗",
+            attributes: attrs(body, .linkColor, tight, link: KookyApp.repositoryURL)
+        ))
+        credits.append(NSAttributedString(
+            string: "\n© \(KookyApp.copyrightYear) \(KookyApp.name). All rights reserved.",
+            attributes: attrs(foot, .secondaryLabelColor, blockGap)
+        ))
+        credits.append(NSAttributedString(
+            string: "\nBuilt with ❤️ by ",
+            attributes: attrs(foot, .secondaryLabelColor, tight)
+        ))
         credits.append(NSAttributedString(
             string: KookyApp.author,
-            attributes: [
-                .font: footnoteFont,
-                .foregroundColor: NSColor.linkColor,
-                .link: KookyApp.authorURL,
-                .paragraphStyle: centered,
-            ]
+            attributes: attrs(foot, .linkColor, tight, link: KookyApp.authorURL)
         ))
-        credits.append(NSAttributedString(string: " with ❤️", attributes: footnoteBase))
         return credits
     }
 

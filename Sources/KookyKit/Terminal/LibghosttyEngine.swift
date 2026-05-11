@@ -598,7 +598,11 @@ final class GhosttySurfaceView: NSView {
 
         switch code {
         // Functional
-        case 36:  return "\r"                              // Enter
+        case 36:
+            // Shift+Enter: send `\` then CR — zsh line-continuation and
+            // Claude Code's documented `\` + Enter → newline trick both
+            // honor this. `\n` alone is useless: ZLE binds it to accept-line.
+            return mods.contains(.shift) ? "\\\r" : "\r"
         case 48:  return mods.contains(.shift) ? "\u{1B}[Z" : "\t"  // Tab / Shift+Tab
         case 51:  return "\u{7F}"                          // Backspace (DEL)
         case 53:  return "\u{1B}"                          // Escape
