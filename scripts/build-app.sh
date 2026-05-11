@@ -61,7 +61,15 @@ cp -R .build/release/Kooky_KookyKit.bundle "${APP}/Contents/Resources/"
 # .icns from CFBundleIconFile in Info.plist; we synthesize the multi-size
 # .iconset via sips, then iconutil packs it. Without a source PNG we ship
 # without an icon and the OS falls back to the generic blank-document.
-ICON_SOURCE="branding/AppIcon.png"
+# Pick the largest available source from branding/icons/ — asset catalog
+# format names the 1024px slot `icon-512@2x.png`. Fall back to a flat
+# `icon-1024.png` (older convention) then to legacy `branding/AppIcon.png`.
+for cand in branding/icons/icon-512@2x.png branding/icons/icon-1024.png branding/AppIcon.png; do
+    if [ -f "$cand" ]; then
+        ICON_SOURCE="$cand"
+        break
+    fi
+done
 if [ -f "$ICON_SOURCE" ]; then
     echo "==> Building AppIcon.icns from ${ICON_SOURCE}"
     ICONSET="$(mktemp -d)/AppIcon.iconset"
