@@ -108,14 +108,13 @@ enum KookyShellIntegration {
         writeManagedFile(at: opencodePluginPath, contents: opencodePluginScript)
     }
 
-    /// Claude Code's settings JSON. Wired via `claude --settings <path>`. No
-    /// SessionStart on purpose: the agent template is either set upfront (+
-    /// menu spawn) or promoted on the first real event below. SessionEnd uses
-    /// a distinct `ended` so the app can also revert the session back to
-    /// `.terminal` — agent's gone, the icon should reflect.
+    /// Wired via `claude --settings <path>`. SessionStart promotes manually-typed
+    /// `claude` immediately; without it the tab icon waits for the user's first
+    /// prompt.
     static func claudeHooksObject(hookCmd: String) -> [String: Any] {
         hooksObject(slug: "claude", hookCmd: hookCmd, events: [
-            "UserPromptSubmit": .running,
+            "SessionStart":      .running,
+            "UserPromptSubmit":  .running,
             "Stop":              .attention,
             "Notification":      .attention,
             "SessionEnd":        .ended,
@@ -125,8 +124,11 @@ enum KookyShellIntegration {
     /// Gemini's hook event names diverge from Claude's (BeforeAgent / AfterAgent
     /// instead of UserPromptSubmit / Stop). Hook scripts must not write to
     /// stdout — `KookyHook` only writes to its socket so this is safe.
+    /// SessionStart promotes manually-typed `gemini` to `.gemini` immediately,
+    /// same pattern as Claude.
     static func geminiDefaultsObject(hookCmd: String) -> [String: Any] {
         hooksObject(slug: "gemini", hookCmd: hookCmd, events: [
+            "SessionStart": .running,
             "BeforeAgent":  .running,
             "AfterAgent":   .attention,
             "Notification": .attention,

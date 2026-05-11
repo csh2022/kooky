@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.3 — 2026-05-11
+
+- **Tab icon promotes on manually-launched agents.** Open a regular Terminal tab, type `claude` (or `gemini` / `codex` / `opencode` / `amp`) — the tab pill + sidebar dot now switch to the agent's icon immediately, not just when the agent was picked from the `+` menu. Added `SessionStart` → `.running` to the Claude Code + Gemini CLI hooks JSON; the bracket-wrapper agents (codex / opencode / amp) already promoted via their wrapper's `running` ping. SessionEnd is unchanged: quitting the agent reverts the tab to `.terminal`.
+
 ## v0.9.2 — 2026-05-11
 
 - **`exit` / `logout` closes the tab.** Shell exits cleanly (code 0) → tab terminates automatically. Non-zero exits still show libghostty's "press any key to close" so you can read crash output before dismissing. Wired via `GHOSTTY_ACTION_SHOW_CHILD_EXITED` → new `engine.onProcessExitedCleanly` callback → `WorkspaceStore.closeTab`.

@@ -458,7 +458,12 @@ final class WorkspaceStore {
         } else if session.agent.id == AgentTemplate.terminal.id {
             session.agent = agent
         }
-        session.activityState = event.activityState
+        // SessionStart → UserPromptSubmit on Claude (and BeforeAgent on Gemini)
+        // re-fires `.running` per turn; the @Observable setter notifies every
+        // sidebar/tab observer even on same-value assignment, so guard.
+        if session.activityState != event.activityState {
+            session.activityState = event.activityState
+        }
         if session.agent.id != agentBefore { scheduleSave() }
     }
 

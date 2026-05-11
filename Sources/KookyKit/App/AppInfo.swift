@@ -5,7 +5,7 @@ import Foundation
 /// About panel matches the latest CHANGELOG `vX.Y` tag.
 enum KookyApp {
     static let name = "kooky"
-    static let displayVersion = "0.9.2"
+    static let displayVersion = "0.9.3"
     static let tagline = "A terminal built for the coding experience."
     static let author = "Corey Chiu"
     static let copyrightYear = "2026"
