@@ -126,7 +126,7 @@ enum GitBranchInventory {
     }
 
     static func shellSwitchCommand(branch: String) -> String {
-        "git switch \(shellQuote(branch))\r"
+        "git switch \(KookyShellIntegration.quote(branch))\r"
     }
 
     static func parseBranches(_ output: String) -> [String] {
@@ -136,9 +136,5 @@ enum GitBranchInventory {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .filter { seen.insert($0).inserted }
-    }
-
-    private static func shellQuote(_ s: String) -> String {
-        "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

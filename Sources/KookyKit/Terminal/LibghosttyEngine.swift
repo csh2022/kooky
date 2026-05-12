@@ -36,6 +36,10 @@ final class LibghosttyApp {
 
         let config = ghostty_config_new()
         ghostty_config_load_default_files(config)
+        // kooky's `~/.kooky/settings.json` rides on top of ghostty's defaults —
+        // last write wins, so user's kooky-side overrides beat the ghostty
+        // file. Ghostty config still acts as a fallback (font / theme / etc.).
+        KookySettings.apply(to: config)
         ghostty_config_finalize(config)
 
         self.app = ghostty_app_new(&runtime, config)

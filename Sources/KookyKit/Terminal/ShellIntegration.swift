@@ -8,6 +8,13 @@ import Foundation
 /// Libghostty's `GHOSTTY_ACTION_PWD` then fires whenever the shell `cd`s, which
 /// is what `WorkspaceStore` listens to for cwd-tracking.
 enum KookyShellIntegration {
+    /// POSIX single-quote wrap (escape internal `'` by `'\''`). Safe for
+    /// arbitrary file paths and argv-style values; reused by anyone that
+    /// builds a shell-command string for `engine.sendInput` or PTY spawn.
+    static func quote(_ s: String) -> String {
+        "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
     static let zshPath = "/bin/zsh"
     static let bashPath = "/bin/bash"
     static let zdotdirKey = "ZDOTDIR"
@@ -396,7 +403,10 @@ enum KookyShellIntegration {
             export KOOKY_AGENT_LAUNCHED=1
             _kooky_cmd="$KOOKY_AGENT"
             unset KOOKY_AGENT
-            "$_kooky_cmd"
+            # `eval` lets KOOKY_AGENT carry multi-word commands (e.g. an
+            # editor + file path); single-word agent commands like `claude`
+            # behave identically.
+            eval "$_kooky_cmd"
         fi
         """
 

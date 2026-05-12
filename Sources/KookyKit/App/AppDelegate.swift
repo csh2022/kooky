@@ -32,6 +32,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         KookyFonts.registerOnce()
+        // First-launch onboarding (blocking NSAlert if a ghostty config exists)
+        // — must run before the window is created and before any libghostty
+        // surface is spawned, since `LibghosttyApp` reads `~/.kooky/settings.json`
+        // at process init when the first surface is created.
+        KookyOnboarding.runIfNeeded()
         KookyShellIntegration.installAgentHooks()
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
@@ -85,6 +90,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         // bundled Info.plist (the responder-chain default reads from there).
         mainMenu.addItem(submenu(buildMenu(title: KookyApp.name, entries: [
             selfRow("About \(KookyApp.name)", #selector(handleAbout)),
+            .separator,
+            selfRow("Settings…", #selector(handleOpenSettings), ","),
             .separator,
             responderRow("Hide \(KookyApp.name)", #selector(NSApplication.hide(_:)), "h"),
             responderRow("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", modifiers: [.command, .option]),
@@ -444,6 +451,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleOpenRepo() {
         NSWorkspace.shared.open(KookyApp.repositoryURL)
+    }
+
+    @objc private func handleOpenSettings() {
+        KookySettingsWindowController.show(store: store)
     }
 
     @objc private func handleCenterWindow() {

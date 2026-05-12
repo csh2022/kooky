@@ -2,6 +2,14 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.7 — 2026-05-12
+
+- **Settings.** New JSON config at `~/.kooky/settings.json` plus a native Settings window (`⌘,` in the kooky app menu). v1 surfaces Font Family / Font Size / Cursor Style; advanced users edit the raw JSON via "Open in New Tab" — opens `${EDITOR:-vi}` inside a kooky tab. Bottom-right Restart button cleanly relaunches via a detached helper that waits for the current PID to exit before `open -n`, so socket / persistence state never collides.
+- **First-launch onboarding.** On first launch kooky checks for `~/.config/ghostty/config` and offers to import it (translated to JSON under `terminal.*`); otherwise writes a commented JSONC template. Settings.json is JSONC — `//` and `/* */` comments parse natively via `JSONSerialization.json5Allowed`.
+- **`terminal.*` keys ride on top of ghostty defaults.** Kooky reads ghostty's own config files first (so existing ghostty users get their font / theme / scrollback-limit for free), then layers settings.json on top. Empty / default sentinels (font-family `""`, cursor-style `"block"`, font-size `nil`) drop the key so the user's underlying ghostty config wins.
+- **Wrapper `KOOKY_AGENT` now accepts multi-word commands.** `eval "$_kooky_cmd"` replaces `"$_kooky_cmd"` in the spawned shell's rcfile so the Settings "Open in New Tab" path can pass `${EDITOR:-vi} <path>`. Single-word agent commands (`claude` / `codex` / etc.) behave identically.
+- **Internals.** `KookyShellIntegration.quote(_:)` consolidates the POSIX shell-quote helper duplicated between `GitStatusFetcher` and the new settings tab spawn. `KookySettings.ensureDirectory()` + `write(_:)` collapse three `createDirectory` and two JSON-write+atomic patterns. Ghostty config import accumulates duplicate keys (e.g. multi-line `keybind`) into JSON arrays so `formatGhosttyLines` can roundtrip them out as repeated key lines.
+
 ## v0.9.6 — 2026-05-12
 
 - **Status bar perf.** Sidebar-collapse animation no longer stutters when a pane has the status bar showing. Removed `AnyView` from every segment + replaced the 6-variant `ViewThatFits` with a custom right-aligned `FlowLayout` — segments now drop from ~30 body evaluations per animation frame down to one layout pass. Narrow split panes wrap segments to a second row instead of hiding low-priority slots, so branch / proxy / env stay visible.
