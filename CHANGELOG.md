@@ -2,6 +2,13 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.6 — 2026-05-12
+
+- **Status bar perf.** Sidebar-collapse animation no longer stutters when a pane has the status bar showing. Removed `AnyView` from every segment + replaced the 6-variant `ViewThatFits` with a custom right-aligned `FlowLayout` — segments now drop from ~30 body evaluations per animation frame down to one layout pass. Narrow split panes wrap segments to a second row instead of hiding low-priority slots, so branch / proxy / env stay visible.
+- **Proxy popover: per-row Unset button.** Each `name=value` row gets an `Unset` button on the right that sends `unset <name> <UPPER>` to the PTY (clears both lowercase + uppercase forms in one shot). Row body click still copies the full line to the pasteboard.
+- **New app icon.** Redesigned brand mark; build pipeline now reads from `branding/icons/icon-512@2x.png` (macOS asset-catalog naming) with fallback to the legacy `branding/AppIcon.png` path.
+- **Internals.** `.gitignore` covers more AI agent context files (`AGENT.md`, `GEMINI.md`, `.cursorrules`, `.cursor/`, `.clinerules`, `.windsurfrules`, `.continue/`).
+
 ## v0.9.5 — 2026-05-11
 
 - **Shift+Enter inserts a newline.** Previously plain Enter and Shift+Enter sent the same `\r` to the PTY, so Claude Code / Codex / shell all submitted on either. Now Shift+Enter sends `\` + `\r` — zsh treats it as line-continuation (PS2 prompt for multi-line commands); Claude Code / Ink-based REPLs honor their documented `\` + Enter → newline pattern. Plain `\n` doesn't work because ZLE binds it to accept-line, same as `\r`.
