@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.9 — 2026-05-13
+
+- **Non-focused panes now fully dim, terminal content included.** v0.9.8 dimmed only the chrome (tab strip + status bar) — the terminal grids stayed at full brightness so the contrast was subtle. v0.9.9 lifts the `.opacity()` from the two chrome `Group`s to the whole pane, so libghostty's `IOSurfaceLayer` rides along too. Verified: SwiftUI `.opacity()` propagates to the `NSViewRepresentable` → `NSView.alphaValue` → metal-backed `IOSurfaceLayer` correctly. Single-pane workspaces look identical.
+
 ## v0.9.8 — 2026-05-13
 
 - **Spot the focused pane at a glance.** With splits, it's hard to tell which pane has the cursor. Non-focused panes now dim their chrome (tab strip + status bar) to 50% opacity, animated via the shared `Theme.chromeTransition` token. Terminal content stays at full brightness so code is still crisp. Single-pane workspaces look identical to before.
