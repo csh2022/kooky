@@ -331,6 +331,13 @@ enum KookyShellIntegration {
         let rcfilePath = dir.appending("kooky-bashrc-\(getpid())")
 
         let bashrc = """
+        # Default word-jump bindings; readline doesn't bind Ctrl/Alt+arrow on
+        # macOS by default. See the matching block in zshDirectory.
+        bind '"\\e[1;5D": backward-word'     # Ctrl+Left
+        bind '"\\e[1;5C": forward-word'      # Ctrl+Right
+        bind '"\\e[1;3D": backward-word'     # Alt+Left
+        bind '"\\e[1;3C": forward-word'      # Alt+Right
+
         [[ -r "$HOME/.bashrc" ]] && source "$HOME/.bashrc"
 
         # User rc may rewrite PATH; re-prepend the kooky wrapper directory so
@@ -366,6 +373,16 @@ enum KookyShellIntegration {
             at: URL(fileURLWithPath: dir), withIntermediateDirectories: true
         )
         let zshrc = """
+        # Default word-jump bindings. zsh ZLE only binds Alt+B/F by default;
+        # most other terminals (iTerm2, ghostty, Apple Terminal) remap the
+        # Ctrl/Alt+arrow sequences to ESC+B/F so users don't notice. kooky
+        # binds them directly here. Placed before sourcing ~/.zshrc so user
+        # rc files retain final say if they override the same sequences.
+        bindkey '^[[1;5D' backward-word    # Ctrl+Left
+        bindkey '^[[1;5C' forward-word     # Ctrl+Right
+        bindkey '^[[1;3D' backward-word    # Alt+Left
+        bindkey '^[[1;3C' forward-word     # Alt+Right
+
         [[ -f "$HOME/.zshrc" ]] && source "$HOME/.zshrc"
 
         # zsh has now consumed ZDOTDIR to locate this rc; restore the user's

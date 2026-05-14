@@ -2,6 +2,16 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.9.11 — 2026-05-14
+
+- **Mac-style text editing shortcuts now work.** zsh out of the box only binds `Alt+B/F` for word jump, so common combos like `Cmd+←` or `Option+Backspace` did nothing in earlier versions. Now they all just work:
+  - `Cmd+←` / `Cmd+→` — beginning / end of line
+  - `Option+←` / `Option+→` (or `Ctrl+←` / `Ctrl+→`) — jump by word
+  - `Cmd+Backspace` — delete to start of line
+  - `Option+Backspace` — delete previous word
+
+  Custom `bindkey` lines in your `~/.zshrc` still win — kooky's defaults are wired before sourcing user rc.
+
 ## v0.9.10 — 2026-05-14
 
 - **Friendlier "agent not installed" message.** When you open a Claude / Codex / OpenCode / Amp tab on a machine where the CLI isn't on `PATH`, the wrapper used to spit out `kooky: real 'X' binary not found in PATH` — easy to miss before the shell prompt redraws over it. Now it prints a yellow `⚠ X is not installed.` block with breathing whitespace. No install instructions baked in (each agent's install path drifts — brew taps rename, curl URLs change, npm package names move), so kooky just names the gap and steps out of the user's way.

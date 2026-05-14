@@ -515,13 +515,11 @@ final class GhosttySurfaceView: NSView {
         }
         let mods = event.modifierFlags
         let cmd = mods.contains(.command)
+        let cmdOnly = cmd && mods.intersection([.shift, .control, .option]).isEmpty
 
         // Cmd+V: read the system pasteboard directly and inject as text via
         // the paste path so bracketed-paste mode wraps it correctly.
-        if cmd,
-           !mods.contains(.shift),
-           !mods.contains(.control),
-           !mods.contains(.option),
+        if cmdOnly,
            event.charactersIgnoringModifiers?.lowercased() == "v",
            let pasted = NSPasteboard.general.string(forType: .string),
            !pasted.isEmpty
@@ -532,18 +530,30 @@ final class GhosttySurfaceView: NSView {
             return
         }
 
-        // Cmd+C with a live selection: copy via the same direct-extraction
-        // path the right-click menu uses. We bypass libghostty's keybinding
-        // system entirely below, so without this branch Cmd+C would do
-        // nothing.
-        if cmd,
-           !mods.contains(.shift),
-           !mods.contains(.control),
-           !mods.contains(.option),
+        // Cmd+C with a live selection — without this branch libghostty's
+        // bypassed keybinding system would leave Cmd+C dead.
+        if cmdOnly,
            event.charactersIgnoringModifiers?.lowercased() == "c",
            ghostty_surface_has_selection(surface)
         {
             performMenuCopy(nil)
+            return
+        }
+
+        // macOS Cocoa text-edit shortcuts → the control bytes readline / zsh
+        // ZLE already bind. Without this Cmd combos get swallowed by the
+        // responder chain, and libghostty's default Option+Delete sequence
+        // isn't what most shells recognise.
+        if cmdOnly {
+            switch event.keyCode {
+            case 123: sendInputBytes("\u{01}", to: surface); return  // Cmd+← → ^A
+            case 124: sendInputBytes("\u{05}", to: surface); return  // Cmd+→ → ^E
+            case 51:  sendInputBytes("\u{15}", to: surface); return  // Cmd+⌫ → ^U
+            default:  break
+            }
+        }
+        if mods.contains(.option), !cmd, !mods.contains(.control), event.keyCode == 51 {
+            sendInputBytes("\u{17}", to: surface)                    // Option+⌫ → ^W
             return
         }
 
