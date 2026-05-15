@@ -118,4 +118,31 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertEqual(env["NVM_DIR"], "/Users/corey/.nvm")
         XCTAssertEqual(env["KOOKY_NODE_VERSION"], "v20.1.0")
     }
+
+    func testBackslashEscapeLeavesPlainPathUntouched() {
+        XCTAssertEqual(KookyShellIntegration.backslashEscape("/Users/corey/file.txt"), "/Users/corey/file.txt")
+    }
+
+    func testBackslashEscapeEscapesSpaceAndQuoteAndDollar() {
+        XCTAssertEqual(
+            KookyShellIntegration.backslashEscape("/Users/corey/My Folder/don't $cost"),
+            #"/Users/corey/My\ Folder/don\'t\ \$cost"#
+        )
+    }
+
+    func testBackslashEscapePassesThroughNonAscii() {
+        // Chinese / emoji filenames are common on macOS; shells accept raw
+        // UTF-8 so we don't escape them.
+        XCTAssertEqual(KookyShellIntegration.backslashEscape("/tmp/项目/🚀.md"), "/tmp/项目/🚀.md")
+    }
+
+    func testBackslashEscapeFallsBackToQuoteOnNewlineToAvoidLineContinuation() {
+        // POSIX: `\<newline>` is line continuation and gets dropped — so a
+        // legitimate macOS filename containing `\n` would be silently
+        // corrupted by the plain backslash-escape path. Codex P3 fix
+        // (v0.11.3): fall back to single-quote wrap, which preserves the
+        // literal newline.
+        let escaped = KookyShellIntegration.backslashEscape("/tmp/multi\nline/file.txt")
+        XCTAssertEqual(escaped, "'/tmp/multi\nline/file.txt'")
+    }
 }

@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.11.3 — 2026-05-16
+
+- Drag a file or folder from Finder onto any kooky terminal pane → its absolute path drops in at the cursor as backslash-escaped text (`/Users/corey/My\ Folder/file.txt`), same shape Finder→Terminal.app / ghostty.app use. Multiple files at once → space-separated. Works in any shell, agent, or TUI — kooky just types the path; what you do with it is up to whatever's on the other side.
+- Edge case handled: filenames containing a literal newline fall back to POSIX single-quote wrap (`'/tmp/foo<newline>bar.txt'`) so the shell doesn't eat the newline as line-continuation. Visible quotes are uglier than `\ ` but better than silently corrupting a legal macOS path.
+
 ## v0.11.2 — 2026-05-16
 
 - Click anywhere on your zsh prompt to jump the shell cursor there — same UX as ghostty.app. Drag is still selection; click without drag moves the cursor. Works in zsh; bash and TUIs (Claude Code / vim) follow each app's own cursor model.

@@ -320,6 +320,22 @@ final class GhosttySurfaceView: NSView {
         ScrollIndicator.install(scrollIndicator, in: self)
         updateTrackingAreas()
         wireScrollDrag()
+        // Accept Finder-style file drops — the user drags a file or folder
+        // onto the terminal pane and we inject its backslash-escaped
+        // absolute path (or paths, space-separated) as if it were pasted.
+        registerForDraggedTypes([.fileURL])
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        sender.draggingPasteboard.availableType(from: [.fileURL]) != nil ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+              !urls.isEmpty else { return false }
+        let escaped = urls.map { KookyShellIntegration.backslashEscape($0.path) }.joined(separator: " ")
+        paste(escaped)
+        return true
     }
 
     private func wireScrollDrag() {

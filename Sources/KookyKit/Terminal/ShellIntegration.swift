@@ -15,6 +15,38 @@ enum KookyShellIntegration {
         "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
+    /// Backslash-escape every POSIX shell metacharacter — matches the
+    /// `\ ` / `\'` style Finder uses when dragging a file onto Terminal.app
+    /// or ghostty.app. Picks this over `quote(_:)` for the drag-and-drop
+    /// path so the user sees the same untouched-looking path they'd see in
+    /// any other macOS terminal, rather than a surrounding pair of quotes.
+    /// Non-ASCII bytes (Chinese / emoji / accented chars) pass through
+    /// unescaped — every modern shell accepts them as raw UTF-8.
+    ///
+    /// Edge case: filenames with embedded newlines are legal on macOS but
+    /// POSIX shells eat `\<newline>` as line-continuation, dropping both
+    /// chars instead of preserving the literal newline. We fall back to
+    /// `quote(_:)` for those — visible quotes are uglier than `\ `, but
+    /// silent path corruption is worse.
+    static func backslashEscape(_ s: String) -> String {
+        if s.contains("\n") {
+            return quote(s)
+        }
+        var result = ""
+        result.reserveCapacity(s.count)
+        for char in s {
+            if shellMetacharacters.contains(char) { result.append("\\") }
+            result.append(char)
+        }
+        return result
+    }
+
+    private static let shellMetacharacters: Set<Character> = [
+        " ", "\t", "\n", "\\", "\"", "'", "`", "$",
+        "(", ")", "|", "&", ";", "<", ">", "*", "?",
+        "[", "]", "{", "}", "~", "!", "#",
+    ]
+
     static let zshPath = "/bin/zsh"
     static let bashPath = "/bin/bash"
     static let zdotdirKey = "ZDOTDIR"
