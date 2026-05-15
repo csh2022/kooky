@@ -2,6 +2,12 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.11.2 — 2026-05-16
+
+- Click anywhere on your zsh prompt to jump the shell cursor there — same UX as ghostty.app. Drag is still selection; click without drag moves the cursor. Works in zsh; bash and TUIs (Claude Code / vim) follow each app's own cursor model.
+- Under the hood: kooky's shell-integration wrapper now emits the OSC 133 prompt marker in the exact format libghostty expects (`A;cl=line` with BEL terminator). Previous releases emitted a slightly different form that libghostty silently ignored, leaving cursor-click-to-move and jump-to-prompt dormant on kooky's wrapped zsh.
+- Cursor-click-to-move is also force-enabled on the kooky side so users don't need to touch their ghostty config to get it.
+
 ## v0.11.1 — 2026-05-15
 
 - Right-click menu now matches the rest of kooky's brutalist style — same `KookyMenuList` / `KookyMenuRow` as the tab pill and sidebar menus, anchored at the click position. Each "Ask <agent>" row shows the agent's brand icon; the default agent gets a leading `▸`.

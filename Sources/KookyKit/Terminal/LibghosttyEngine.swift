@@ -35,10 +35,22 @@ final class LibghosttyApp {
         )
 
         let config = ghostty_config_new()
+        // Config precedence, last-write wins:
+        //   ghostty defaults → kooky baselines → ~/.kooky/settings.json
+        // So user's kooky settings beat both, and kooky baselines fill in
+        // features we want on by default (e.g. `cursor-click-to-move`)
+        // without forcing users to edit their ghostty config.
         ghostty_config_load_default_files(config)
-        // kooky's `~/.kooky/settings.json` rides on top of ghostty's defaults —
-        // last write wins, so user's kooky-side overrides beat the ghostty
-        // file. Ghostty config still acts as a fallback (font / theme / etc.).
+        // Click anywhere on the current zsh / bash prompt to jump the
+        // shell cursor there — requires the OSC 133 prompt marker our
+        // wrapper rc already emits with the `cl=line` metadata libghostty
+        // needs to recognise it.
+        let baseline = "cursor-click-to-move = true\n"
+        baseline.withCString { cstr in
+            "kooky-baseline".withCString { source in
+                ghostty_config_load_string(config, cstr, UInt(strlen(cstr)), source)
+            }
+        }
         KookySettings.apply(to: config)
         ghostty_config_finalize(config)
 

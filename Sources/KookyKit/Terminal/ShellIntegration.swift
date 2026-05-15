@@ -576,28 +576,34 @@ enum KookyShellIntegration {
         """
 
     /// FinalTerm / OSC 133 prompt+command boundary markers. libghostty parses
-    /// these and fires `GHOSTTY_ACTION_COMMAND_FINISHED` on `D`, which kooky
-    /// uses to surface per-tab last-command status (exit + duration) and to
-    /// power scroll-to-prompt jumps. Re-injects the `B` marker into PROMPT on
-    /// every redraw because Starship / p10k-style themes rebuild PROMPT each
-    /// `precmd` and would otherwise drop our suffix.
+    /// these and fires `GHOSTTY_ACTION_COMMAND_FINISHED` on `D` (per-tab
+    /// last-command status + duration, scroll-to-prompt jumps), and uses
+    /// `A;cl=line` to anchor `cursor-click-to-move` so option-/single-click
+    /// on a prompt jumps the shell cursor to that column. Re-injects the
+    /// `B` marker into PROMPT on every redraw because Starship / p10k-style
+    /// themes rebuild PROMPT each `precmd` and would otherwise drop our suffix.
     private static let osc133Block = #"""
         __kooky_133_first=1
         __kooky_133_precmd() {
             local last=$?
             if (( ! __kooky_133_first )); then
-                printf '\e]133;D;%s\e\\' "$last"
+                printf '\e]133;D;%s\a' "$last"
             fi
             __kooky_133_first=0
-            printf '\e]133;A\e\\'
-            [[ "$PROMPT" != *$'\e]133;B\e\\'* ]] && PROMPT="${PROMPT}"$'\e]133;B\e\\'
+            # `cl=line` is ghostty's required marker metadata — without it
+            # libghostty silently ignores the prompt sentinel and features
+            # that depend on it (`cursor-click-to-move`, jump-to-prompt)
+            # stay dormant. `\a` (BEL) terminator matches ghostty's own
+            # zsh shell-integration script exactly.
+            printf '\e]133;A;cl=line\a'
+            [[ "$PROMPT" != *$'\e]133;B\a'* ]] && PROMPT="${PROMPT}"$'\e]133;B\a'
             _kooky_env_status
             # Same masking concern as `_kooky_env_status` itself: the kooky
             # hooks must not leak `$?` into user prompts that downstream
             # precmd hooks may sample.
             return 0
         }
-        __kooky_133_preexec() { printf '\e]133;C\e\\' }
+        __kooky_133_preexec() { printf '\e]133;C\a' }
         add-zsh-hook precmd __kooky_133_precmd
         add-zsh-hook preexec __kooky_133_preexec
         """#
