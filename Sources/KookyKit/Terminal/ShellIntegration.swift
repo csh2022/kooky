@@ -43,6 +43,20 @@ enum KookyShellIntegration {
         hooksDirectory.appendingPathComponent("gemini-defaults.json").path
     }()
 
+    /// Path to the kooky-managed Copilot hooks file. Copilot CLI auto-loads
+    /// every `~/.copilot/hooks/*.json` and merges events across files, so a
+    /// dedicated `kooky.json` co-exists with anything the user has dropped
+    /// in there. Pure path computation — the directory is materialised
+    /// (and the file written) only when `~/.copilot/` already exists, so
+    /// non-Copilot users don't get an empty kooky-owned vendor dir in their
+    /// home. We don't honor `COPILOT_HOME` from the user's shell here —
+    /// kooky.app runs out-of-process, can't see interactive shell env — so
+    /// users who customise `COPILOT_HOME` would drop the file themselves.
+    static let copilotHooksPath: String = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".copilot/hooks/kooky.json").path
+    }()
+
     /// XDG plugin directory OpenCode auto-loads at startup. Honors
     /// `XDG_CONFIG_HOME` when set (the OpenCode launch is a child of the same
     /// shell, so a user-relocated config dir routes consistently between us
@@ -123,7 +137,23 @@ enum KookyShellIntegration {
         let hookCmd = kookyHookBinaryPath
         writeJSON(at: claudeHooksPath, object: claudeHooksObject(hookCmd: hookCmd))
         writeJSON(at: geminiDefaultsPath, object: geminiDefaultsObject(hookCmd: hookCmd))
+        installCopilotHooksIfPresent(hookCmd: hookCmd)
         writeManagedFile(at: opencodePluginPath, contents: opencodePluginScript)
+    }
+
+    /// Writes the Copilot hooks JSON only when the user already has a
+    /// `~/.copilot/` directory — i.e. they've at least run Copilot CLI once.
+    /// Skips otherwise so kooky doesn't pre-stage a vendor namespace for
+    /// users who may never install Copilot. Installing Copilot later then
+    /// requires one kooky restart to pick up the hooks (acceptable: the
+    /// bracket wrapper still gives running/ended on the first run).
+    private static func installCopilotHooksIfPresent(hookCmd: String) {
+        let copilotHome = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".copilot", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: copilotHome.path) else { return }
+        let hooksDir = copilotHome.appendingPathComponent("hooks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
+        writeManagedJSON(at: copilotHooksPath, object: copilotHooksObject(hookCmd: hookCmd))
     }
 
     /// Wired via `claude --settings <path>`. SessionStart promotes manually-typed
@@ -154,6 +184,32 @@ enum KookyShellIntegration {
         ])
     }
 
+    /// Copilot CLI's hooks schema diverges from Claude/Gemini's enough that
+    /// it doesn't fit `hooksObject`: top-level `version: 1`, camelCase event
+    /// names, no inner `{"hooks": [...]}` wrapper, and the command goes in
+    /// a `bash` field (not `command`). Event mapping mirrors Claude's
+    /// (sessionStart / userPromptSubmitted → running; agentStop / notification
+    /// → attention; sessionEnd → ended). The `_kookyManaged` sentinel is the
+    /// JSON-friendly equivalent of the text marker — `writeManagedJSON` reads
+    /// it back to decide whether the file is ours to overwrite.
+    static func copilotHooksObject(hookCmd: String) -> [String: Any] {
+        let events: [(String, HookEvent)] = [
+            ("sessionStart",        .running),
+            ("userPromptSubmitted", .running),
+            ("agentStop",           .attention),
+            ("notification",        .attention),
+            ("sessionEnd",          .ended),
+        ]
+        var hooks: [String: Any] = [:]
+        let quotedCmd = quote(hookCmd)
+        for (event, state) in events {
+            hooks[event] = [
+                ["type": "command", "bash": "\(quotedCmd) copilot \(state.rawValue)", "timeoutSec": 5]
+            ]
+        }
+        return ["version": 1, "_kookyManaged": managedFileMarker, "hooks": hooks]
+    }
+
     /// Builds a `claude --settings`-style hooks object for any agent that
     /// follows the `{"hooks": {<EventName>: [{"hooks": [{"type": "command",
     /// "command": "..."}]}]}}` shape (Claude Code, Gemini CLI). Routing
@@ -165,8 +221,12 @@ enum KookyShellIntegration {
         events: [String: HookEvent]
     ) -> [String: Any] {
         var hooks: [String: Any] = [:]
+        // Claude / Gemini run `command` through `/bin/sh -c`, so an unquoted
+        // `KookyHook` path breaks the moment the app lives under a path with
+        // spaces or shell metacharacters (e.g. `/Applications/Kooky 2.app/…`).
+        let quotedCmd = quote(hookCmd)
         for (event, state) in events {
-            hooks[event] = [["hooks": [["type": "command", "command": "\(hookCmd) \(slug) \(state.rawValue)"]]]]
+            hooks[event] = [["hooks": [["type": "command", "command": "\(quotedCmd) \(slug) \(state.rawValue)"]]]]
         }
         return ["hooks": hooks]
     }
@@ -194,6 +254,24 @@ enum KookyShellIntegration {
             return
         }
         try? contents.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// JSON variant of `writeManagedFile` — preserves a user-authored
+    /// `kooky.json` that happens to live at the same path by looking for the
+    /// `_kookyManaged` sentinel field. The Copilot hooks dir is user-owned
+    /// (`~/.copilot/hooks/`), so a same-named user file is plausible enough
+    /// to guard against. A corrupt-or-non-JSON file at the same path is
+    /// treated as ours to overwrite — same policy `writeManagedFile` uses
+    /// for non-UTF-8 / marker-less text. The alternative (silently skipping)
+    /// would leave the user without working hooks and no signal as to why.
+    private static func writeManagedJSON(at path: String, object: [String: Any]) {
+        let url = URL(fileURLWithPath: path)
+        if let data = try? Data(contentsOf: url),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           (parsed["_kookyManaged"] as? String) != managedFileMarker {
+            return
+        }
+        writeJSON(at: path, object: object)
     }
 
     private static func writeWrapper(name: String, script: String) {

@@ -25,7 +25,7 @@ struct AgentTemplate: Identifiable, Hashable {
     /// taken at `fromCustom` time. Nil for builtins. Lives on the template
     /// (not on Session) because the wrapper-end revert in `applyHookEvent`
     /// must use the value present when the session *started*, not whatever
-    /// the user has since changed in Settings → Coding Agents (a mid-run
+    /// the user has since changed in Settings → Agents (a mid-run
     /// edit/delete would otherwise leave the tab stuck in the custom-agent
     /// state forever).
     let baseAgentId: String?
@@ -149,7 +149,7 @@ extension AgentTemplate {
 
     static let copilot = AgentTemplate(
         id: "copilot",
-        title: "GitHub Copilot",
+        title: "Copilot CLI",
         symbol: "hexagon.fill",
         iconAsset: "githubcopilot",
         tintHex: "6E40C9",
@@ -161,7 +161,7 @@ extension AgentTemplate {
     static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot]
 
     /// All templates available right now — `builtin` plus the user's custom
-    /// agents from Settings → Coding Agents. MainActor-isolated because it
+    /// agents from Settings → Agents. MainActor-isolated because it
     /// reads `KookySettingsModel.shared` to materialise custom entries.
     @MainActor
     static var all: [AgentTemplate] {
@@ -200,7 +200,7 @@ extension AgentTemplate {
     /// is set. The `initialCommand != nil` gate skips half-configured custom
     /// agents (just-added or command-cleared) so the launch surface never
     /// offers a row that would spawn a plain Terminal but get recorded as
-    /// that custom agent. They still appear in Settings → Coding Agents so
+    /// that custom agent. They still appear in Settings → Agents so
     /// the user can finish editing them.
     @MainActor
     static func visibleOrdered(model: KookySettingsModel) -> [AgentTemplate] {

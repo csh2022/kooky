@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.10.7 — 2026-05-15
+
+- **Copilot tabs now show the mid-run "attention" dot.** GitHub Copilot CLI joins Claude Code as the second agent with full lifecycle tracking — sidebar dot turns yellow the moment Copilot finishes a turn and is waiting for your next prompt, then back to green when you submit again. Implemented via Copilot's native hook system (`sessionStart` / `userPromptSubmitted` / `agentStop` / `notification` / `sessionEnd`) which loads every `*.json` in `~/.copilot/hooks/`; we drop a single `kooky.json` there alongside whatever the user has. No merge needed (Copilot hooks are file-per-event, not key-per-event), so a user-authored `kooky.json` at the same path is left untouched — kooky's file carries a `_kookyManaged` sentinel that the write path checks first. The bracket wrapper stays in place as the backstop for the "Copilot not installed" / crash paths.
+
 ## v0.10.6 — 2026-05-15
 
 - **Custom agents can now "inherit" from a builtin.** Each custom agent's edit form gains a `based on` picker. Pick **Claude Code** and your custom (e.g. "Claude Opus") gets:

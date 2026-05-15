@@ -188,7 +188,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .terminal: return "Terminal"
-        case .codingAgents: return "Coding Agents"
+        case .codingAgents: return "Agents"
         case .advanced: return "Advanced"
         }
     }
