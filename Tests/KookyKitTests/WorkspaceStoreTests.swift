@@ -528,6 +528,14 @@ final class WorkspaceStoreTests: XCTestCase {
         let reopened = store.reopenLastClosedTab()
         XCTAssertEqual(reopened?.conversationId, "convo-reopen")
     }
+
+    func testAddTabPropagatesInitialPromptToSpawnedEngine() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let tab = store.addTab(in: ws, template: .claudeCode, initialPrompt: "explain this")
+        let cfg = engine(tab).startedConfigs.last
+        XCTAssertEqual(cfg?.environment["KOOKY_AGENT"], "claude 'explain this'")
+    }
 }
 
 private extension PersistedPaneNode {

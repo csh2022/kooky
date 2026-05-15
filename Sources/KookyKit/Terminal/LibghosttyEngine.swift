@@ -257,6 +257,15 @@ final class LibghosttyEngine: TerminalEngine {
     func sendInput(_ text: String) {
         surfaceView.sendInput(text)
     }
+
+    func readSelection() -> String? {
+        surfaceView.readSelection()
+    }
+
+    var contextMenuExtrasProvider: (() -> [ContextMenuExtra])? {
+        get { surfaceView.contextMenuExtrasProvider }
+        set { surfaceView.contextMenuExtrasProvider = newValue }
+    }
 }
 
 // MARK: - GhosttySurfaceView
@@ -264,6 +273,20 @@ final class LibghosttyEngine: TerminalEngine {
 /// AppKit host view that libghostty renders into directly. The view's pointer
 /// lives in `ghostty_surface_config_s.platform.macos.nsview`; libghostty owns
 /// the Metal layer and draws into it.
+/// Bridges a Swift closure to an Objective-C `@selector` so we can drop
+/// it onto an NSMenuItem.target without subclassing NSMenuItem itself.
+/// Lifetime owned by `GhosttySurfaceView.contextMenuTargets` — see the
+/// comment on that property for the weak-target hazard.
+@MainActor
+private final class MenuActionTarget: NSObject {
+    let action: () -> Void
+    init(action: @escaping () -> Void) {
+        self.action = action
+        super.init()
+    }
+    @objc func fire(_ sender: Any?) { action() }
+}
+
 @MainActor
 final class GhosttySurfaceView: NSView {
     private static let defaultBackingScale: CGFloat = 2.0
@@ -281,6 +304,15 @@ final class GhosttySurfaceView: NSView {
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int) -> Void)?
     var onSearchSelected: ((Int) -> Void)?
+    /// External provider for "Ask <agent>" rows prepended to the
+    /// right-click menu. WorkspaceStore wires this on session spawn so
+    /// the closure captures live workspace / store / session references.
+    var contextMenuExtrasProvider: (() -> [ContextMenuExtra])?
+    /// Holds strong refs to NSMenuItem.target objects for the current
+    /// build of the menu. NSMenuItem.target is weak — without keeping
+    /// these around past `popUpContextMenu`, the closure-bearing target
+    /// would deallocate before the user clicked.
+    private var contextMenuTargets: [NSObject] = []
     private(set) var surface: ghostty_surface_t? {
         didSet {
             if surface != nil { propagateSizeToSurface() }
@@ -757,6 +789,30 @@ final class GhosttySurfaceView: NSView {
         let menu = NSMenu()
         let hasSelection = surface.map { ghostty_surface_has_selection($0) } ?? false
 
+        // Ask <agent> rows go on top when there's a selection to feed them.
+        // Provider returns nothing → menu starts directly with Copy/Paste.
+        // Drop the previous build's targets here — NSMenu is modal so no
+        // outstanding menu can fire after another right-click rebuilds.
+        contextMenuTargets.removeAll()
+        if hasSelection, let provider = contextMenuExtrasProvider {
+            let extras = provider()
+            for extra in extras {
+                let target = MenuActionTarget(action: extra.action)
+                contextMenuTargets.append(target)
+                let title = extra.isDefault ? "▸ \(extra.title)" : extra.title
+                let item = NSMenuItem(
+                    title: title,
+                    action: #selector(MenuActionTarget.fire(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = target
+                menu.addItem(item)
+            }
+            if !extras.isEmpty {
+                menu.addItem(.separator())
+            }
+        }
+
         let copy = NSMenuItem(title: "Copy", action: #selector(performMenuCopy(_:)), keyEquivalent: "c")
         copy.target = self
         copy.isEnabled = hasSelection
@@ -784,18 +840,23 @@ final class GhosttySurfaceView: NSView {
         // Direct selection extraction — bypasses the libghostty binding +
         // write_clipboard_cb path so the menu item works regardless of which
         // keys are bound for copy in the active config.
-        guard let surface, ghostty_surface_has_selection(surface) else { return }
-        var text = ghostty_text_s()
-        guard ghostty_surface_read_selection(surface, &text) else { return }
-        // libghostty allocated the buffer; we must hand it back, otherwise every
-        // copy leaks the selection's bytes.
-        defer { ghostty_surface_free_text(surface, &text) }
-        guard let textPtr = text.text, text.text_len > 0 else { return }
-        let data = Data(bytes: textPtr, count: Int(text.text_len))
-        guard let str = String(data: data, encoding: .utf8), !str.isEmpty else { return }
+        guard let str = readSelection() else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(str, forType: .string)
+    }
+
+    func readSelection() -> String? {
+        guard let surface, ghostty_surface_has_selection(surface) else { return nil }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return nil }
+        // libghostty allocated the buffer; we must hand it back, otherwise every
+        // read leaks the selection's bytes.
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let textPtr = text.text, text.text_len > 0 else { return nil }
+        let data = Data(bytes: textPtr, count: Int(text.text_len))
+        guard let str = String(data: data, encoding: .utf8), !str.isEmpty else { return nil }
+        return str
     }
 
     @objc private func performMenuPaste(_ sender: Any?) {

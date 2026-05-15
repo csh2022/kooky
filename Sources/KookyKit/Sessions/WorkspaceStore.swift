@@ -206,13 +206,14 @@ final class WorkspaceStore {
         pane: Pane? = nil,
         template: AgentTemplate = .terminal,
         initialCwd: URL? = nil,
-        conversationId: String? = nil
+        conversationId: String? = nil,
+        initialPrompt: String? = nil
     ) -> Session {
         guard let target = pane ?? workspace.activePane ?? workspace.root.firstPane else {
             preconditionFailure("workspace has no panes")
         }
         let cwd = initialCwd ?? workspace.workingDirectory
-        let session = spawnSession(template: template, initialCwd: cwd, conversationId: conversationId)
+        let session = spawnSession(template: template, initialCwd: cwd, conversationId: conversationId, initialPrompt: initialPrompt)
         wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
         target.tabs.append(session)
         target.activeTabId = session.id
@@ -616,7 +617,7 @@ final class WorkspaceStore {
     /// Spawns the engine + Session. Caller wires `onPwdChange` / `onFocus`
     /// after a workspace ref is available — `restore` builds sessions before
     /// the workspace exists, so callbacks can't capture it here.
-    private func spawnSession(template: AgentTemplate, initialCwd: URL, sessionId: UUID = UUID(), conversationId: String? = nil) -> Session {
+    private func spawnSession(template: AgentTemplate, initialCwd: URL, sessionId: UUID = UUID(), conversationId: String? = nil, initialPrompt: String? = nil) -> Session {
         let engine = engineFactory()
         // Resume gated by user setting — `resumeConversations` flips this off
         // when the user wants every Claude tab to start fresh without
@@ -627,7 +628,8 @@ final class WorkspaceStore {
         let resumeId = resumeProvider() ? conversationId : nil
         var config = template.makeSessionConfig(
             extraOptions: optionsProvider(template.id),
-            resumeId: resumeId
+            resumeId: resumeId,
+            initialPrompt: initialPrompt
         )
         config.workingDirectory = initialCwd.path
         config.environment.merge(KookyShellIntegration.kookyEnvironment(for: sessionId)) { _, new in new }
@@ -701,6 +703,41 @@ final class WorkspaceStore {
         engine.onSearchSelected = { [weak session] selected in
             guard let session, session.searchSelected != selected else { return }
             session.searchSelected = selected
+        }
+        engine.contextMenuExtrasProvider = { [weak self, weak session, weak workspace] in
+            guard let self, let session, let workspace else { return [] }
+            guard let selection = session.engine.readSelection(), !selection.isEmpty else {
+                return []
+            }
+            let model = KookySettingsModel.shared
+            let defaultId = AgentTemplate.defaultLaunchTemplate(model: model)
+                .flatMap { $0.id == "terminal" ? nil : $0.id }
+            let visible = AgentTemplate.visibleOrdered(model: model).filter { $0.id != "terminal" }
+            // Default first (with the leading ▸ glyph), then everyone else
+            // in their visibleOrdered position. `visibleOrdered` already
+            // honours user reordering + hiding, so the second block reads
+            // in the same order the user sees in `+`.
+            var rows: [(template: AgentTemplate, isDefault: Bool)] = []
+            if let defaultId, let def = visible.first(where: { $0.id == defaultId }) {
+                rows.append((def, true))
+            }
+            for t in visible where t.id != defaultId {
+                rows.append((t, false))
+            }
+            return rows.map { row in
+                let template = row.template
+                return ContextMenuExtra(title: "Ask \(template.title)", isDefault: row.isDefault) { [weak self, weak workspace, weak session] in
+                    guard let self, let workspace, let session else { return }
+                    guard let live = session.engine.readSelection(), !live.isEmpty else { return }
+                    let tab = self.addTab(
+                        in: workspace,
+                        template: template,
+                        initialCwd: session.currentDirectory,
+                        initialPrompt: live
+                    )
+                    self.activateTab(tab, in: workspace)
+                }
+            }
         }
     }
 

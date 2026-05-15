@@ -24,6 +24,21 @@ struct TerminalSessionConfig {
     }
 }
 
+/// Item to prepend onto the terminal-pane right-click menu. The engine
+/// owns the menu (libghostty has no built-in menu, GhosttySurfaceView
+/// pops up an NSMenu in `rightMouseDown`); the kooky layer hands it the
+/// "Ask <agent>" rows through this struct so the AppKit menu code stays
+/// agnostic of WorkspaceStore / AgentTemplate.
+@MainActor
+struct ContextMenuExtra {
+    let title: String
+    /// Render with a leading `▸` glyph so the one-click default-agent
+    /// path reads as the obvious choice. (NSMenu doesn't let us bold
+    /// arbitrary items without a custom view, so the glyph is the affordance.)
+    let isDefault: Bool
+    let action: () -> Void
+}
+
 @MainActor
 protocol TerminalEngine: AnyObject {
     var view: NSView { get }
@@ -68,4 +83,15 @@ protocol TerminalEngine: AnyObject {
     func performAction(_ name: String) -> Bool
     /// Sends committed text into the PTY as if the user typed it.
     func sendInput(_ text: String)
+    /// Returns the current selection as a UTF-8 string, or nil if no
+    /// selection is active. Powers the right-click "Ask agent" path and
+    /// the menu-bar Copy item — same surface, two callers.
+    func readSelection() -> String?
+    /// Called by the engine at right-click time. Returning a non-empty
+    /// array prepends these as menu rows above the engine's own Copy /
+    /// Paste / Select All / Clear. Returning empty leaves the menu as
+    /// kooky-vanilla. The callback runs on each right-click so the row
+    /// list can be derived from live Settings → Agents state and the
+    /// current selection.
+    var contextMenuExtrasProvider: (() -> [ContextMenuExtra])? { get set }
 }

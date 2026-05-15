@@ -40,6 +40,13 @@ final class TestEngine: TerminalEngine {
         sentInputs.append(text)
     }
 
+    var nextSelection: String?
+    func readSelection() -> String? {
+        nextSelection
+    }
+
+    var contextMenuExtrasProvider: (() -> [ContextMenuExtra])?
+
     func emitPwd(_ path: String) {
         onPwdChange?(path)
     }

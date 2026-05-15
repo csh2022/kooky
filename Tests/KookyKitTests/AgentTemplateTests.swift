@@ -87,4 +87,76 @@ final class AgentTemplateTests: XCTestCase {
         let config = template.makeSessionConfig(resumeId: "xyz")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude --resume xyz")
     }
+
+    // MARK: - initialPrompt (Ask <agent> right-click path)
+
+    func testMakeSessionConfigPositionalPromptForClaude() {
+        let config = AgentTemplate.claudeCode.makeSessionConfig(initialPrompt: "fix this error")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'fix this error'")
+    }
+
+    func testMakeSessionConfigFlagPromptForCopilot() {
+        let config = AgentTemplate.copilot.makeSessionConfig(initialPrompt: "fix this error")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "copilot -p 'fix this error'")
+    }
+
+    func testMakeSessionConfigFlagPromptForAmp() {
+        let config = AgentTemplate.amp.makeSessionConfig(initialPrompt: "fix this error")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "amp -x 'fix this error'")
+    }
+
+    func testMakeSessionConfigPositionalPromptForCodexCursorGeminiOpencode() {
+        let pairs: [(AgentTemplate, String)] = [
+            (.codex, "codex"),
+            (.cursor, "cursor-agent"),
+            (.gemini, "gemini"),
+            (.opencode, "opencode"),
+        ]
+        for (template, bin) in pairs {
+            let config = template.makeSessionConfig(initialPrompt: "hello")
+            XCTAssertEqual(config.environment["KOOKY_AGENT"], "\(bin) 'hello'", "agent \(template.id)")
+        }
+    }
+
+    func testMakeSessionConfigQuotesSingleQuotesInPrompt() {
+        // POSIX wrap: `'` inside single quotes becomes `'\''`
+        let config = AgentTemplate.claudeCode.makeSessionConfig(initialPrompt: "don't fix it")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'don'\\''t fix it'")
+    }
+
+    func testMakeSessionConfigCombinesPromptAndExtras() {
+        let config = AgentTemplate.claudeCode.makeSessionConfig(extraOptions: "--model opus", initialPrompt: "review this")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'review this' --model opus")
+    }
+
+    func testInitialPromptSuppressesResume() {
+        // Ask <agent> is a fresh question — don't graft onto a stale
+        // conversation. Both supplied → prompt wins, resume dropped.
+        let config = AgentTemplate.claudeCode.makeSessionConfig(resumeId: "old-convo", initialPrompt: "new question")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude 'new question'")
+    }
+
+    func testEmptyInitialPromptIgnored() {
+        let blankConfig = AgentTemplate.claudeCode.makeSessionConfig(initialPrompt: "   ")
+        XCTAssertEqual(blankConfig.environment["KOOKY_AGENT"], "claude")
+        let resumeConfig = AgentTemplate.claudeCode.makeSessionConfig(resumeId: "abc", initialPrompt: "")
+        XCTAssertEqual(resumeConfig.environment["KOOKY_AGENT"], "claude --resume abc")
+    }
+
+    func testFromCustomInheritsPromptLaunchFlagFromCopilotBase() {
+        // Codex P2 (v0.10.9): a Copilot-based custom must inherit Copilot's
+        // `-p` flag — otherwise right-click Ask sends the prompt as a
+        // positional argv that Copilot ignores.
+        let custom = CustomAgentData(id: "copilot-beta", baseAgentId: "copilot")
+        let template = AgentTemplate.fromCustom(custom)
+        let config = template.makeSessionConfig(initialPrompt: "hello")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "copilot -p 'hello'")
+    }
+
+    func testFromCustomInheritsPromptLaunchFlagFromAmpBase() {
+        let custom = CustomAgentData(id: "amp-beta", baseAgentId: "amp")
+        let template = AgentTemplate.fromCustom(custom)
+        let config = template.makeSessionConfig(initialPrompt: "hello")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "amp -x 'hello'")
+    }
 }

@@ -2,6 +2,12 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.11.0 — 2026-05-15
+
+- Right-click selection → "Ask <agent>". Select an error / log line / file path in any terminal, right-click → native menu lists every agent in your `+` menu (Claude / Codex / Gemini / Cursor / Copilot / OpenCode / Amp). Pick one → a new tab spawns with the selection already submitted as the first prompt, agent starts answering immediately. Zero ⌘C / ⌘V.
+- Default agent (Settings → Agents → default) shows first with a `▸` glyph so the one-click path is obvious.
+- Right-click on whitespace / no selection does nothing — the menu only opens when there's text to ask about. The menu sits above the existing Copy / Paste / Select All / Clear actions, separated by a divider.
+
 ## v0.10.8 — 2026-05-15
 
 - Claude conversations now resume across kooky restarts. Quit kooky mid-conversation → next launch, the same tabs spawn with `claude --resume <id>` and pick up where they left off. Reopen Closed Tab (`⌘⇧T`) also restores the conversation.

@@ -29,6 +29,13 @@ struct AgentTemplate: Identifiable, Hashable {
     /// edit/delete would otherwise leave the tab stuck in the custom-agent
     /// state forever).
     let baseAgentId: String?
+    /// CLI flag the agent's binary expects when receiving a prompt argument.
+    /// Nil = positional (`claude "<prompt>"`, the most common shape). Agents
+    /// that need a flag set it on their builtin definition below — see the
+    /// Copilot / Amp wirings. Drives the right-click "Ask <agent>" launch
+    /// path via `makeSessionConfig(initialPrompt:)`. Templates with
+    /// `initialCommand == nil` (Terminal) ignore this entirely.
+    let promptLaunchFlag: String?
 
     init(
         id: String,
@@ -37,7 +44,8 @@ struct AgentTemplate: Identifiable, Hashable {
         iconAsset: String?,
         tintHex: String?,
         initialCommand: String?,
-        baseAgentId: String? = nil
+        baseAgentId: String? = nil,
+        promptLaunchFlag: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -46,6 +54,7 @@ struct AgentTemplate: Identifiable, Hashable {
         self.tintHex = tintHex
         self.initialCommand = initialCommand
         self.baseAgentId = baseAgentId
+        self.promptLaunchFlag = promptLaunchFlag
     }
 
     var tint: Color? {
@@ -62,7 +71,19 @@ struct AgentTemplate: Identifiable, Hashable {
     /// so the new tab continues an existing conversation. Other agents
     /// silently ignore it for v1 — their CLIs support `--resume <id>` too,
     /// but the id-capture path (Claude's hook payload) is Claude-only today.
-    func makeSessionConfig(extraOptions: String? = nil, resumeId: String? = nil) -> TerminalSessionConfig {
+    ///
+    /// `initialPrompt`, when non-empty, drives the right-click "Ask <agent>"
+    /// path: the prompt is POSIX-quoted and inserted into `KOOKY_AGENT` as
+    /// the first argv after the binary name (or after `promptLaunchFlag`
+    /// when that's set — Copilot's `-p`, Amp's `-x`). Mutually exclusive
+    /// with `resumeId` — asking a fresh question shouldn't graft onto a
+    /// stale conversation, so `initialPrompt` wins and `resumeId` is
+    /// silently dropped when both are supplied.
+    func makeSessionConfig(
+        extraOptions: String? = nil,
+        resumeId: String? = nil,
+        initialPrompt: String? = nil
+    ) -> TerminalSessionConfig {
         // Pick a shell that has a kooky integration wrapper. Plain terminal
         // sessions respect $SHELL where we have a wrapper (zsh/bash); other
         // shells (fish/nu/...) get $SHELL too, just without cwd tracking.
@@ -81,17 +102,28 @@ struct AgentTemplate: Identifiable, Hashable {
         }
         if let initialCommand {
             let trimmedExtras = extraOptions?.trimmingCharacters(in: .whitespaces) ?? ""
+            let trimmedPrompt = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             // Resume flag goes between binary name and options:
             //   `claude --resume <id> --model opus`
             // — Claude takes it as a positional argument to its top-level
             // command; appending after extras would still work but reads
-            // worse in `ps`.
+            // worse in `ps`. Suppressed when `initialPrompt` is present —
+            // "Ask <agent>" is a fresh question, not a continuation.
             var resumeFragment = ""
-            if supportsResume, let id = resumeId, !id.isEmpty {
+            if trimmedPrompt.isEmpty, supportsResume, let id = resumeId, !id.isEmpty {
                 resumeFragment = " --resume \(id)"
             }
+            var promptFragment = ""
+            if !trimmedPrompt.isEmpty {
+                let quoted = KookyShellIntegration.quote(trimmedPrompt)
+                if let flag = promptLaunchFlag {
+                    promptFragment = " \(flag) \(quoted)"
+                } else {
+                    promptFragment = " \(quoted)"
+                }
+            }
             let extrasFragment = trimmedExtras.isEmpty ? "" : " \(trimmedExtras)"
-            config.environment["KOOKY_AGENT"] = "\(initialCommand)\(resumeFragment)\(extrasFragment)"
+            config.environment["KOOKY_AGENT"] = "\(initialCommand)\(resumeFragment)\(promptFragment)\(extrasFragment)"
         }
         return config
     }
@@ -158,7 +190,8 @@ extension AgentTemplate {
         symbol: "bolt.fill",
         iconAsset: "amp",
         tintHex: "E8B168",
-        initialCommand: "amp"
+        initialCommand: "amp",
+        promptLaunchFlag: "-x"
     )
 
     static let cursor = AgentTemplate(
@@ -176,7 +209,8 @@ extension AgentTemplate {
         symbol: "hexagon.fill",
         iconAsset: "githubcopilot",
         tintHex: "6E40C9",
-        initialCommand: "copilot"
+        initialCommand: "copilot",
+        promptLaunchFlag: "-p"
     )
 
     /// The 8 templates shipped with kooky. User-defined custom agents are
@@ -254,6 +288,12 @@ extension AgentTemplate {
     /// skips half-configured customs.
     static func fromCustom(_ data: CustomAgentData) -> AgentTemplate {
         let base = builtin.first { $0.id == data.baseAgentId }
+        // `promptLaunchFlag` follows the base unconditionally — it's a
+        // property of the binary (Copilot needs `-p`, Amp needs `-x`),
+        // not something the user could meaningfully override per custom.
+        // Without inheritance, a "Copilot Beta" custom built on Copilot
+        // would lose the flag and right-click Ask would feed the prompt
+        // as a positional argv that Copilot ignores.
         return AgentTemplate(
             id: data.id,
             title: data.title.isEmpty ? data.id : data.title,
@@ -261,7 +301,8 @@ extension AgentTemplate {
             iconAsset: data.iconAsset.isEmpty ? base?.iconAsset : data.iconAsset,
             tintHex: data.tintHex.isEmpty ? base?.tintHex : data.tintHex,
             initialCommand: data.command.isEmpty ? base?.initialCommand : data.command,
-            baseAgentId: data.baseAgentId.isEmpty ? nil : data.baseAgentId
+            baseAgentId: data.baseAgentId.isEmpty ? nil : data.baseAgentId,
+            promptLaunchFlag: base?.promptLaunchFlag
         )
     }
 }
