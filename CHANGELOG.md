@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.11.4 — 2026-05-18
+
+- Fixed: Chinese / Japanese / Korean IME candidate window now appears right under the cursor where you'd expect, instead of flying out of kooky's window to the bottom-left of the screen. Pinyin, kana, hangul, anything — composes inline like every other macOS app.
+- Under the hood: kooky now wires libghostty's `ghostty_surface_preedit` for the in-progress composition string, so libghostty renders the preedit glyphs on-surface and clears them cleanly on commit / cancel. `firstRect(forCharacterRange:)` calls `ghostty_surface_ime_point` instead of the v0.4 sentinel that pushed the rect off-window. Verified no ghost residue in Codex / Claude Code TUIs.
+
 ## v0.11.3 — 2026-05-16
 
 - Drag a file or folder from Finder onto any kooky terminal pane → its absolute path drops in at the cursor as backslash-escaped text (`/Users/corey/My\ Folder/file.txt`), same shape Finder→Terminal.app / ghostty.app use. Multiple files at once → space-separated. Works in any shell, agent, or TUI — kooky just types the path; what you do with it is up to whatever's on the other side.
