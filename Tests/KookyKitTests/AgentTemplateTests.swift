@@ -71,14 +71,24 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude")
     }
 
-    func testMakeSessionConfigIgnoresResumeOnNonClaudeBuiltins() {
-        // Codex / Cursor / Gemini / OpenCode all support --resume syntactically
-        // but kooky doesn't have a reliable id-capture path for them yet, so
-        // we don't inject the flag — see AgentTemplate.supportsResume.
+    func testMakeSessionConfigIgnoresResumeOnUnsupportedBuiltins() {
+        // Codex / Cursor / Gemini / OpenCode / Copilot / Amp / Grok all
+        // support a resume flag syntactically but kooky doesn't have a
+        // reliable id-capture path for them yet, so we don't inject the
+        // flag — see AgentTemplate.supportsResume / resumeFlag.
         let codexConfig = AgentTemplate.codex.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(codexConfig.environment["KOOKY_AGENT"], "codex")
         let copilotConfig = AgentTemplate.copilot.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(copilotConfig.environment["KOOKY_AGENT"], "copilot")
+        let grokConfig = AgentTemplate.grok.makeSessionConfig(resumeId: "abc-123")
+        XCTAssertEqual(grokConfig.environment["KOOKY_AGENT"], "grok")
+    }
+
+    func testSupportsResumeMatchesResumeFlag() {
+        XCTAssertTrue(AgentTemplate.claudeCode.supportsResume)
+        XCTAssertFalse(AgentTemplate.codex.supportsResume)
+        XCTAssertFalse(AgentTemplate.copilot.supportsResume)
+        XCTAssertFalse(AgentTemplate.grok.supportsResume)
     }
 
     func testMakeSessionConfigInjectsResumeForClaudeBasedCustom() {
@@ -105,12 +115,13 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "amp -x 'fix this error'")
     }
 
-    func testMakeSessionConfigPositionalPromptForCodexCursorGeminiOpencode() {
+    func testMakeSessionConfigPositionalPromptForCodexCursorGeminiOpencodeGrok() {
         let pairs: [(AgentTemplate, String)] = [
             (.codex, "codex"),
             (.cursor, "cursor-agent"),
             (.gemini, "gemini"),
             (.opencode, "opencode"),
+            (.grok, "grok"),
         ]
         for (template, bin) in pairs {
             let config = template.makeSessionConfig(initialPrompt: "hello")

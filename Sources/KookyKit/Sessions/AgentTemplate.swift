@@ -36,6 +36,11 @@ struct AgentTemplate: Identifiable, Hashable {
     /// path via `makeSessionConfig(initialPrompt:)`. Templates with
     /// `initialCommand == nil` (Terminal) ignore this entirely.
     let promptLaunchFlag: String?
+    /// CLI flag the agent's binary expects to resume a prior conversation.
+    /// Nil = no resume support (kooky doesn't have an id-capture path for
+    /// this agent yet). Claude Code = `--resume`; Grok = `--session`. Drives
+    /// `makeSessionConfig(resumeId:)` and `supportsResume`.
+    let resumeFlag: String?
 
     init(
         id: String,
@@ -45,7 +50,8 @@ struct AgentTemplate: Identifiable, Hashable {
         tintHex: String?,
         initialCommand: String?,
         baseAgentId: String? = nil,
-        promptLaunchFlag: String? = nil
+        promptLaunchFlag: String? = nil,
+        resumeFlag: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -55,6 +61,7 @@ struct AgentTemplate: Identifiable, Hashable {
         self.initialCommand = initialCommand
         self.baseAgentId = baseAgentId
         self.promptLaunchFlag = promptLaunchFlag
+        self.resumeFlag = resumeFlag
     }
 
     var tint: Color? {
@@ -66,11 +73,12 @@ struct AgentTemplate: Identifiable, Hashable {
     /// whitespace, so the caller handles its own quoting for tokens that
     /// contain spaces.
     ///
-    /// `resumeId`, when present and the template is Claude Code (or a custom
-    /// based on Claude Code), prepends `--resume <id>` to the launch command
-    /// so the new tab continues an existing conversation. Other agents
-    /// silently ignore it for v1 — their CLIs support `--resume <id>` too,
-    /// but the id-capture path (Claude's hook payload) is Claude-only today.
+    /// `resumeId`, when present and the template declares a `resumeFlag`,
+    /// prepends `<resumeFlag> <id>` to the launch command so the new tab
+    /// continues an existing conversation. Other agents leave `resumeFlag`
+    /// nil — their CLIs accept resume flags syntactically, but the
+    /// id-capture path (a hook payload carrying the session id) is not
+    /// implemented for them yet.
     ///
     /// `initialPrompt`, when non-empty, drives the right-click "Ask <agent>"
     /// path: the prompt is POSIX-quoted and inserted into `KOOKY_AGENT` as
@@ -103,15 +111,15 @@ struct AgentTemplate: Identifiable, Hashable {
         if let initialCommand {
             let trimmedExtras = extraOptions?.trimmingCharacters(in: .whitespaces) ?? ""
             let trimmedPrompt = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            // Resume flag goes between binary name and options:
-            //   `claude --resume <id> --model opus`
-            // — Claude takes it as a positional argument to its top-level
-            // command; appending after extras would still work but reads
-            // worse in `ps`. Suppressed when `initialPrompt` is present —
-            // "Ask <agent>" is a fresh question, not a continuation.
+            // Resume flag goes between binary name and options
+            // (`claude --resume <id> --model opus`) — each CLI takes it as
+            // a positional argument to its top-level command; appending
+            // after extras would still work but reads worse in `ps`.
+            // Suppressed when `initialPrompt` is present — "Ask <agent>"
+            // is a fresh question, not a continuation.
             var resumeFragment = ""
-            if trimmedPrompt.isEmpty, supportsResume, let id = resumeId, !id.isEmpty {
-                resumeFragment = " --resume \(id)"
+            if trimmedPrompt.isEmpty, let flag = resumeFlag, let id = resumeId, !id.isEmpty {
+                resumeFragment = " \(flag) \(id)"
             }
             var promptFragment = ""
             if !trimmedPrompt.isEmpty {
@@ -133,13 +141,8 @@ struct AgentTemplate: Identifiable, Hashable {
         return config
     }
 
-    /// Only Claude Code (and customs based on it) supports the
-    /// `--resume <id>` injection path today: that's the only agent whose
-    /// hooks pipe `session_id` back to kooky so we can persist + reuse it.
-    /// Other agents' CLIs do accept `--resume <id>` syntactically, but we
-    /// don't have a reliable id-capture mechanism for them yet.
     var supportsResume: Bool {
-        id == "claude-code" || baseAgentId == "claude-code"
+        resumeFlag != nil
     }
 }
 
@@ -159,7 +162,8 @@ extension AgentTemplate {
         symbol: "sparkle",
         iconAsset: "claudecode",
         tintHex: "D97757",
-        initialCommand: "claude"
+        initialCommand: "claude",
+        resumeFlag: "--resume"
     )
 
     static let codex = AgentTemplate(
@@ -218,9 +222,18 @@ extension AgentTemplate {
         promptLaunchFlag: "-p"
     )
 
-    /// The 8 templates shipped with kooky. User-defined custom agents are
+    static let grok = AgentTemplate(
+        id: "grok",
+        title: "Grok Build",
+        symbol: "x.square.fill",
+        iconAsset: "grok",
+        tintHex: "E8E8E8",
+        initialCommand: "grok"
+    )
+
+    /// The 9 templates shipped with kooky. User-defined custom agents are
     /// merged on top via `all` at runtime.
-    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot]
+    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot, .grok]
 
     /// All templates available right now — `builtin` plus the user's custom
     /// agents from Settings → Agents. MainActor-isolated because it
@@ -293,12 +306,14 @@ extension AgentTemplate {
     /// skips half-configured customs.
     static func fromCustom(_ data: CustomAgentData) -> AgentTemplate {
         let base = builtin.first { $0.id == data.baseAgentId }
-        // `promptLaunchFlag` follows the base unconditionally — it's a
-        // property of the binary (Copilot needs `-p`, Amp needs `-x`),
-        // not something the user could meaningfully override per custom.
-        // Without inheritance, a "Copilot Beta" custom built on Copilot
-        // would lose the flag and right-click Ask would feed the prompt
-        // as a positional argv that Copilot ignores.
+        // `promptLaunchFlag` + `resumeFlag` follow the base unconditionally —
+        // they're properties of the binary (Copilot needs `-p`, Amp needs
+        // `-x`; Claude needs `--resume`, Grok needs `--session`), not
+        // something the user could meaningfully override per custom. Without
+        // inheritance, a "Copilot Beta" custom built on Copilot would lose
+        // the flag and right-click Ask would feed the prompt as a positional
+        // argv that Copilot ignores; a "Claude Opus" custom would lose
+        // conversation resume on relaunch.
         return AgentTemplate(
             id: data.id,
             title: data.title.isEmpty ? data.id : data.title,
@@ -307,7 +322,8 @@ extension AgentTemplate {
             tintHex: data.tintHex.isEmpty ? base?.tintHex : data.tintHex,
             initialCommand: data.command.isEmpty ? base?.initialCommand : data.command,
             baseAgentId: data.baseAgentId.isEmpty ? nil : data.baseAgentId,
-            promptLaunchFlag: base?.promptLaunchFlag
+            promptLaunchFlag: base?.promptLaunchFlag,
+            resumeFlag: base?.resumeFlag
         )
     }
 }

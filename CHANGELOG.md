@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.12.0 — 2026-05-19
+
+- Grok Build (xAI) joins the agent menu.
+
 ## v0.11.6 — 2026-05-18
 
 - Fixed: shell history and Tab completion now survive kooky restarts.

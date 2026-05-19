@@ -165,12 +165,17 @@ enum KookyShellIntegration {
         writeWrapper(name: "amp", script: bracketWrapperScript(slug: "amp"))
         writeWrapper(name: "cursor-agent", script: bracketWrapperScript(slug: "cursor-agent"))
         writeWrapper(name: "copilot", script: bracketWrapperScript(slug: "copilot"))
+        writeWrapper(name: "grok", script: bracketWrapperScript(slug: "grok"))
 
         let hookCmd = kookyHookBinaryPath
         writeJSON(at: claudeHooksPath, object: claudeHooksObject(hookCmd: hookCmd))
         writeJSON(at: geminiDefaultsPath, object: geminiDefaultsObject(hookCmd: hookCmd))
         installCopilotHooksIfPresent(hookCmd: hookCmd)
         writeManagedFile(at: opencodePluginPath, contents: opencodePluginScript)
+        // Grok CLI has no JSON hook file like Claude — its `~/.grok/hooks/`
+        // is a script directory driven by env vars (GROK_HOOK_EVENT /
+        // GROK_SESSION_ID), so the bracket wrapper handles running/ended
+        // and full lifecycle integration requires a different code path.
     }
 
     /// Writes the Copilot hooks JSON only when the user already has a
