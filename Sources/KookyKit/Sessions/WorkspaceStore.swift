@@ -59,6 +59,9 @@ final class WorkspaceStore {
     /// even when the source lives in a different pane.
     var draggingTabId: UUID?
     var sidebarMode: SidebarMode = .full
+    /// Fired when the last workspace closes. `KookyWindowController` wires
+    /// this to close its window — a window with zero workspaces is empty.
+    var onBecameEmpty: (() -> Void)?
 
     /// Mutate + schedule save. UI sites wrap in `withAnimation(Theme.chromeTransition)`.
     func setSidebarMode(_ mode: SidebarMode) {
@@ -115,7 +118,7 @@ final class WorkspaceStore {
     }
 
     init(
-        persistence: any Persistence = FilePersistence.shared,
+        persistence: any Persistence,
         engineFactory: @escaping @MainActor () -> any TerminalEngine = { LibghosttyEngine() },
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations }
@@ -167,6 +170,7 @@ final class WorkspaceStore {
             activeWorkspaceId = workspaces[nextIdx].id
         }
         scheduleSave()
+        if workspaces.isEmpty { onBecameEmpty?() }
     }
 
     func activateWorkspace(_ workspace: Workspace) {
@@ -548,6 +552,25 @@ final class WorkspaceStore {
         pendingSave?.cancel()
         pendingSave = nil
         persistence.save(snapshot())
+    }
+
+    /// Tears the store down when its window closes — releases every
+    /// session's libghostty surface + PTY (AppKit closing the `NSWindow`
+    /// does not, and Swift 6's nonisolated `deinit` can't reach the
+    /// `@MainActor` engine state) and stops background work. Does not
+    /// mutate `workspaces` or persist — the caller decides slot retention.
+    func terminate() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        for workspace in workspaces {
+            for pane in workspace.root.allPanes {
+                for tab in pane.tabs {
+                    tab.engine.terminate()
+                }
+            }
+        }
+        for watcher in gitWatchers.values { watcher.cancel() }
+        gitWatchers.removeAll()
     }
 
     // MARK: - Internals

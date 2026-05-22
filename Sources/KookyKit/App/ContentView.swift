@@ -19,9 +19,6 @@ struct ContentView: View {
         }
         .background(chromeBackground)
         .ignoresSafeArea(.all)
-        .onChange(of: store.workspaces.isEmpty) { _, isEmpty in
-            if isEmpty { NSApplication.shared.keyWindow?.close() }
-        }
     }
 
     /// Top 32pt strip. `window.isMovable = false` is set globally, so this

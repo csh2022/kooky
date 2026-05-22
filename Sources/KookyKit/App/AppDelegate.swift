@@ -16,16 +16,34 @@ private enum MenuTag {
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var window: NSWindow?
-    let store = WorkspaceStore()
-    private lazy var hookServer = HookServer { [weak store] message in
-        switch message {
-        case .agent(let agent, let event, let sessionId):
-            store?.applyHookEvent(agent: agent, event: event, sessionId: sessionId)
-        case .shellEnvironment(let env, let sessionId):
-            store?.applyShellEnvironment(env, sessionId: sessionId)
-        case .conversationId(let conversationId, let sessionId):
-            store?.applyConversationId(conversationId: conversationId, sessionId: sessionId)
+    private var windowControllers: [KookyWindowController] = []
+    private let appPersistence = AppPersistence()
+    /// Set in `applicationShouldTerminate` so `windowWillClose` (fired for
+    /// every window during ⌘Q) can tell "app quitting" from "user closed
+    /// one window" — the former keeps each window's persisted slot.
+    private var isTerminating = false
+    /// Walks the macOS window cascade so a `⌘⇧N` window doesn't land
+    /// exactly on top of the previous one.
+    private var cascadePoint = NSPoint.zero
+    /// The kooky window that was key most recently. `activeStore` routes
+    /// here (not an arbitrary array slot) when a Settings / Update panel is
+    /// the key window. Weak so a closed window doesn't pin its store.
+    private weak var lastKeyController: KookyWindowController?
+    /// Agent hook events carry a global surface-UUID. Broadcast to every
+    /// window's store — `applyHookEvent` & friends no-op when the session
+    /// isn't theirs, so exactly the owning window reacts.
+    private lazy var hookServer = HookServer { [weak self] message in
+        guard let self else { return }
+        for controller in self.windowControllers {
+            let store = controller.store
+            switch message {
+            case .agent(let agent, let event, let sessionId):
+                store.applyHookEvent(agent: agent, event: event, sessionId: sessionId)
+            case .shellEnvironment(let env, let sessionId):
+                store.applyShellEnvironment(env, sessionId: sessionId)
+            case .conversationId(let conversationId, let sessionId):
+                store.applyConversationId(conversationId: conversationId, sessionId: sessionId)
+            }
         }
     }
 
@@ -35,33 +53,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         KookyFonts.registerOnce()
         // First-launch onboarding (blocking NSAlert if a ghostty config exists)
-        // — must run before the window is created and before any libghostty
+        // — must run before any window is created and before any libghostty
         // surface is spawned, since `LibghosttyApp` reads `~/.kooky/settings.json`
         // at process init when the first surface is created.
         KookyOnboarding.runIfNeeded()
         KookyShellIntegration.installAgentHooks()
         KookyShellIntegration.refreshClaudeCustomSettings(customAgents: KookySettingsModel.shared.customAgents)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = KookyApp.name
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        // Tab strips sit under the transparent titlebar; let only our explicit
-        // sidebar handle move the window so tab DnD never races AppKit.
-        window.isMovable = false
-        window.isMovableByWindowBackground = false
-        // Force dark chrome regardless of system appearance — the terminal
-        // surface and our sidebar are always dark, and SwiftUI's .primary /
-        // .secondary need a dark context to resolve to readable colors.
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.contentView = NSHostingView(rootView: ContentView(store: store))
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        self.window = window
+
+        restoreWindows()
 
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -69,12 +68,93 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         hookServer.start()
     }
 
+    /// Rebuilds every window persisted in `state.json`, or opens one default
+    /// window on a fresh install.
+    private func restoreWindows() {
+        let ids = appPersistence.windowIds
+        if ids.isEmpty {
+            addWindow()
+        } else {
+            for id in ids { addWindow(windowId: id) }
+        }
+        // `addWindow` keys each as it's created, so the last restored window
+        // ends up frontmost — kooky doesn't persist which window was key.
+    }
+
+    /// Creates a window + its own `WorkspaceStore`. A fresh `windowId` (the
+    /// `⌘⇧N` default) gets an empty store, which opens one default
+    /// workspace; a restored id loads that window's persisted slice.
+    @discardableResult
+    private func addWindow(windowId: UUID = UUID()) -> KookyWindowController {
+        let store = WorkspaceStore(persistence: WindowPersistence(windowId: windowId, app: appPersistence))
+        let controller = KookyWindowController(windowId: windowId, store: store)
+        controller.onWillClose = { [weak self] in self?.handleWindowWillClose($0) }
+        controller.onDidBecomeKey = { [weak self] in self?.lastKeyController = $0 }
+        windowControllers.append(controller)
+        if let window = controller.window {
+            if windowControllers.count == 1 {
+                window.center()
+                cascadePoint = NSPoint(x: window.frame.minX, y: window.frame.maxY)
+            } else {
+                cascadePoint = window.cascadeTopLeft(from: cascadePoint)
+            }
+            window.makeKeyAndOrderFront(nil)
+        }
+        return controller
+    }
+
+    private func handleWindowWillClose(_ controller: KookyWindowController) {
+        // Keep the persisted slot (restore next launch) when this is the
+        // last window — closing it is effectively a quit, matching kooky's
+        // long-standing single-window behaviour — or when ⌘Q is closing
+        // every window. Closing one of several open windows discards just
+        // that one. `contains` is evaluated synchronously against the live
+        // array, so it's correct regardless of the deferred removal below
+        // and doesn't depend on `isTerminating` having been set yet.
+        let isLastWindow = !windowControllers.contains { $0 !== controller }
+        if isTerminating || isLastWindow {
+            controller.store.flushPersistence()
+        } else {
+            appPersistence.removeWindow(controller.windowId)
+        }
+        controller.store.terminate()
+        // Drop the controller next tick — releasing it (and its NSWindow)
+        // synchronously inside windowWillClose can crash AppKit mid-close.
+        DispatchQueue.main.async { [weak self] in
+            self?.windowControllers.removeAll { $0 === controller }
+        }
+    }
+
+    /// The `WorkspaceStore` of the key window — the target for menu actions.
+    /// When a non-kooky window (Settings / Update) is key, routes to the
+    /// most-recently-key kooky window; nil only when no kooky window exists.
+    private var activeStore: WorkspaceStore? {
+        if let key = NSApp.keyWindow,
+           let controller = windowControllers.first(where: { $0.window === key }) {
+            return controller.store
+        }
+        return (lastKeyController ?? windowControllers.first)?.store
+    }
+
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
 
+    public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Runs before AppKit closes the windows, so every `windowWillClose`
+        // that follows sees the flag and keeps its persisted slot.
+        isTerminating = true
+        return .terminateNow
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
-        store.flushPersistence()
+        // `windowWillClose` is not reliably delivered to every window during
+        // app termination, so flush each live window's store here — the 1s
+        // `scheduleSave` debounce would otherwise drop changes made in the
+        // final second before ⌘Q.
+        for controller in windowControllers {
+            controller.store.flushPersistence()
+        }
         hookServer.stop()
         KookyShellIntegration.cleanup()
     }
@@ -107,6 +187,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         mainMenu.addItem(submenu(buildMenu(title: "File", entries: [
             selfRow("New Tab", #selector(handleNewTab), "t"),
             selfRow("New Workspace", #selector(handleNewWorkspace), "n"),
+            selfRow("New Window", #selector(handleNewWindow), "n", modifiers: [.command, .shift]),
             .separator,
             selfRow("Close Tab", #selector(handleCloseTab), "w"),
             selfRow("Reopen Closed Tab", #selector(handleReopenClosedTab), "t", modifiers: [.command, .shift]),
@@ -258,8 +339,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     // MARK: - Menu actions
 
+    @objc private func handleNewWindow() {
+        addWindow()
+    }
+
     @objc private func handleNewTab() {
-        guard let workspace = store.active else { return }
+        guard let store = activeStore, let workspace = store.active else { return }
         // Keyboard convention: ⌘T is deterministic — open the user's default
         // agent if set, otherwise Terminal. The visual `+` button keeps the
         // "Ask each time" popover for mouse interaction.
@@ -268,35 +353,38 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     @objc private func handleNewWorkspace() {
-        store.addWorkspace()
+        activeStore?.addWorkspace()
     }
 
     @objc private func handleCloseTab() {
-        guard let workspace = store.active, let session = workspace.activeSession else { return }
+        guard let store = activeStore, let workspace = store.active,
+              let session = workspace.activeSession else { return }
         store.closeTab(session, in: workspace)
     }
 
     @objc private func handleReopenClosedTab() {
-        store.reopenLastClosedTab()
+        activeStore?.reopenLastClosedTab()
     }
 
     @objc private func handleNextTab() {
-        guard let workspace = store.active else { return }
+        guard let store = activeStore, let workspace = store.active else { return }
         store.cycleTab(in: workspace, direction: 1)
     }
 
     @objc private func handlePreviousTab() {
-        guard let workspace = store.active else { return }
+        guard let store = activeStore, let workspace = store.active else { return }
         store.cycleTab(in: workspace, direction: -1)
     }
 
     @objc private func handleSplitRight() {
-        guard let workspace = store.active, let pane = workspace.activePane else { return }
+        guard let store = activeStore, let workspace = store.active,
+              let pane = workspace.activePane else { return }
         store.splitPane(pane, orientation: .horizontal, in: workspace)
     }
 
     @objc private func handleSplitDown() {
-        guard let workspace = store.active, let pane = workspace.activePane else { return }
+        guard let store = activeStore, let workspace = store.active,
+              let pane = workspace.activePane else { return }
         store.splitPane(pane, orientation: .vertical, in: workspace)
     }
 
@@ -309,7 +397,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     private func cyclePaneFocus(forward: Bool) {
-        guard let workspace = store.active else { return }
+        guard let store = activeStore, let workspace = store.active else { return }
         let panes = workspace.root.allPanes
         guard panes.count > 1 else { return }
         let currentId = workspace.activePaneId ?? panes.first?.id
@@ -318,7 +406,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     @objc private func handleCloseWorkspace() {
-        guard let workspace = store.active else { return }
+        guard let store = activeStore, let workspace = store.active else { return }
         store.closeWorkspace(workspace)
     }
 
@@ -327,8 +415,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     public func menuNeedsUpdate(_ menu: NSMenu) {
         // Hidden NSMenuItems don't fire their keyEquivalents — pressing ⌘5
         // with 3 tabs is a no-op, matching what the menu shows.
-        let tabCount = store.active?.activePane?.tabs.count ?? 0
-        let workspaceCount = store.workspaces.count
+        let store = activeStore
+        let tabCount = store?.active?.activePane?.tabs.count ?? 0
+        let workspaceCount = store?.workspaces.count ?? 0
         for item in menu.items {
             if MenuTag.tabRange.contains(item.tag) {
                 item.isHidden = item.tag > tabCount
@@ -339,37 +428,38 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     @objc private func handleIncreaseFontSize() {
-        store.active?.activeSession?.engine.performAction("increase_font_size:1")
+        activeStore?.active?.activeSession?.engine.performAction("increase_font_size:1")
     }
 
     @objc private func handleDecreaseFontSize() {
-        store.active?.activeSession?.engine.performAction("decrease_font_size:1")
+        activeStore?.active?.activeSession?.engine.performAction("decrease_font_size:1")
     }
 
     @objc private func handleResetFontSize() {
-        store.active?.activeSession?.engine.performAction("reset_font_size")
+        activeStore?.active?.activeSession?.engine.performAction("reset_font_size")
     }
 
     @objc private func handleClearScrollback() {
-        store.active?.activeSession?.engine.performAction("clear_screen")
+        activeStore?.active?.activeSession?.engine.performAction("clear_screen")
     }
 
     @objc private func handleJumpToPreviousPrompt() {
-        store.active?.activeSession?.engine.performAction("jump_to_prompt:-1")
+        activeStore?.active?.activeSession?.engine.performAction("jump_to_prompt:-1")
     }
 
     @objc private func handleJumpToNextPrompt() {
-        store.active?.activeSession?.engine.performAction("jump_to_prompt:1")
+        activeStore?.active?.activeSession?.engine.performAction("jump_to_prompt:1")
     }
 
     @objc private func handleToggleSidebar() {
+        guard let store = activeStore else { return }
         withAnimation(Theme.chromeTransition) {
             store.setSidebarMode(store.sidebarMode.next)
         }
     }
 
     @objc private func handleFind() {
-        guard let session = store.active?.activeSession else { return }
+        guard let session = activeStore?.active?.activeSession else { return }
         // ⌘F is a toggle on the active tab. Search state is per-session, so
         // ⌘F in pane A doesn't affect pane B's open search bar — both can
         // be active simultaneously, each with their own needle / count.
@@ -381,11 +471,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     @objc private func handleFindNext() {
-        store.active?.activeSession?.engine.performAction("navigate_search:next")
+        activeStore?.active?.activeSession?.engine.performAction("navigate_search:next")
     }
 
     @objc private func handleFindPrevious() {
-        store.active?.activeSession?.engine.performAction("navigate_search:previous")
+        activeStore?.active?.activeSession?.engine.performAction("navigate_search:previous")
     }
 
     @objc private func handleAbout() {
@@ -479,7 +569,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     @objc private func handleOpenSettings() {
-        KookySettingsWindowController.show(store: store)
+        // Pass a live resolver, not a snapshot — the Settings window is a
+        // singleton that outlives any one window; a captured store would
+        // dangle once its window closed.
+        KookySettingsWindowController.show(storeProvider: { [weak self] in self?.activeStore })
     }
 
     @objc private func handleCenterWindow() {
@@ -490,7 +583,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleSwitchTab(_ sender: NSMenuItem) {
         let index = MenuTag.tabIndex(from: sender.tag)
-        guard let workspace = store.active,
+        guard let store = activeStore, let workspace = store.active,
               let pane = workspace.activePane,
               index >= 0, index < pane.tabs.count else { return }
         store.activateTab(pane.tabs[index], in: workspace)
@@ -498,7 +591,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleSwitchWorkspace(_ sender: NSMenuItem) {
         let index = MenuTag.workspaceIndex(from: sender.tag)
-        guard index >= 0, index < store.workspaces.count else { return }
+        guard let store = activeStore,
+              index >= 0, index < store.workspaces.count else { return }
         store.activateWorkspace(store.workspaces[index])
     }
 
@@ -507,7 +601,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// → failure → attention → idle. Used to preview the dot palette without
     /// running real agents / commands.
     @objc private func handleCycleActivity() {
-        guard let session = store.active?.activeSession else { return }
+        guard let session = activeStore?.active?.activeSession else { return }
         let isFailure = session.lastCommandExit.map { $0 != 0 } ?? false
         switch (session.activityState, isFailure) {
         case (.idle, false):

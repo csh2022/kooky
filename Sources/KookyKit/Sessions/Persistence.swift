@@ -10,6 +10,19 @@ struct PersistedState: Codable, Equatable {
     var sidebarMode: SidebarMode?
 }
 
+/// Root of the multi-window `state.json`. Each `PersistedWindow` is one
+/// kooky window's `WorkspaceStore`; array order is window restore order.
+struct PersistedApp: Codable, Equatable {
+    var windows: [PersistedWindow]
+}
+
+/// Window frame (size / position) is intentionally not persisted — kooky
+/// has never restored window geometry; restored windows just cascade.
+struct PersistedWindow: Codable, Equatable {
+    var id: UUID
+    var state: PersistedState
+}
+
 struct PersistedWorkspace: Codable, Equatable {
     var id: UUID
     var workingDirectoryPath: String
@@ -196,26 +209,84 @@ protocol Persistence {
     func save(_ state: PersistedState)
 }
 
+/// Owns the single `state.json` for the whole app. Holds every window's
+/// `PersistedState` in memory (ordered) and writes the file synchronously
+/// on each change. `WorkspaceStore`s never touch this directly — each gets
+/// a `WindowPersistence` scoped to its own `windowId`.
 @MainActor
-final class FilePersistence: Persistence {
-    static let shared = FilePersistence()
-
-    private let fileURL: URL = {
+final class AppPersistence {
+    /// The real `state.json`. Tests inject a temp path via `init(fileURL:)`.
+    static var defaultFileURL: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = support.appendingPathComponent("kooky", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("state.json")
-    }()
-
-    func load() -> PersistedState? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? JSONDecoder().decode(PersistedState.self, from: data)
     }
 
-    func save(_ state: PersistedState) {
+    private let fileURL: URL
+    private var windows: [PersistedWindow]
+
+    init(fileURL: URL = AppPersistence.defaultFileURL) {
+        self.fileURL = fileURL
+        windows = Self.loadFromDisk(from: fileURL)
+    }
+
+    /// Window ids in restore order — `AppDelegate` rebuilds one window each.
+    var windowIds: [UUID] { windows.map(\.id) }
+
+    func state(for id: UUID) -> PersistedState? {
+        windows.first { $0.id == id }?.state
+    }
+
+    /// Upserts a window's state — a new id appends (so a `⌘⇧N` window
+    /// restores last) — and writes the file. The write is synchronous:
+    /// `WorkspaceStore.scheduleSave` already debounces upstream, and a
+    /// closing window must reach disk before the process can exit.
+    func setWindow(_ id: UUID, state: PersistedState) {
+        if let idx = windows.firstIndex(where: { $0.id == id }) {
+            windows[idx].state = state
+        } else {
+            windows.append(PersistedWindow(id: id, state: state))
+        }
+        writeToDisk()
+    }
+
+    func removeWindow(_ id: UUID) {
+        windows.removeAll { $0.id == id }
+        writeToDisk()
+    }
+
+    private func writeToDisk() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(state) else { return }
+        guard let data = try? encoder.encode(PersistedApp(windows: windows)) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
+
+    /// Reads `state.json`, accepting both the current `{windows:[…]}` shape
+    /// and the legacy bare `PersistedState` (pre-multi-window) — a legacy
+    /// file migrates to one window. Returns `[]` for a missing / corrupt file.
+    static func loadFromDisk(from url: URL) -> [PersistedWindow] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let decoder = JSONDecoder()
+        if let app = try? decoder.decode(PersistedApp.self, from: data) {
+            return app.windows
+        }
+        if let legacy = try? decoder.decode(PersistedState.self, from: data) {
+            return [PersistedWindow(id: UUID(), state: legacy)]
+        }
+        return []
+    }
+}
+
+/// A `Persistence` scoped to one window's slice of the shared `state.json`.
+/// `WorkspaceStore` uses it like any `Persistence` and never knows it's one
+/// window among several.
+@MainActor
+struct WindowPersistence: Persistence {
+    let windowId: UUID
+    let app: AppPersistence
+
+    func load() -> PersistedState? { app.state(for: windowId) }
+    func save(_ state: PersistedState) { app.setWindow(windowId, state: state) }
 }

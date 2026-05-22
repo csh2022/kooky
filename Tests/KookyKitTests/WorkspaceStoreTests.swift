@@ -605,6 +605,33 @@ final class WorkspaceStoreTests: XCTestCase {
         let cfg = engine(tab).startedConfigs.last
         XCTAssertEqual(cfg?.environment["KOOKY_AGENT"], "claude -- 'explain this'")
     }
+
+    // MARK: - Multi-window teardown
+
+    func testTerminateReleasesEverySessionEngine() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        store.addTab(in: ws, template: .terminal)
+        store.splitPane(firstPane(ws), orientation: .horizontal, in: ws)
+        let engines = store.workspaces
+            .flatMap { $0.root.allPanes.flatMap(\.tabs) }
+            .map { engine($0) }
+        XCTAssertTrue(engines.allSatisfy { $0.terminateCount == 0 })
+        store.terminate()
+        XCTAssertTrue(engines.allSatisfy { $0.terminateCount == 1 },
+                      "terminate() must release every session's engine")
+    }
+
+    func testOnBecameEmptyFiresWhenLastWorkspaceCloses() {
+        let store = makeStore()   // starts with one workspace
+        var fired = 0
+        store.onBecameEmpty = { fired += 1 }
+        let extra = store.addWorkspace(workingDirectory: projectA)
+        store.closeWorkspace(extra)
+        XCTAssertEqual(fired, 0, "one workspace still open — store is not empty")
+        store.closeWorkspace(store.workspaces[0])
+        XCTAssertEqual(fired, 1, "closing the last workspace empties the store")
+    }
 }
 
 private extension PersistedPaneNode {

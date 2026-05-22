@@ -824,14 +824,15 @@ private struct AgentRow: View {
 }
 
 /// Singleton NSWindowController so reopening Settings reuses the same window
-/// (preserves position, doesn't stack). `show(store:)` is the only entry
-/// point; the store reference powers the "Open in New Tab" action that
-/// spawns an editor session for `settings.json` inside kooky itself.
+/// (preserves position, doesn't stack). `show(storeProvider:)` is the only
+/// entry point; the provider resolves the *current* active window's store
+/// each time "Open in New Tab" runs — a captured store would dangle once
+/// its window closed.
 @MainActor
 final class KookySettingsWindowController: NSWindowController {
     static let shared = KookySettingsWindowController()
     private let model = KookySettingsModel.shared
-    private weak var store: WorkspaceStore?
+    private var storeProvider: (() -> WorkspaceStore?)?
     private var host: NSHostingController<KookySettingsView>?
 
     private init() {
@@ -840,9 +841,9 @@ final class KookySettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    static func show(store: WorkspaceStore) {
+    static func show(storeProvider: @escaping () -> WorkspaceStore?) {
         let controller = shared
-        controller.store = store
+        controller.storeProvider = storeProvider
         controller.buildWindowIfNeeded()
         controller.model.load()
         if controller.window?.isVisible != true {
@@ -878,7 +879,7 @@ final class KookySettingsWindowController: NSWindowController {
         if !FileManager.default.fileExists(atPath: KookySettings.url.path) {
             KookySettings.writeDefaultTemplate()
         }
-        guard let store, let workspace = store.active else {
+        guard let store = storeProvider?(), let workspace = store.active else {
             NSWorkspace.shared.open(KookySettings.url)
             return
         }
