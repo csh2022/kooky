@@ -86,7 +86,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// workspace; a restored id loads that window's persisted slice.
     @discardableResult
     private func addWindow(windowId: UUID = UUID()) -> KookyWindowController {
-        let store = WorkspaceStore(persistence: WindowPersistence(windowId: windowId, app: appPersistence))
+        let store = WorkspaceStore(
+            persistence: WindowPersistence(windowId: windowId, app: appPersistence),
+            peerStores: { [weak self] in self?.windowControllers.map(\.store) ?? [] }
+        )
         let controller = KookyWindowController(windowId: windowId, store: store)
         controller.onWillClose = { [weak self] in self?.handleWindowWillClose($0) }
         controller.onDidBecomeKey = { [weak self] in self?.lastKeyController = $0 }

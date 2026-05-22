@@ -24,6 +24,25 @@ final class WorkspaceStoreTests: XCTestCase {
         )
     }
 
+    /// Two independent stores wired as each other's peers — models two kooky
+    /// windows for cross-window tab-drag tests.
+    private func makeWindowPair() -> (WorkspaceStore, WorkspaceStore) {
+        // `peers` reads `stores` lazily — both inits run (neither invokes
+        // `peerStores`) before the array is backfilled on the line below.
+        var stores: [WorkspaceStore] = []
+        let peers: @MainActor () -> [WorkspaceStore] = { stores }
+        let a = WorkspaceStore(
+            persistence: InMemoryPersistence(), engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil }, resumeProvider: { true }, peerStores: peers
+        )
+        let b = WorkspaceStore(
+            persistence: InMemoryPersistence(), engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil }, resumeProvider: { true }, peerStores: peers
+        )
+        stores = [a, b]
+        return (a, b)
+    }
+
     private func engine(_ session: Session) -> TestEngine {
         guard let e = session.engine as? TestEngine else { preconditionFailure("expected TestEngine") }
         return e
@@ -631,6 +650,72 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(fired, 0, "one workspace still open — store is not empty")
         store.closeWorkspace(store.workspaces[0])
         XCTAssertEqual(fired, 1, "closing the last workspace empties the store")
+    }
+
+    // MARK: - Cross-window tab drag
+
+    func testHandleTabDropMovesTabBetweenPanesInSameWindow() {
+        // The same-window path through `handleTabDrop` still works after the
+        // cross-window branch was added.
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let source = firstPane(ws)
+        let session = source.tabs[0]
+        let dest = store.splitPane(source, orientation: .horizontal, in: ws)!
+        let ok = store.handleTabDrop(droppedId: session.id, to: dest, at: dest.tabs.count, in: ws)
+        XCTAssertTrue(ok)
+        XCTAssertTrue(dest.tabs.contains { $0 === session })
+    }
+
+    func testCrossWindowDropMovesSessionToOtherWindow() {
+        let (a, b) = makeWindowPair()
+        let wsA = a.workspaces[0]
+        let moved = a.addTab(in: wsA, template: .claudeCode)
+        let wsB = b.workspaces[0]
+        let destPane = firstPane(wsB)
+
+        let ok = b.handleTabDrop(droppedId: moved.id, to: destPane, at: destPane.tabs.count, in: wsB)
+
+        XCTAssertTrue(ok)
+        XCTAssertTrue(destPane.tabs.contains { $0 === moved }, "session now lives in window B")
+        XCTAssertFalse(firstPane(wsA).tabs.contains { $0 === moved }, "session left window A")
+        XCTAssertEqual(firstPane(wsA).tabs.count, 1, "window A keeps its remaining tab")
+        XCTAssertEqual(engine(moved).terminateCount, 0, "the move must not terminate the engine")
+    }
+
+    func testCrossWindowDropRewiresEngineCallbacksToDestination() {
+        let (a, b) = makeWindowPair()
+        let wsA = a.workspaces[0]
+        let moved = a.addTab(in: wsA, template: .terminal)
+        let wsB = b.workspaces[0]
+        b.handleTabDrop(droppedId: moved.id, to: firstPane(wsB), at: 0, in: wsB)
+
+        // The engine's callbacks must now drive window B, not the window the
+        // tab was dragged out of.
+        engine(moved).emitPwd("/tmp/projectC")
+        XCTAssertEqual(wsB.workingDirectory.path, "/tmp/projectC", "pwd change reaches window B")
+        XCTAssertNotEqual(wsA.workingDirectory.path, "/tmp/projectC", "window A is untouched")
+    }
+
+    func testCrossWindowDropOfLastTabEmptiesSourceWindow() {
+        let (a, b) = makeWindowPair()
+        var aBecameEmpty = 0
+        a.onBecameEmpty = { aBecameEmpty += 1 }
+        let onlyTab = firstPane(a.workspaces[0]).tabs[0]
+        let wsB = b.workspaces[0]
+
+        b.handleTabDrop(droppedId: onlyTab.id, to: firstPane(wsB), at: firstPane(wsB).tabs.count, in: wsB)
+
+        XCTAssertTrue(a.workspaces.isEmpty, "window A's last tab left — its workspace collapsed away")
+        XCTAssertEqual(aBecameEmpty, 1, "store A signalled empty so its window can close")
+        XCTAssertTrue(firstPane(wsB).tabs.contains { $0 === onlyTab })
+        XCTAssertEqual(engine(onlyTab).terminateCount, 0, "engine survives the source window emptying")
+    }
+
+    func testHandleTabDropReturnsFalseWhenSessionExistsNowhere() {
+        let (_, b) = makeWindowPair()
+        let wsB = b.workspaces[0]
+        XCTAssertFalse(b.handleTabDrop(droppedId: UUID(), to: firstPane(wsB), at: 0, in: wsB))
     }
 }
 

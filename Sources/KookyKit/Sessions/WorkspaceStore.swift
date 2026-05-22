@@ -80,6 +80,11 @@ final class WorkspaceStore {
     /// tests inject a static value (typically `true`) for the same reason
     /// as `optionsProvider`.
     private let resumeProvider: @MainActor () -> Bool
+    /// Every live window's store (including this one) — injected by
+    /// `AppDelegate` so a tab dropped here from another window can be located
+    /// in the store it came from. Tests default to `{ [] }`, keeping each
+    /// store window-isolated.
+    private let peerStores: @MainActor () -> [WorkspaceStore]
     private let persistence: any Persistence
     private let gitStatusFetcher = GitStatusFetcher()
     /// One watcher per session — refreshes git status when `.git/HEAD` or
@@ -121,12 +126,14 @@ final class WorkspaceStore {
         persistence: any Persistence,
         engineFactory: @escaping @MainActor () -> any TerminalEngine = { LibghosttyEngine() },
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
-        resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations }
+        resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
+        peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] }
     ) {
         self.persistence = persistence
         self.engineFactory = engineFactory
         self.optionsProvider = optionsProvider
         self.resumeProvider = resumeProvider
+        self.peerStores = peerStores
         if let saved = persistence.load(), !saved.workspaces.isEmpty {
             restore(from: saved)
         } else {
@@ -267,43 +274,97 @@ final class WorkspaceStore {
         guard let sourcePane = workspace.root.pane(containingSessionId: session.id) else { return }
         if sourcePane.id == destPane.id { return }
         guard let sourceIndex = sourcePane.tabs.firstIndex(where: { $0.id == session.id }) else { return }
-        sourcePane.tabs.remove(at: sourceIndex)
-        if sourcePane.activeTabId == session.id {
-            sourcePane.activeTabId = sourcePane.tabs.first?.id
+        detachSession(session, from: sourcePane, at: sourceIndex, in: workspace)
+        attachSession(session, to: destPane, at: destIndex, in: workspace)
+    }
+
+    /// Removes `session` from `pane`. An emptied pane collapses — cascading
+    /// to closing the workspace, and the window, when it was the last one;
+    /// otherwise the active-tab crown passes to the neighbour and the
+    /// workspace cwd re-syncs. Structural only: the engine keeps running, so
+    /// this serves both `closeTab` (which terminates first) and a tab move
+    /// (which re-homes the live session elsewhere).
+    private func detachSession(_ session: Session, from pane: Pane, at idx: Int, in workspace: Workspace) {
+        pane.tabs.remove(at: idx)
+        if pane.tabs.isEmpty {
+            closePane(pane, in: workspace)
+            return
         }
-        let insertIndex = min(max(destIndex, 0), destPane.tabs.count)
-        destPane.tabs.insert(session, at: insertIndex)
-        destPane.activeTabId = session.id
-        workspace.activePaneId = destPane.id
-        // Cross-pane move promotes the dragged session to active; mirror what
-        // `activateTab` does so the sidebar title + next-spawned tab cwd
-        // follow the new focus instead of waiting for the next OSC 7.
-        if workspace.workingDirectory != session.currentDirectory {
-            workspace.workingDirectory = session.currentDirectory
-        }
-        if sourcePane.tabs.isEmpty {
-            closePane(sourcePane, in: workspace)
+        if pane.activeTabId == session.id {
+            let next = pane.tabs[min(idx, pane.tabs.count - 1)]
+            pane.activeTabId = next.id
+            if workspace.activePane?.id == pane.id, workspace.workingDirectory != next.currentDirectory {
+                workspace.workingDirectory = next.currentDirectory
+            }
         }
         scheduleSave()
     }
 
-    /// One-shot drop handler for tab reorder gestures. Dispatches to the
-    /// same-pane index-to-index reorder when source == dest, or the cross-pane
-    /// session move otherwise. `destIndex` is the target item's current index
-    /// in `destPane.tabs` (or `destPane.tabs.count` for "drop at end").
+    /// Inserts an existing `session` into `destPane` at `destIndex` and
+    /// promotes it to the active tab + active pane.
+    private func attachSession(_ session: Session, to destPane: Pane, at destIndex: Int, in workspace: Workspace) {
+        let insertIndex = min(max(destIndex, 0), destPane.tabs.count)
+        destPane.tabs.insert(session, at: insertIndex)
+        destPane.activeTabId = session.id
+        workspace.activePaneId = destPane.id
+        // Promoting to active mirrors `activateTab` so the sidebar title and
+        // the next tab's spawn cwd follow the new focus without waiting for
+        // the next OSC 7.
+        if workspace.workingDirectory != session.currentDirectory {
+            workspace.workingDirectory = session.currentDirectory
+        }
+        scheduleSave()
+    }
+
+    /// One-shot drop handler for tab reorder gestures. Dispatches three ways:
+    /// a same-pane index reorder when source == dest, a cross-pane session
+    /// move within this window, or — when the session isn't in this window at
+    /// all — a cross-window adoption from whichever peer store owns it.
+    /// `destIndex` is the target item's current index in `destPane.tabs` (or
+    /// `destPane.tabs.count` for "drop at end").
     @discardableResult
     func handleTabDrop(droppedId: UUID, to destPane: Pane, at destIndex: Int, in workspace: Workspace) -> Bool {
-        guard let sourcePane = workspace.root.pane(containingSessionId: droppedId),
-              let session = sourcePane.tabs.first(where: { $0.id == droppedId }) else { return false }
-        if sourcePane.id == destPane.id {
-            guard let from = sourcePane.tabs.firstIndex(where: { $0.id == droppedId }) else { return false }
-            let to = min(max(destIndex, 0), sourcePane.tabs.count - 1)
-            guard from != to else { return false }
-            moveTab(from: from, to: to, in: sourcePane)
-        } else {
-            moveTab(session, to: destPane, at: destIndex, in: workspace)
+        if let sourcePane = workspace.root.pane(containingSessionId: droppedId),
+           let session = sourcePane.tabs.first(where: { $0.id == droppedId }) {
+            if sourcePane.id == destPane.id {
+                guard let from = sourcePane.tabs.firstIndex(where: { $0.id == droppedId }) else { return false }
+                let to = min(max(destIndex, 0), sourcePane.tabs.count - 1)
+                guard from != to else { return false }
+                moveTab(from: from, to: to, in: sourcePane)
+            } else {
+                moveTab(session, to: destPane, at: destIndex, in: workspace)
+            }
+            return true
         }
-        return true
+        // The drag started in another window: take the session from the peer
+        // store that owns it, slot it in here, and re-point its engine
+        // callbacks at this store so focus / title / activity events follow.
+        for source in peerStores() where source !== self {
+            if let session = source.surrenderSession(id: droppedId) {
+                attachSession(session, to: destPane, at: destIndex, in: workspace)
+                wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Removes the session with `id` from this store and returns it for a
+    /// peer store (another window) to adopt — its engine, libghostty surface,
+    /// scrollback, PTY and agent state all stay alive. Returns nil when this
+    /// store doesn't own the id. `internal`, not `private`: `handleTabDrop`
+    /// calls it on each peer store.
+    func surrenderSession(id: UUID) -> Session? {
+        guard let (workspace, pane) = location(ofSessionId: id),
+              let idx = pane.tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        let session = pane.tabs[idx]
+        // The drag started in this window, so `onDrag` set our `draggingTabId`
+        // — and the destination store's `dropDestination` defer clears only
+        // its own. Clear ours so this window's drop indicators reset.
+        draggingTabId = nil
+        gitWatchers.removeValue(forKey: id)?.cancel()
+        detachSession(session, from: pane, at: idx, in: workspace)
+        return session
     }
 
     func closeOtherTabs(keeping session: Session, in workspace: Workspace) {
@@ -326,19 +387,7 @@ final class WorkspaceStore {
         recordClosedTab(session, pane: pane, workspace: workspace)
         gitWatchers.removeValue(forKey: session.id)?.cancel()
         session.engine.terminate()
-        pane.tabs.remove(at: idx)
-        if pane.tabs.isEmpty {
-            closePane(pane, in: workspace)
-            return
-        }
-        if pane.activeTabId == session.id {
-            let next = pane.tabs[min(idx, pane.tabs.count - 1)]
-            pane.activeTabId = next.id
-            if workspace.activePane?.id == pane.id, workspace.workingDirectory != next.currentDirectory {
-                workspace.workingDirectory = next.currentDirectory
-            }
-        }
-        scheduleSave()
+        detachSession(session, from: pane, at: idx, in: workspace)
     }
 
     private func recordClosedTab(_ session: Session, pane: Pane, workspace: Workspace) {
@@ -539,13 +588,19 @@ final class WorkspaceStore {
         scheduleSave()
     }
 
-    private func findSession(id: UUID) -> Session? {
-        for ws in workspaces {
-            if let pane = ws.root.pane(containingSessionId: id) {
-                return pane.tabs.first { $0.id == id }
+    /// The workspace + pane holding the session with `id`, or nil. One DFS
+    /// per workspace, stopping at the first hit.
+    private func location(ofSessionId id: UUID) -> (workspace: Workspace, pane: Pane)? {
+        for workspace in workspaces {
+            if let pane = workspace.root.pane(containingSessionId: id) {
+                return (workspace, pane)
             }
         }
         return nil
+    }
+
+    private func findSession(id: UUID) -> Session? {
+        location(ofSessionId: id)?.pane.tabs.first { $0.id == id }
     }
 
     func flushPersistence() {
