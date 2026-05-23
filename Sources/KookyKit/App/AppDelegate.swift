@@ -149,16 +149,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
     }
 
+    /// The kooky window that should host a menu action — the key window
+    /// when it's one of ours, otherwise the most-recently-key kooky window.
+    /// Nil only when no kooky window exists.
+    private var activeController: KookyWindowController? {
+        if let key = NSApp.keyWindow,
+           let controller = windowControllers.first(where: { $0.window === key }) {
+            return controller
+        }
+        return lastKeyController ?? windowControllers.first
+    }
+
     /// The `WorkspaceStore` of the key window — the target for menu actions.
     /// When a non-kooky window (Settings / Update) is key, routes to the
     /// most-recently-key kooky window; nil only when no kooky window exists.
-    private var activeStore: WorkspaceStore? {
-        if let key = NSApp.keyWindow,
-           let controller = windowControllers.first(where: { $0.window === key }) {
-            return controller.store
-        }
-        return (lastKeyController ?? windowControllers.first)?.store
-    }
+    private var activeStore: WorkspaceStore? { activeController?.store }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
@@ -212,6 +217,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             selfRow("New Tab", #selector(handleNewTab), "t"),
             selfRow("New Workspace", #selector(handleNewWorkspace), "n"),
             selfRow("New Window", #selector(handleNewWindow), "n", modifiers: [.command, .shift]),
+            .separator,
+            selfRow("Open Folder…", #selector(handleOpenFolder), "o"),
             .separator,
             selfRow("Close Tab", #selector(handleCloseTab), "w"),
             selfRow("Reopen Closed Tab", #selector(handleReopenClosedTab), "t", modifiers: [.command, .shift]),
@@ -378,6 +385,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleNewWorkspace() {
         activeStore?.addWorkspace()
+    }
+
+    @objc private func handleOpenFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.title = "Open Folder"
+        panel.message = "Choose a folder to open as a workspace."
+
+        let controller = activeController
+        let store = controller?.store
+        // Start the picker at the active workspace's cwd — the user is
+        // usually picking something nearby (sibling project, parent dir).
+        panel.directoryURL = store?.active?.workingDirectory
+
+        let openPicked: () -> Void = {
+            for url in panel.urls { store?.addWorkspace(workingDirectory: url) }
+        }
+        if let window = controller?.window {
+            panel.beginSheetModal(for: window) { response in
+                if response == .OK { openPicked() }
+            }
+        } else if panel.runModal() == .OK {
+            openPicked()
+        }
     }
 
     @objc private func handleCloseTab() {

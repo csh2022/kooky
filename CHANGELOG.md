@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.14.4 — 2026-05-24
+
+- File → Open Folder… (⌘O) opens any folder as a new workspace.
+
 ## v0.14.3 — 2026-05-23
 
 - Drag a folder from Finder onto the sidebar to open it as a new workspace.
