@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.14.3 — 2026-05-23
+
+- Drag a folder from Finder onto the sidebar to open it as a new workspace.
+
 ## v0.14.2 — 2026-05-23
 
 - Right-click any tab → "Move to New Window" sends it to its own new window — the terminal, scrollback, and any running process all come along.

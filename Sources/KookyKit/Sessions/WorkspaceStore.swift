@@ -12,17 +12,20 @@ extension Array {
     }
 }
 
+/// True iff `url` points at a directory that currently exists on disk.
+func isDirectory(_ url: URL) -> Bool {
+    guard url.isFileURL else { return false }
+    var isDir: ObjCBool = false
+    return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+}
+
 /// Returns `path` as a directory URL if it exists, otherwise the user's
 /// home dir. The fallback prevents kooky from spawning a shell at a deleted
 /// project path (deleted between sessions, externally unmounted disk),
 /// which manifests as the new tab dying with a confusing one-line error.
 func resolvedSpawnCwd(_ path: String) -> URL {
-    var isDir: ObjCBool = false
-    if FileManager.default.fileExists(atPath: path, isDirectory: &isDir),
-       isDir.boolValue {
-        return URL(fileURLWithPath: path)
-    }
-    return URL(fileURLWithPath: NSHomeDirectory())
+    let url = URL(fileURLWithPath: path)
+    return isDirectory(url) ? url : URL(fileURLWithPath: NSHomeDirectory())
 }
 
 /// Trims a title string; blank or whitespace-only input collapses to `nil`.

@@ -9,6 +9,10 @@ struct SidebarView: View {
     /// on drop. Lets each row compute whether the drag origin is above or
     /// below it so the drop indicator can flip edges.
     @State private var draggingWorkspaceId: UUID?
+    /// True while a Finder folder drag is hovering the sidebar — gates the
+    /// drop-zone outline so the user sees that releasing here opens a new
+    /// workspace.
+    @State private var isFolderDropTargeted = false
 
     var body: some View {
         let isCompact = store.sidebarMode == .compact
@@ -19,6 +23,33 @@ struct SidebarView: View {
         }
         .frame(width: isCompact ? Self.compactWidth : Self.fullWidth)
         .background(Theme.chromeBackground)
+        .overlay {
+            // Drop affordance: tinted fill + hairline stroke, inset from the
+            // sidebar edges so the splitter / titlebar don't clip it. Always
+            // in the view tree (alpha-driven) so `easeOut(0.12)` can animate.
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.chromeActive)
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Theme.chromeForeground.opacity(0.55), lineWidth: 1)
+            }
+            .padding(Theme.space2)
+            .opacity(isFolderDropTargeted ? 1 : 0)
+            .animation(.easeOut(duration: 0.12), value: isFolderDropTargeted)
+            .allowsHitTesting(false)
+        }
+        // Files are silently ignored — `GhosttySurfaceView` already handles
+        // "drop a file path at the cursor" inside a pane (M5.kk). The outline
+        // lights up for any URL drag (SwiftUI's `.dropDestination` can't
+        // pre-filter file-vs-folder); file drags release as no-ops.
+        .dropDestination(for: URL.self) { urls, _ in
+            let folders = urls.filter(isDirectory)
+            guard !folders.isEmpty else { return false }
+            for folder in folders {
+                store.addWorkspace(workingDirectory: folder)
+            }
+            return true
+        } isTargeted: { isFolderDropTargeted = $0 }
     }
 
     @ViewBuilder
