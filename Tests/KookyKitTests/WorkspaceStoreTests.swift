@@ -717,6 +717,29 @@ final class WorkspaceStoreTests: XCTestCase {
         let wsB = b.workspaces[0]
         XCTAssertFalse(b.handleTabDrop(droppedId: UUID(), to: firstPane(wsB), at: 0, in: wsB))
     }
+
+    func testMoveTabToNewWindowForwardsRequestToInjectedClosure() {
+        var captured: UUID?
+        let store = WorkspaceStore(
+            persistence: InMemoryPersistence(), engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil }, resumeProvider: { true },
+            moveToNewWindow: { captured = $0 }
+        )
+        let id = UUID()
+        store.moveTabToNewWindow(id)
+        XCTAssertEqual(captured, id)
+    }
+
+    func testDiscardTabDoesNotRecordToReopenHistory() {
+        // `discardTab` is for synthetic tabs the user never knowingly opened
+        // (e.g. the placeholder in a freshly-spawned Move-to-New-Window
+        // window). It must not pollute the `⌘⇧T` reopen stack.
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let tab = store.addTab(in: ws)
+        store.discardTab(tab, in: ws)
+        XCTAssertNil(store.reopenLastClosedTab(), "discardTab must not feed the reopen stack")
+    }
 }
 
 private extension PersistedPaneNode {

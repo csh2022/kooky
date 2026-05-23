@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.14.2 — 2026-05-23
+
+- Right-click any tab → "Move to New Window" sends it to its own new window — the terminal, scrollback, and any running process all come along.
+
 ## v0.14.1 — 2026-05-22
 
 - Drag a tab from one window's tab bar onto another window's to move it across — the terminal, its scrollback, and any running process all come with it.

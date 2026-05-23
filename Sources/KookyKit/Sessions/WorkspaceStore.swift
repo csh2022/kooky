@@ -85,6 +85,10 @@ final class WorkspaceStore {
     /// in the store it came from. Tests default to `{ [] }`, keeping each
     /// store window-isolated.
     private let peerStores: @MainActor () -> [WorkspaceStore]
+    /// Invoked when the user picks "Move to New Window" from a tab's
+    /// right-click menu — `AppDelegate` opens a fresh window and moves the
+    /// session into it. Tests default to a no-op.
+    private let moveToNewWindow: @MainActor (UUID) -> Void
     private let persistence: any Persistence
     private let gitStatusFetcher = GitStatusFetcher()
     /// One watcher per session — refreshes git status when `.git/HEAD` or
@@ -127,13 +131,15 @@ final class WorkspaceStore {
         engineFactory: @escaping @MainActor () -> any TerminalEngine = { LibghosttyEngine() },
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
-        peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] }
+        peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] },
+        moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in }
     ) {
         self.persistence = persistence
         self.engineFactory = engineFactory
         self.optionsProvider = optionsProvider
         self.resumeProvider = resumeProvider
         self.peerStores = peerStores
+        self.moveToNewWindow = moveToNewWindow
         if let saved = persistence.load(), !saved.workspaces.isEmpty {
             restore(from: saved)
         } else {
@@ -367,6 +373,12 @@ final class WorkspaceStore {
         return session
     }
 
+    /// Routes the right-click "Move to New Window" request to `AppDelegate`,
+    /// which creates a fresh window and moves the session into it.
+    func moveTabToNewWindow(_ sessionId: UUID) {
+        moveToNewWindow(sessionId)
+    }
+
     func closeOtherTabs(keeping session: Session, in workspace: Workspace) {
         guard let pane = pane(containing: session, in: workspace) else { return }
         let toClose = pane.tabs.filter { $0.id != session.id }
@@ -382,9 +394,24 @@ final class WorkspaceStore {
     }
 
     func closeTab(_ session: Session, in workspace: Workspace) {
+        closeTab(session, in: workspace, recordHistory: true)
+    }
+
+    /// Like `closeTab` but skips the reopen-closed-tab history — for
+    /// synthetic tabs the user never knowingly opened (e.g. the placeholder
+    /// the new-window orchestration spawns before adopting a moved-in tab).
+    /// Without this, `⌘⇧T` after a Move to New Window resurrects a phantom
+    /// "terminal at ~" the user never closed.
+    func discardTab(_ session: Session, in workspace: Workspace) {
+        closeTab(session, in: workspace, recordHistory: false)
+    }
+
+    private func closeTab(_ session: Session, in workspace: Workspace, recordHistory: Bool) {
         guard let pane = pane(containing: session, in: workspace),
               let idx = pane.tabs.firstIndex(where: { $0.id == session.id }) else { return }
-        recordClosedTab(session, pane: pane, workspace: workspace)
+        if recordHistory {
+            recordClosedTab(session, pane: pane, workspace: workspace)
+        }
         gitWatchers.removeValue(forKey: session.id)?.cancel()
         session.engine.terminate()
         detachSession(session, from: pane, at: idx, in: workspace)

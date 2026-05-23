@@ -88,7 +88,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     private func addWindow(windowId: UUID = UUID()) -> KookyWindowController {
         let store = WorkspaceStore(
             persistence: WindowPersistence(windowId: windowId, app: appPersistence),
-            peerStores: { [weak self] in self?.windowControllers.map(\.store) ?? [] }
+            peerStores: { [weak self] in self?.windowControllers.map(\.store) ?? [] },
+            moveToNewWindow: { [weak self] id in self?.moveTabToNewWindow(sessionId: id) }
         )
         let controller = KookyWindowController(windowId: windowId, store: store)
         controller.onWillClose = { [weak self] in self?.handleWindowWillClose($0) }
@@ -104,6 +105,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             window.makeKeyAndOrderFront(nil)
         }
         return controller
+    }
+
+    /// Right-click → "Move to New Window": creates a fresh window and pulls
+    /// the session into it via the same cross-window machinery as a drag
+    /// between existing windows. The new window's throwaway default tab is
+    /// discarded once the adoption lands — `discardTab` (vs `closeTab`)
+    /// keeps it off the `⌘⇧T` reopen stack since the user never asked for it.
+    private func moveTabToNewWindow(sessionId: UUID) {
+        let controller = addWindow()
+        guard let workspace = controller.store.active,
+              let pane = workspace.activePane else { return }
+        let defaultTab = pane.tabs.first
+        controller.store.handleTabDrop(droppedId: sessionId, to: pane, at: pane.tabs.count, in: workspace)
+        // `count > 1` is a soft-fail guard for the rare case where
+        // cross-window adoption returned false (e.g. the source store
+        // vanished between right-click and here) — without it we'd discard
+        // the placeholder, leaving the new window with zero tabs.
+        if let defaultTab, pane.tabs.count > 1 {
+            controller.store.discardTab(defaultTab, in: workspace)
+        }
     }
 
     private func handleWindowWillClose(_ controller: KookyWindowController) {

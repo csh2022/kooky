@@ -11,6 +11,7 @@ struct TabBarItem: View {
     let onDuplicate: () -> Void
     let onRename: (String) -> Void
     let onSplit: (SplitOrientation) -> Void
+    let onMoveToNewWindow: () -> Void
 
     @State private var isHovered = false
     @State private var isContextMenuOpen = false
@@ -65,6 +66,10 @@ struct TabBarItem: View {
                 KookyMenuRow(title: "Split Down", shortcut: "⌘⇧D") {
                     isContextMenuOpen = false
                     onSplit(.vertical)
+                }
+                KookyMenuRow(title: "Move to New Window") {
+                    isContextMenuOpen = false
+                    onMoveToNewWindow()
                 }
                 KookyMenuDivider()
                 KookyMenuRow(title: "Rename Tab…") {
