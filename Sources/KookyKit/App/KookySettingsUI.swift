@@ -43,6 +43,14 @@ final class KookySettingsModel {
     /// joins the `+` menu / Settings list alongside the builtin agents,
     /// and supports the same visibility / order / options machinery.
     var customAgents: [CustomAgentData] = []
+    /// User-defined "Terminal at <path>" presets (`terminals.presets` in
+    /// settings.json). Independent of `agentOrder` / `hiddenAgents` /
+    /// `agentOptions` — presets have their own list under Settings →
+    /// Terminals, not a sub-section of the Agents one.
+    var terminalPresets: [TerminalPreset] = []
+    /// Sibling of `hiddenAgents` for the preset list. Hidden presets stay
+    /// in `terminalPresets` so the user can re-enable without re-configuring.
+    var hiddenPresets: Set<String> = []
     /// When true, kooky launches Claude tabs with `--resume <id>` using the
     /// conversation id persisted on each tab (captured via Claude's hook
     /// payload). When false, every Claude tab starts fresh — but the
@@ -92,6 +100,27 @@ final class KookySettingsModel {
                 symbol: (dict["symbol"] as? String) ?? "",
                 tintHex: (dict["tintHex"] as? String) ?? "",
                 env: (dict["env"] as? String) ?? ""
+            )
+        }
+
+        let terminals = parsed["terminals"] as? [String: Any] ?? [:]
+        hiddenPresets = Set((terminals["hidden"] as? [String]) ?? [])
+        let rawPresets = (terminals["presets"] as? [[String: Any]]) ?? []
+        // Same id-uniqueness defence as customAgents — a hand-edited
+        // settings.json with a duplicate or a builtin-colliding preset id
+        // would otherwise produce two AgentTemplate rows with the same id
+        // (visibleOrdered would still surface both, but ForEach renders
+        // glitchy and id-based lookups become non-deterministic).
+        var presetSeen: Set<String> = []
+        let customIds = Set(customAgents.map(\.id))
+        terminalPresets = rawPresets.compactMap { dict -> TerminalPreset? in
+            guard let id = dict["id"] as? String, !id.isEmpty else { return nil }
+            if builtinIds.contains(id) || customIds.contains(id) { return nil }
+            if !presetSeen.insert(id).inserted { return nil }
+            return TerminalPreset(
+                id: id,
+                title: (dict["title"] as? String) ?? "",
+                path: (dict["path"] as? String) ?? ""
             )
         }
     }
@@ -158,6 +187,22 @@ final class KookySettingsModel {
             parsed["agents"] = agents
         }
 
+        let serialisedPresets: [[String: Any]] = terminalPresets.compactMap { p in
+            guard !p.id.isEmpty else { return nil }
+            var dict: [String: Any] = ["id": p.id]
+            if !p.title.isEmpty { dict["title"] = p.title }
+            if !p.path.isEmpty { dict["path"] = p.path }
+            return dict
+        }
+        if serialisedPresets.isEmpty && hiddenPresets.isEmpty {
+            parsed.removeValue(forKey: "terminals")
+        } else {
+            var terminals = parsed["terminals"] as? [String: Any] ?? [:]
+            terminals["presets"] = serialisedPresets.isEmpty ? nil : serialisedPresets
+            terminals["hidden"] = hiddenPresets.isEmpty ? nil : Array(hiddenPresets).sorted()
+            parsed["terminals"] = terminals
+        }
+
         KookySettings.write(parsed)
         KookyShellIntegration.refreshClaudeCustomSettings(customAgents: customAgents)
     }
@@ -191,16 +236,43 @@ final class KookySettingsModel {
         if defaultAgentId == id { defaultAgentId = nil }
         scheduleSave()
     }
+
+    /// `preset-N` slug deliberately doesn't reuse the `custom-N` namespace
+    /// so a hand-edited settings.json with a preset id stays distinct
+    /// from a custom-agent id on the same numeric tail.
+    func addTerminalPreset() {
+        let usedIds = Set(
+            AgentTemplate.builtin.map(\.id)
+            + customAgents.map(\.id)
+            + terminalPresets.map(\.id)
+        )
+        var n = terminalPresets.count + 1
+        while usedIds.contains("preset-\(n)") { n += 1 }
+        terminalPresets.append(TerminalPreset(id: "preset-\(n)"))
+        scheduleSave()
+    }
+
+    func deleteTerminalPreset(id: String) {
+        terminalPresets.removeAll { $0.id == id }
+        hiddenPresets.remove(id)
+        // Stale-default cleanup: if the user had this preset set as the
+        // default for `+` / `⌘T`, the saved id would otherwise point at a
+        // now-gone row → `defaultLaunchTemplate` returns nil → +/⌘T
+        // silently fall back to the popover. Matches `deleteCustomAgent`.
+        if defaultAgentId == id { defaultAgentId = nil }
+        scheduleSave()
+    }
 }
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
-    case terminal, codingAgents, advanced
+    case general, terminalPresets, codingAgents, advanced
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .terminal: return "Terminal"
+        case .general: return "General"
+        case .terminalPresets: return "Terminals"
         case .codingAgents: return "Agents"
         case .advanced: return "Advanced"
         }
@@ -219,7 +291,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 struct KookySettingsView: View {
     @Bindable var model: KookySettingsModel
     let onOpenInTab: () -> Void
-    @State private var selected: SettingsCategory = .terminal
+    @State private var selected: SettingsCategory = .general
 
     var body: some View {
         HStack(spacing: 0) {
@@ -239,6 +311,8 @@ struct KookySettingsView: View {
         .onChange(of: model.defaultAgentId) { _, _ in model.scheduleSave() }
         .onChange(of: model.customAgents) { _, _ in model.scheduleSave() }
         .onChange(of: model.resumeConversations) { _, _ in model.scheduleSave() }
+        .onChange(of: model.terminalPresets) { _, _ in model.scheduleSave() }
+        .onChange(of: model.hiddenPresets) { _, _ in model.scheduleSave() }
     }
 
     private var sidebar: some View {
@@ -292,7 +366,8 @@ struct KookySettingsView: View {
                 .padding(.horizontal, 28)
                 .padding(.bottom, 18)
             switch selected {
-            case .terminal: terminalDetail
+            case .general: generalDetail
+            case .terminalPresets: terminalPresetsDetail
             case .codingAgents: codingAgentsDetail
             case .advanced: advancedDetail
             }
@@ -300,7 +375,7 @@ struct KookySettingsView: View {
         }
     }
 
-    private var terminalDetail: some View {
+    private var generalDetail: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsRow(label: "font-family") {
                 Picker("", selection: $model.fontFamily) {
@@ -337,13 +412,8 @@ struct KookySettingsView: View {
                 .pickerStyle(.menu)
                 .frame(minWidth: 180)
             }
-            terminalRestartCallout
-        }
-    }
-
-    private var codingAgentsDetail: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(label: "default") {
+            SettingsHairline()
+            SettingsRow(label: "default-new-tab") {
                 Picker("", selection: $model.defaultAgentId) {
                     Text("Ask each time").tag(String?.none)
                     Divider()
@@ -355,7 +425,16 @@ struct KookySettingsView: View {
                 .pickerStyle(.menu)
                 .frame(minWidth: 180)
             }
-            SettingsHairline()
+            terminalRestartCallout
+        }
+    }
+
+    private var terminalPresetsDetail: some View {
+        TerminalPresetsList(model: model)
+    }
+
+    private var codingAgentsDetail: some View {
+        VStack(alignment: .leading, spacing: 0) {
             AgentReorderList(model: model)
             SettingsHairline()
             SettingsRow(label: "resume-conversation-when-reopen") {
@@ -381,7 +460,7 @@ struct KookySettingsView: View {
 
     private var terminalRestartCallout: some View {
         HStack(spacing: 12) {
-            Text("Terminal settings apply on restart.")
+            Text("Font and cursor changes apply on restart.")
                 .font(Theme.mono(11.5))
                 .foregroundStyle(Theme.chromeMuted)
             Spacer()
@@ -706,7 +785,7 @@ private struct AgentRow: View {
                 HStack {
                     Spacer()
                     if let onDelete {
-                        Button("delete agent", action: onDelete)
+                        Button("delete", action: onDelete)
                             .buttonStyle(.plain)
                             .font(Theme.mono(11))
                             .foregroundStyle(Theme.activityFailure.opacity(0.85))
@@ -737,7 +816,7 @@ private struct AgentRow: View {
             Picker("", selection: $baseAgentId) {
                 Text("(none)").tag("")
                 Divider()
-                ForEach(AgentTemplate.builtin.filter { $0.id != "terminal" }) { template in
+                ForEach(AgentTemplate.builtin.filter { !$0.isShell }) { template in
                     Text(template.title).tag(template.id)
                 }
             }
@@ -896,5 +975,327 @@ final class KookySettingsWindowController: NSWindowController {
         let session = store.addTab(in: workspace, template: template)
         session.customTitle = "settings.json"
         window?.orderOut(nil)
+    }
+}
+
+private struct TerminalPresetsList: View {
+    @Bindable var model: KookySettingsModel
+    @State private var draggingId: String?
+    @State private var endTargeted: Bool = false
+    @State private var expandedId: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(model.terminalPresets.enumerated()), id: \.element.id) { index, preset in
+                if index > 0 { SettingsHairline() }
+                TerminalPresetRow(
+                    id: preset.id,
+                    visible: !model.hiddenPresets.contains(preset.id),
+                    isDragging: draggingId == preset.id,
+                    isExpanded: expandedId == preset.id,
+                    title: titleBinding(id: preset.id),
+                    path: pathBinding(id: preset.id),
+                    onToggleVisible: { toggleVisible(preset.id) },
+                    onToggleExpanded: {
+                        expandedId = expandedId == preset.id ? nil : preset.id
+                    },
+                    onChooseFolder: { chooseFolder(forPresetId: preset.id) },
+                    onDelete: { model.deleteTerminalPreset(id: preset.id) },
+                    onBeginDrag: { draggingId = preset.id },
+                    onDrop: { droppedId in
+                        defer { draggingId = nil }
+                        return reorder(draggedId: droppedId, before: preset.id)
+                    }
+                )
+            }
+            // Trailing drop catcher — drop past the last row to send the
+            // preset to the bottom of the list. Without this, the bottom
+            // slot is only reachable by dropping ON the last row (which
+            // means "before it"), which reads wrong.
+            Color.clear
+                .frame(height: 10)
+                .contentShape(Rectangle())
+                .dropIndicator(active: endTargeted, on: .top, offset: 4)
+                .dropDestination(for: String.self) { items, _ in
+                    defer { draggingId = nil }
+                    guard let id = items.first else { return false }
+                    return moveToEnd(id)
+                } isTargeted: { endTargeted = $0 }
+            HStack {
+                Button {
+                    // Auto-expand the freshly-added preset so the user
+                    // doesn't have to chase the disclosure chevron.
+                    // Matches `AgentReorderList`'s "+ add custom agent".
+                    let priorId = model.terminalPresets.last?.id
+                    model.addTerminalPreset()
+                    if let newId = model.terminalPresets.last?.id, newId != priorId {
+                        expandedId = newId
+                    }
+                } label: {
+                    Text("+ add terminal preset")
+                        .font(Theme.mono(11, weight: .medium))
+                        .foregroundStyle(Theme.chromeForeground)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .bracketBorder()
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, model.terminalPresets.isEmpty ? 6 : 14)
+
+            if model.terminalPresets.isEmpty {
+                Text("Each preset becomes a Terminal entry in the + menu that always spawns in the configured folder, regardless of the active workspace.")
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.chromeMuted)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 16)
+            }
+        }
+    }
+
+    /// Resolves bindings by id (not by index) so a deletion that shifts
+    /// indices doesn't leave a row writing into the wrong preset.
+    private func titleBinding(id: String) -> Binding<String> {
+        Binding(
+            get: { model.terminalPresets.first(where: { $0.id == id })?.title ?? "" },
+            set: { newValue in
+                guard let idx = model.terminalPresets.firstIndex(where: { $0.id == id }) else { return }
+                model.terminalPresets[idx].title = newValue
+            }
+        )
+    }
+
+    private func pathBinding(id: String) -> Binding<String> {
+        Binding(
+            get: { model.terminalPresets.first(where: { $0.id == id })?.path ?? "" },
+            set: { newValue in
+                guard let idx = model.terminalPresets.firstIndex(where: { $0.id == id }) else { return }
+                model.terminalPresets[idx].path = newValue
+            }
+        )
+    }
+
+    /// Opens NSOpenPanel as a sheet on the Settings window. Sheet-modal
+    /// blocks edits to the underlying view, so resolving the preset by id
+    /// in the completion handler is race-free.
+    private func chooseFolder(forPresetId id: String) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder for this terminal preset."
+        let assign: (URL) -> Void = { url in
+            // Resolve by id so a concurrent deletion (or a parallel
+            // Settings window mutating the same singleton) doesn't write
+            // into the wrong row. Stored with `~` for HOME so the preset
+            // survives a `$HOME` move.
+            guard let idx = model.terminalPresets.firstIndex(where: { $0.id == id }) else { return }
+            model.terminalPresets[idx].path = (url.path as NSString).abbreviatingWithTildeInPath
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window) { response in
+                if response == .OK, let url = panel.url { assign(url) }
+            }
+        } else if panel.runModal() == .OK, let url = panel.url {
+            assign(url)
+        }
+    }
+
+    private func toggleVisible(_ id: String) {
+        if model.hiddenPresets.contains(id) {
+            model.hiddenPresets.remove(id)
+        } else {
+            model.hiddenPresets.insert(id)
+        }
+    }
+
+    /// Reorder by moving `draggedId` to just before `targetId`. Same shift-
+    /// adjust as `AgentReorderList.reorder` — removing from a position earlier
+    /// than the target shifts every later index left by one.
+    private func reorder(draggedId: String, before targetId: String) -> Bool {
+        let ids = model.terminalPresets.map(\.id)
+        guard let sourceIdx = ids.firstIndex(of: draggedId),
+              let targetIdx = ids.firstIndex(of: targetId),
+              sourceIdx != targetIdx else { return false }
+        var presets = model.terminalPresets
+        let item = presets.remove(at: sourceIdx)
+        let adjustedTarget = sourceIdx < targetIdx ? targetIdx - 1 : targetIdx
+        presets.insert(item, at: adjustedTarget)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            model.terminalPresets = presets
+        }
+        return true
+    }
+
+    private func moveToEnd(_ draggedId: String) -> Bool {
+        guard let sourceIdx = model.terminalPresets.firstIndex(where: { $0.id == draggedId }),
+              sourceIdx != model.terminalPresets.count - 1 else { return false }
+        var presets = model.terminalPresets
+        let item = presets.remove(at: sourceIdx)
+        presets.append(item)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            model.terminalPresets = presets
+        }
+        return true
+    }
+}
+
+private struct TerminalPresetRow: View {
+    let id: String
+    let visible: Bool
+    let isDragging: Bool
+    let isExpanded: Bool
+    @Binding var title: String
+    @Binding var path: String
+    let onToggleVisible: () -> Void
+    let onToggleExpanded: () -> Void
+    let onChooseFolder: () -> Void
+    let onDelete: () -> Void
+    let onBeginDrag: () -> Void
+    let onDrop: (String) -> Bool
+    @State private var isTargeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                dragHandle
+                AgentIconView(
+                    asset: AgentTemplate.terminal.iconAsset,
+                    fallbackSymbol: AgentTemplate.terminal.symbol,
+                    size: 14
+                )
+                .opacity(visible ? 1.0 : 0.35)
+                Text(displayTitle)
+                    .font(Theme.mono(12.5))
+                    .foregroundStyle(visible ? Theme.chromeForeground : Theme.chromeMuted)
+                Spacer(minLength: 14)
+                disclosureButton
+                Toggle("", isOn: Binding(get: { visible }, set: { _ in onToggleVisible() }))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 10)
+            .background(dropZone)
+            if isExpanded { expandedForm }
+        }
+        .opacity(isDragging ? 0.35 : 1.0)
+    }
+
+    private var displayTitle: String {
+        TerminalPreset(id: id, title: title, path: path).displayTitle
+    }
+
+    private var disclosureButton: some View {
+        Button(action: onToggleExpanded) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.chromeMuted.opacity(isExpanded ? 1.0 : 0.7))
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Indent the expansion sub-rows so they visually hang under the row
+    /// title, matching `AgentRow.optionsRowIndent`.
+    private static let editRowIndent: CGFloat = 56
+
+    private var expandedForm: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            editRow(label: "name", placeholder: "Work", text: $title)
+            HStack(alignment: .center, spacing: 10) {
+                Text("path")
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.chromeMuted)
+                    .frame(width: 50, alignment: .leading)
+                TextField("~/projects/foo", text: $path)
+                    .textFieldStyle(.plain)
+                    .font(Theme.mono(11.5))
+                    .foregroundStyle(Theme.chromeForeground)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .bracketBorder()
+                Button("choose") { onChooseFolder() }
+                    .buttonStyle(.plain)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.chromeForeground)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .bracketBorder()
+            }
+            .padding(.leading, Self.editRowIndent)
+            .padding(.trailing, 22)
+            HStack {
+                Spacer()
+                Button("delete", action: onDelete)
+                    .buttonStyle(.plain)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.activityFailure.opacity(0.85))
+                    .underline()
+            }
+            .padding(.leading, Self.editRowIndent)
+            .padding(.trailing, 22)
+            .padding(.top, 4)
+        }
+        .padding(.bottom, 12)
+    }
+
+    private func editRow(label: String, placeholder: String, text: Binding<String>) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text(label)
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.chromeMuted)
+                .frame(width: 50, alignment: .leading)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(Theme.mono(11.5))
+                .foregroundStyle(Theme.chromeForeground)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .bracketBorder()
+        }
+        .padding(.leading, Self.editRowIndent)
+        .padding(.trailing, 22)
+    }
+
+    /// Drop catcher lives on a clear background so TextField hit-testing
+    /// stays independent — same lesson as `AgentRow.dropZone`. Without
+    /// that, dropping mid-row would route through whichever field happens
+    /// to live at the cursor instead of the row-level handler.
+    private var dropZone: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .dropIndicator(active: isTargeted && !isDragging, on: .top)
+            .dropDestination(for: String.self) { items, _ in
+                guard let droppedId = items.first, droppedId != id else { return false }
+                return onDrop(droppedId)
+            } isTargeted: { isTargeted = $0 }
+            .allowsHitTesting(true)
+    }
+
+    /// Only the `≡` glyph is the drag source. Scoping `.onDrag` to the
+    /// handle keeps text-selection in the TextFields unaffected and
+    /// matches the openHand cursor convention used by AgentRow.
+    private var dragHandle: some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Theme.chromeMuted.opacity(0.7))
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.openHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .onDrag {
+                onBeginDrag()
+                return NSItemProvider(object: id as NSString)
+            }
     }
 }

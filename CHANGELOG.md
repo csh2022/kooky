@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.15.0 — 2026-05-25
+
+- **Terminal presets** — define "Terminal at <path>" entries that show up in the `+` menu, each opening a new tab at a fixed folder regardless of the active workspace. Configure under Settings → Terminals: name + path (with `~/foo` shorthand or a folder picker), drag to reorder, toggle visibility, delete. Handy when you keep jumping to the same project folders.
+- Settings sidebar reorganized — first category renamed `General` (was `Terminal`) to make room for the new `Terminals` category in between. The `default-new-tab` picker moved to `General` since it now controls both presets and agents.
+
 ## v0.14.4 — 2026-05-24
 
 - File → Open Folder… (⌘O) opens any folder as a new workspace.

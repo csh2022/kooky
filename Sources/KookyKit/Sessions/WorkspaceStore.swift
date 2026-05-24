@@ -239,7 +239,14 @@ final class WorkspaceStore {
         guard let target = pane ?? workspace.activePane ?? workspace.root.firstPane else {
             preconditionFailure("workspace has no panes")
         }
-        let cwd = initialCwd ?? workspace.workingDirectory
+        // Precedence: explicit caller cwd (`reopenLastClosedTab`,
+        // right-click "Ask <agent>") > template's pinned cwd
+        // (`TerminalPreset.path` via `AgentTemplate.extraCwd`) > workspace
+        // cwd. `~/` is expanded; a vanished path falls back to `$HOME` via
+        // `resolvedSpawnCwd`.
+        let cwd = initialCwd
+            ?? template.extraCwd.map { resolvedSpawnCwd(($0 as NSString).expandingTildeInPath) }
+            ?? workspace.workingDirectory
         let session = spawnSession(template: template, initialCwd: cwd, conversationId: conversationId, initialPrompt: initialPrompt)
         wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
         target.tabs.append(session)
@@ -587,7 +594,10 @@ final class WorkspaceStore {
             if session.agent.id == agent.id || session.agent.baseAgentId == agent.id {
                 session.agent = .terminal
             }
-        } else if session.agent.id == AgentTemplate.terminal.id {
+        } else if session.agent.isShell {
+            // Includes the default Terminal *and* any TerminalPreset — a
+            // user starting Claude inside a preset terminal should get
+            // the same icon-upgrade the default Terminal does.
             session.agent = agent
         }
         // SessionStart → UserPromptSubmit on Claude (and BeforeAgent on Gemini)

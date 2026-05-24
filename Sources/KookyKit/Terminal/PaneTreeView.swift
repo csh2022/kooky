@@ -537,9 +537,10 @@ private struct PaneContextMenu: View {
     }
 
     private func buildAskRows() -> [(template: AgentTemplate, isDefault: Bool)] {
+        // Shells (default Terminal + presets) have nothing to "Ask".
         let defaultId = AgentTemplate.defaultLaunchTemplate(model: model)
-            .flatMap { $0.id == "terminal" ? nil : $0.id }
-        let visible = AgentTemplate.visibleOrdered(model: model).filter { $0.id != "terminal" }
+            .flatMap { $0.isShell ? nil : $0.id }
+        let visible = AgentTemplate.visibleOrdered(model: model).filter { !$0.isShell }
         var rows: [(AgentTemplate, Bool)] = []
         if let defaultId, let def = visible.first(where: { $0.id == defaultId }) {
             rows.append((def, true))

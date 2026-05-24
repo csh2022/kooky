@@ -47,7 +47,7 @@ final class Workspace: Identifiable {
         var hasFailure = false
         walk(root) { pane in
             for tab in pane.tabs {
-                if tab.agent.id != AgentTemplate.terminal.id, !seen.contains(tab.agent.id) {
+                if !tab.agent.isShell, !seen.contains(tab.agent.id) {
                     seen.insert(tab.agent.id)
                     agents.append(tab.agent)
                 }

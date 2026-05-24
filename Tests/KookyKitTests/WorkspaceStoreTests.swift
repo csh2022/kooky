@@ -240,6 +240,49 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertTrue(ws.hasCommandFailure)
     }
 
+    func testPresetTabsAreTreatedAsShellsInSidebarReadout() {
+        // Regression: when `Workspace.sidebarReadout` filtered with
+        // `id != AgentTemplate.terminal.id`, preset tabs (id `preset-N`)
+        // counted as "agents" — the sidebar would show a pip per preset
+        // and a `+N` indicator for a workspace that just held a few
+        // pinned-cwd terminals. `isShell` covers Terminal + all presets.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let pinned = AgentTemplate.fromTerminalPreset(
+            TerminalPreset(id: "preset-b", title: "B", path: projectB.path)
+        )
+        store.addTab(in: ws, template: pinned)
+        XCTAssertTrue(ws.distinctAgents.isEmpty,
+                      "preset tabs are shells, not agents — sidebar must not list them")
+    }
+
+    func testAddTabUsesTemplateExtraCwdOverWorkspaceCwd() {
+        // Terminal preset pinned to /tmp/projectB spawns there even when
+        // the active workspace lives in /tmp/projectA. Models issue #12 —
+        // `+` menu entries that always open at a fixed path.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let pinned = AgentTemplate.fromTerminalPreset(
+            TerminalPreset(id: "preset-b", title: "B", path: projectB.path)
+        )
+        let session = store.addTab(in: ws, template: pinned)
+        XCTAssertEqual(engine(session).startedConfigs.last?.workingDirectory, projectB.path)
+    }
+
+    func testAddTabInitialCwdOverridesTemplateExtraCwd() {
+        // Explicit `initialCwd` (right-click "Ask <agent>" path,
+        // `reopenLastClosedTab`) wins over the template's pinned cwd —
+        // the caller is asking for that exact path, not the template's
+        // default.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let pinned = AgentTemplate.fromTerminalPreset(
+            TerminalPreset(id: "preset-b", title: "B", path: projectB.path)
+        )
+        let session = store.addTab(in: ws, template: pinned, initialCwd: projectC)
+        XCTAssertEqual(engine(session).startedConfigs.last?.workingDirectory, projectC.path)
+    }
+
     func testNewTabInheritsLatestPwd() {
         let store = makeStore()
         let ws = store.addWorkspace(workingDirectory: projectA)

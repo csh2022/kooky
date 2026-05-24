@@ -56,6 +56,113 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertNil(AgentTemplate.fromCustom(data).baseAgentId)
     }
 
+    @MainActor
+    func testOrderedKeepsHalfConfiguredCustoms() {
+        // Regression: when `ordered(model:)` filtered with `!isShell`, a
+        // freshly-added custom agent (initialCommand still nil until the
+        // user fills `command` or picks a `baseAgentId`) vanished from
+        // Settings → Agents — the user couldn't continue editing the row
+        // they just created. `ordered` must keep these visible; the
+        // `+` menu's own `initialCommand != nil` gate (in `visibleOrdered`)
+        // is what hides them from the launch surface.
+        //
+        // `ordered` reads `customAgents` off `KookySettingsModel.shared`
+        // (via `all`), so the test snapshots + restores the singleton
+        // rather than constructing a fresh model.
+        let model = KookySettingsModel.shared
+        let snapshot = model.customAgents
+        defer { model.customAgents = snapshot }
+        model.customAgents = [CustomAgentData(id: "draft-custom")]
+        let ordered = AgentTemplate.ordered(model: model)
+        XCTAssertTrue(ordered.contains(where: { $0.id == "draft-custom" }),
+                      "half-configured custom must stay in Settings list")
+    }
+
+    // MARK: - Terminal presets
+
+    func testFromTerminalPresetSnapshotsPathAsExtraCwd() {
+        let preset = TerminalPreset(id: "preset-1", title: "Work", path: "~/projects/foo")
+        let template = AgentTemplate.fromTerminalPreset(preset)
+        XCTAssertEqual(template.id, "preset-1")
+        XCTAssertEqual(template.title, "Work")
+        XCTAssertEqual(template.extraCwd, "~/projects/foo")
+        XCTAssertNil(template.initialCommand, "presets are terminals — must not carry a binary")
+        XCTAssertEqual(template.iconAsset, AgentTemplate.terminal.iconAsset)
+    }
+
+    func testFromTerminalPresetTitleFallsBackToBasename() {
+        // Blank title is fine — many users will rename later. Until they
+        // do, the path basename reads better than `preset-1`.
+        let preset = TerminalPreset(id: "preset-1", title: "", path: "~/projects/foo")
+        XCTAssertEqual(AgentTemplate.fromTerminalPreset(preset).title, "foo")
+    }
+
+    func testFromTerminalPresetTitleFallsBackToIdWhenAllBlank() {
+        let preset = TerminalPreset(id: "preset-1", title: "", path: "")
+        XCTAssertEqual(AgentTemplate.fromTerminalPreset(preset).title, "preset-1")
+    }
+
+    func testFromTerminalPresetTreatsEmptyPathAsNilExtraCwd() {
+        // Empty path = no override → addTab falls through to the workspace
+        // cwd instead of trying to expand "" via NSString.
+        let preset = TerminalPreset(id: "preset-1", title: "Untouched", path: "")
+        XCTAssertNil(AgentTemplate.fromTerminalPreset(preset).extraCwd)
+    }
+
+    func testVisibleOrderedDropsHiddenPresets() {
+        // Toggling a preset off in Settings → Terminals should remove it
+        // from the `+` menu but keep its config alive — symmetric with
+        // hiding an agent via the Agents toggle.
+        let model = KookySettingsModel()
+        model.terminalPresets = [
+            TerminalPreset(id: "preset-shown", title: "Shown", path: "/tmp"),
+            TerminalPreset(id: "preset-hidden", title: "Hidden", path: "/var"),
+        ]
+        model.hiddenPresets = ["preset-hidden"]
+        model.hiddenAgents = []
+        model.agentOrder = []
+        let ids = AgentTemplate.visibleOrdered(model: model).map(\.id)
+        XCTAssertTrue(ids.contains("preset-shown"))
+        XCTAssertFalse(ids.contains("preset-hidden"), "hidden preset must not appear in + menu")
+    }
+
+    func testVisibleOrderedDropsPresetsWithBlankPath() {
+        // A just-added preset with no path entered yet must not pollute
+        // the `+` menu — it would render as a no-op duplicate of the
+        // default Terminal under a misleading "preset-N" label.
+        let model = KookySettingsModel()
+        model.terminalPresets = [
+            TerminalPreset(id: "preset-blank", title: "Blank", path: ""),
+            TerminalPreset(id: "preset-whitespace", title: "Whitespace", path: "   "),
+            TerminalPreset(id: "preset-real", title: "Real", path: "/tmp"),
+        ]
+        model.hiddenAgents = []
+        model.agentOrder = []
+        let ids = AgentTemplate.visibleOrdered(model: model).map(\.id)
+        XCTAssertFalse(ids.contains("preset-blank"), "blank-path preset must not appear in + menu")
+        XCTAssertFalse(ids.contains("preset-whitespace"), "whitespace-only path counts as blank")
+        XCTAssertTrue(ids.contains("preset-real"), "path-bearing preset still surfaces")
+    }
+
+    func testVisibleOrderedInsertsPresetsBetweenTerminalAndAgents() {
+        // A fresh model reads the user's actual settings.json — overwrite
+        // the slots we care about so the test stays deterministic across
+        // machines and across whatever the developer has saved locally.
+        let model = KookySettingsModel()
+        model.terminalPresets = [
+            TerminalPreset(id: "preset-a", title: "A", path: "/tmp"),
+            TerminalPreset(id: "preset-b", title: "B", path: "/var"),
+        ]
+        model.hiddenAgents = []
+        model.agentOrder = []
+        let list = AgentTemplate.visibleOrdered(model: model)
+        XCTAssertEqual(list.first?.id, "terminal")
+        XCTAssertEqual(list[1].id, "preset-a")
+        XCTAssertEqual(list[2].id, "preset-b")
+        XCTAssertEqual(list[3].id, AgentTemplate.claudeCodeID,
+                       "agents must follow the preset block; Claude is the first builtin agent after Terminal")
+    }
+
     func testMakeSessionConfigInjectsResumeFlagForClaude() {
         let config = AgentTemplate.claudeCode.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude --resume abc-123")

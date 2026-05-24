@@ -47,6 +47,21 @@ struct AgentTemplate: Identifiable, Hashable {
     /// consumes it for Claude-Code-based customs — `spawnSession` writes
     /// it into a per-agent Claude settings file.
     let extraEnv: [String: String]
+    /// Pinned initial working directory snapshotted from `TerminalPreset.path`
+    /// in `fromTerminalPreset`. Nil for builtins and customs. When set,
+    /// `WorkspaceStore.addTab` uses it instead of the workspace cwd unless
+    /// the caller passes an explicit `initialCwd` (right-click "Ask <agent>",
+    /// `reopenLastClosedTab`). `~/` is expanded; a missing path falls back
+    /// to `$HOME` via `resolvedSpawnCwd`.
+    let extraCwd: String?
+
+    /// True when this template launches a plain shell instead of an agent
+    /// binary. Covers the default `.terminal` and every materialised
+    /// `TerminalPreset`. Use this rather than `id == "terminal"` checks at
+    /// call sites that need to distinguish shells from agents (the Ask-
+    /// <agent> right-click, the "based on" Picker, etc.) — once presets
+    /// exist there are many shell templates, not one.
+    var isShell: Bool { initialCommand == nil }
 
     init(
         id: String,
@@ -58,7 +73,8 @@ struct AgentTemplate: Identifiable, Hashable {
         baseAgentId: String? = nil,
         promptLaunchFlag: String? = nil,
         resumeFlag: String? = nil,
-        extraEnv: [String: String] = [:]
+        extraEnv: [String: String] = [:],
+        extraCwd: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -70,6 +86,7 @@ struct AgentTemplate: Identifiable, Hashable {
         self.promptLaunchFlag = promptLaunchFlag
         self.resumeFlag = resumeFlag
         self.extraEnv = extraEnv
+        self.extraCwd = extraCwd
     }
 
     var tint: Color? {
@@ -342,7 +359,12 @@ extension AgentTemplate {
     /// their `AgentTemplate.all` position so nothing silently disappears.
     @MainActor
     static func ordered(model: KookySettingsModel) -> [AgentTemplate] {
-        let nonTerminal = all.filter { $0.id != "terminal" }
+        // Filter by exact terminal id, NOT `!isShell`: this list backs
+        // `AgentReorderList.rows` (Settings → Agents), which must keep
+        // half-configured customs (initialCommand still nil) visible so
+        // the user can finish editing them. `visibleOrdered` does the
+        // `initialCommand != nil` gate downstream for the `+` menu.
+        let nonTerminal = all.filter { $0.id != AgentTemplate.terminal.id }
         // Use `uniquingKeysWith` so a hand-edited settings.json that puts a
         // custom agent on a builtin id (or two customs on the same id) lands
         // on the first occurrence instead of crashing the launcher. Builtin
@@ -354,18 +376,24 @@ extension AgentTemplate {
         return userOrderIds.compactMap { byId[$0] } + missing
     }
 
-    /// What the `+` menu renders: Terminal pinned first (not user-controlled),
-    /// then `ordered(model:)` filtered to visible agents whose `initialCommand`
-    /// is set. The `initialCommand != nil` gate skips half-configured custom
-    /// agents (just-added or command-cleared) so the launch surface never
-    /// offers a row that would spawn a plain Terminal but get recorded as
-    /// that custom agent. They still appear in Settings → Agents so
-    /// the user can finish editing them.
+    /// `+` menu order: pinned Terminal → presets → agents. The
+    /// `initialCommand != nil` gate on agents skips half-configured
+    /// customs (just-added with no command set) so the launch surface
+    /// never spawns a bare Terminal that gets recorded as that custom.
+    /// Blank-path presets are skipped for the same reason — they'd
+    /// duplicate the default Terminal under a misleading label.
     @MainActor
     static func visibleOrdered(model: KookySettingsModel) -> [AgentTemplate] {
-        [.terminal] + ordered(model: model).filter {
+        let presets = model.terminalPresets
+            .filter {
+                !$0.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !model.hiddenPresets.contains($0.id)
+            }
+            .map(AgentTemplate.fromTerminalPreset)
+        let agents = ordered(model: model).filter {
             !model.hiddenAgents.contains($0.id) && $0.initialCommand != nil
         }
+        return [.terminal] + presets + agents
     }
 
     /// Resolves the user's chosen default template for `+` / `⌘T`. Returns
@@ -409,6 +437,22 @@ extension AgentTemplate {
             promptLaunchFlag: base?.promptLaunchFlag,
             resumeFlag: base?.resumeFlag,
             extraEnv: parseEnv(data.env)
+        )
+    }
+
+    /// Materialises a `TerminalPreset` into a synthetic Terminal-flavored
+    /// `AgentTemplate`. `initialCommand` stays nil so `isShell` is true —
+    /// the Ask-<agent> right-click filter and the "based on" Picker both
+    /// skip these correctly. Title falls through `TerminalPreset.displayTitle`.
+    static func fromTerminalPreset(_ preset: TerminalPreset) -> AgentTemplate {
+        AgentTemplate(
+            id: preset.id,
+            title: preset.displayTitle,
+            symbol: AgentTemplate.terminal.symbol,
+            iconAsset: AgentTemplate.terminal.iconAsset,
+            tintHex: AgentTemplate.terminal.tintHex,
+            initialCommand: nil,
+            extraCwd: preset.path.isEmpty ? nil : preset.path
         )
     }
 }
@@ -465,5 +509,45 @@ struct CustomAgentData: Hashable, Identifiable {
         self.symbol = symbol
         self.tintHex = tintHex
         self.env = env
+    }
+}
+
+/// User-defined "Terminal at <path>" entry. Stored in `settings.json` under
+/// `terminals.presets`; round-tripped through `KookySettingsModel.terminalPresets`.
+/// Materialised into a synthetic `AgentTemplate` by `AgentTemplate.fromTerminalPreset`
+/// so the `+` menu and the spawn pipeline treat presets as Terminal-flavored
+/// rows that happen to pin a cwd. Distinct from `CustomAgentData` on purpose
+/// — presets aren't agents, they don't run a binary, they don't have hooks /
+/// env / options; conflating them would put "Terminal at /foo" into the
+/// "Custom Agents" mental model where it doesn't belong.
+struct TerminalPreset: Hashable, Identifiable, Sendable {
+    /// Slug — must be unique across builtin agents, custom agents, and other
+    /// presets. Generated as `preset-N` on creation; user-editable from
+    /// Settings is deferred (id stays stable, title carries the rename).
+    var id: String
+    /// Display name shown in the `+` menu. Falls back to the path's basename
+    /// (or the preset id, if path is also empty) when blank.
+    var title: String
+    /// Initial working directory. Accepts `~/`-prefixed paths; expanded at
+    /// spawn time. A missing path resolves to `$HOME` via `resolvedSpawnCwd`.
+    var path: String
+
+    init(id: String, title: String = "", path: String = "") {
+        self.id = id
+        self.title = title
+        self.path = path
+    }
+
+    /// Effective name for both the Settings row's collapsed header and the
+    /// `+` menu entry (via `AgentTemplate.fromTerminalPreset`): explicit
+    /// title wins, else the path's basename, else the slug. Single source
+    /// so a future tweak (e.g. trimming) can't drift between the two surfaces.
+    var displayTitle: String {
+        if !title.isEmpty { return title }
+        if !path.isEmpty {
+            let basename = (path as NSString).lastPathComponent
+            if !basename.isEmpty { return basename }
+        }
+        return id
     }
 }
