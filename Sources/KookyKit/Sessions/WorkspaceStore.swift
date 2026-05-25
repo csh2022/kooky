@@ -123,6 +123,12 @@ final class WorkspaceStore {
     private static let closedTabHistoryLimit = 50
 
     private var pendingSave: Task<Void, Never>?
+    /// Monotonic counter bumped on every `toggleZoom`. The async restore
+    /// Task captures the value at toggle time and bails if the counter has
+    /// moved by the time it fires — keeps a rapid second toggle's
+    /// in-flight animation from being prematurely un-suspended by the
+    /// previous toggle's stale Task.
+    private var zoomSuspensionGeneration: Int = 0
     private static let saveDebounce: UInt64 = 1_000_000_000
 
     var active: Workspace? {
@@ -492,6 +498,12 @@ final class WorkspaceStore {
         }
         if workspace.activePaneId != pane.id {
             workspace.activePaneId = pane.id
+            // Focusing a different pane while zoomed would route ⌘D /
+            // ⌘T / cwd-sync at the now-hidden active pane. Auto-exit so
+            // the visible pane = the active pane invariant holds.
+            if let zoomed = workspace.zoomedPaneId, zoomed != pane.id {
+                workspace.zoomedPaneId = nil
+            }
             changed = true
         }
         if workspace.workingDirectory != session.currentDirectory {
@@ -502,6 +514,51 @@ final class WorkspaceStore {
     }
 
     // MARK: - Panes
+
+    /// Toggle pane zoom for the active pane (keyboard / menu entry point
+    /// — `⌘⇧E` operates on whatever pane has keyboard focus).
+    func toggleZoom(in workspace: Workspace) {
+        guard let active = workspace.activePaneId else { return }
+        toggleZoom(in: workspace, paneId: active)
+    }
+
+    /// Toggle zoom for an explicit pane — used by the per-pane button and
+    /// the right-click menu, so clicking the button on a non-active pane
+    /// zooms *that* pane (and activates it so subsequent ⌘D / ⌘[ / ⌘]
+    /// operate on the visibly-zoomed pane).
+    func toggleZoom(in workspace: Workspace, paneId: UUID) {
+        guard workspace.canZoom else { return }
+        // Suspend per-frame `set_size` propagation across every surface in
+        // this workspace for the duration of the SwiftUI frame animation.
+        // Otherwise each of the ~12-24 intermediate frame sizes fires its
+        // own SIGWINCH, triggering the conda-init scrollback wipe (the
+        // documented known issue). After the animation settles we push
+        // one final size sync.
+        let engines = workspace.root.allPanes.flatMap { $0.tabs }.map(\.engine)
+        for engine in engines { engine.suspendsSizePropagation = true }
+
+        workspace.activePaneId = paneId
+        workspace.zoomedPaneId = workspace.isZoomed(paneId) ? nil : paneId
+        scheduleSave()
+
+        // Generation token: a rapid second toggle bumps the counter
+        // before the first Task fires, so the stale restore bails out
+        // and only the latest toggle's restore actually clears
+        // suspension. Without this, a double-tap inside the 0.25s window
+        // re-opens the per-frame `set_size` window mid-animation and the
+        // SIGWINCH burst (conda scrollback wipe) comes back.
+        zoomSuspensionGeneration &+= 1
+        let token = zoomSuspensionGeneration
+        let restoreDelay: TimeInterval = 0.25
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(restoreDelay * 1_000_000_000))
+            guard let self, self.zoomSuspensionGeneration == token else { return }
+            for engine in engines {
+                engine.suspendsSizePropagation = false
+                engine.flushSize()
+            }
+        }
+    }
 
     /// Splits `pane` in two. The existing pane stays as the first child of the
     /// new split; the second child is a fresh `Pane` with a single new tab
@@ -520,6 +577,10 @@ final class WorkspaceStore {
         let secondChild = PaneNode(pane: newPane)
         leafNode.content = .split(orientation: orientation, first: firstChild, second: secondChild, fraction: 0.5)
         workspace.activePaneId = newPane.id
+        // Splitting while zoomed = "I want to see what I'm creating". Drop
+        // zoom so the new pane is visible. Guarded so a no-op write
+        // doesn't trigger an extra Observable invalidation.
+        if workspace.zoomedPaneId != nil { workspace.zoomedPaneId = nil }
         scheduleSave()
         return newPane
     }
@@ -529,6 +590,7 @@ final class WorkspaceStore {
     /// take the parent split's place.
     func closePane(_ pane: Pane, in workspace: Workspace) {
         guard let leafNode = workspace.root.paneNode(paneId: pane.id) else { return }
+        if workspace.zoomedPaneId == pane.id { workspace.zoomedPaneId = nil }
         for tab in pane.tabs { tab.engine.terminate() }
         // Object identity, not id equality. After `splitPane`, the workspace
         // root keeps its original id but its content becomes a `.split`, while
@@ -557,6 +619,11 @@ final class WorkspaceStore {
         var changed = false
         if workspace.activePaneId != pane.id {
             workspace.activePaneId = pane.id
+            // Same "visible-pane = active-pane" invariant as activateTab —
+            // cycling focus via ⌘[ / ⌘] off the zoomed pane drops zoom.
+            if let zoomed = workspace.zoomedPaneId, zoomed != pane.id {
+                workspace.zoomedPaneId = nil
+            }
             changed = true
         }
         if let session = pane.activeTab, workspace.workingDirectory != session.currentDirectory {

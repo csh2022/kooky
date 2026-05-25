@@ -67,6 +67,21 @@ extension PaneNode {
         }
     }
 
+    /// Subtree membership — same short-circuit walk as `pane(id:)`, just
+    /// without resurfacing the leaf when callers only need the boolean.
+    func contains(paneId: UUID) -> Bool { pane(id: paneId) != nil }
+
+    /// True when this subtree contains more than one leaf pane (i.e. it
+    /// has any split node). O(1) vs `allPanes.count > 1`'s O(n) array
+    /// allocation — used in hot-path render code that asks "is zoom
+    /// meaningful here?" on every status-bar layout.
+    var hasMultiplePanes: Bool {
+        switch content {
+        case .pane: return false
+        case .split: return true
+        }
+    }
+
     func paneNode(paneId: UUID) -> PaneNode? {
         switch content {
         case .pane(let p):

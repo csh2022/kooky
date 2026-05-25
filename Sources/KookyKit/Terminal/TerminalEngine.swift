@@ -66,6 +66,17 @@ protocol TerminalEngine: AnyObject {
     var onProcessExitedCleanly: (() -> Void)? { get set }
     func start(config: TerminalSessionConfig)
     func terminate()
+    /// When true, AppKit `setFrameSize` callbacks skip `ghostty_surface_set_size`.
+    /// Set during animated workspace-layout changes (pane zoom) so each
+    /// intermediate animation frame doesn't fire its own SIGWINCH burst —
+    /// the documented "12-24 set_size calls per toggle" scrollback-wipe
+    /// problem that hits conda init users (see CLAUDE.md known issues).
+    /// Pair every `true` assignment with `flushSize()` once the layout
+    /// settles so libghostty's grid catches up to the final dimensions.
+    var suspendsSizePropagation: Bool { get set }
+    /// Force a one-shot size sync of the surface to the current view
+    /// frame. Used when un-suspending after an animation.
+    func flushSize()
     /// Trigger a libghostty named action (e.g. `increase_font_size:1`,
     /// `decrease_font_size:1`, `reset_font_size`, `clear_screen`). Returns
     /// `true` when the engine recognised and dispatched the action.

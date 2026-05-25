@@ -80,9 +80,9 @@ private struct PaneView: View {
                             .padding(.trailing, Theme.space3)
                         }
                     }
-                if paneStatusBarHasData(session: active) {
+                if paneStatusBarHasData(session: active) || workspace.canZoom {
                     Rectangle().fill(Theme.chromeHairline).frame(height: 1)
-                    PaneStatusBar(session: active)
+                    PaneStatusBar(session: active, paneId: pane.id, workspace: workspace, store: store)
                 }
             } else {
                 Color.clear
@@ -157,26 +157,83 @@ func paneStatusBarHasData(session: Session) -> Bool {
 /// stacked right-aligned. Hidden entirely when no segment has data.
 private struct PaneStatusBar: View {
     @Bindable var session: Session
+    /// Which pane this status bar belongs to. The zoom button uses this so
+    /// clicking a non-active pane's button still zooms *that* pane (not
+    /// whatever has keyboard focus).
+    let paneId: UUID
+    @Bindable var workspace: Workspace
+    let store: WorkspaceStore
     /// `.shared` is the only producer — `@Observable` tracks per-property
     /// reads, so observation is per-`statusBarItems` / per-`hiddenStatusBarItems`
     /// access without needing `@Bindable`.
     private let model = KookySettingsModel.shared
+    @State private var zoomButtonHovered = false
 
     var body: some View {
-        // Flow wraps overflowing segments to a new row instead of hiding
-        // them — narrow panes still surface every status at the cost of a
-        // taller chrome row. Each row is right-aligned so the visual
-        // matches the single-row layout when nothing wraps.
-        FlowLayout(alignment: .trailing, spacing: 8, rowSpacing: 4) {
-            ForEach(visibleItems, id: \.self) { item in
-                segment(for: item)
+        HStack(spacing: 8) {
+            // Zoom button — visible whenever zoom is meaningful. The
+            // status bar's own visibility gate now includes `canZoom`,
+            // so in clean multi-pane workspaces with no env/git data the
+            // bar appears just to host this button (else the affordance
+            // would be unreachable by mouse).
+            if workspace.canZoom {
+                zoomButton
             }
+            // Flow wraps overflowing segments to a new row instead of hiding
+            // them — narrow panes still surface every status at the cost of
+            // a taller chrome row. Each row is right-aligned so the visual
+            // matches the single-row layout when nothing wraps.
+            FlowLayout(alignment: .trailing, spacing: 8, rowSpacing: 4) {
+                ForEach(visibleItems, id: \.self) { item in
+                    segment(for: item)
+                }
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
         .font(Theme.mono(11))
-        .padding(.horizontal, Theme.space4)
+        .padding(.horizontal, Theme.space2)
         .padding(.vertical, 5)
         .background(Theme.chromeBackground)
+    }
+
+    private var zoomButton: some View {
+        let isZoomed = workspace.isZoomed(paneId)
+        let tooltip = isZoomed ? "Exit zoom (⌘⇧E)" : "Zoom pane (⌘⇧E)"
+        // Bracket-bordered pill matching `BracketButton` / Settings rows.
+        // Active (zoomed) state fills with `chromeActive` so the button
+        // itself reads as "engaged"; hover state lifts to `chromeHover`.
+        // No state = transparent fill, hairline border for affordance.
+        let fill: Color = {
+            if isZoomed { return Theme.chromeActive }
+            if zoomButtonHovered { return Theme.chromeHover }
+            return Color.clear
+        }()
+        return Button(action: {
+            withAnimation(Theme.chromeTransition) {
+                store.toggleZoom(in: workspace, paneId: paneId)
+            }
+        }) {
+            Image(systemName: isZoomed
+                  ? "arrow.down.right.and.arrow.up.left"
+                  : "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isZoomed ? Theme.chromeForeground : Theme.chromeMuted)
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(fill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .stroke(Theme.chromeHairline, lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .onHover { zoomButtonHovered = $0 }
+        .animation(Theme.chromeTransition, value: zoomButtonHovered)
+        .animation(Theme.chromeTransition, value: isZoomed)
     }
 
     private var visibleItems: [StatusBarItemKind] {
@@ -607,6 +664,16 @@ private struct PaneContextMenu: View {
                 isPresented = false
                 session.engine.performAction("clear_screen")
             }
+            if workspace.canZoom {
+                Divider()
+                let isZoomed = workspace.isZoomed(pane.id)
+                KookyMenuRow(title: isZoomed ? "Exit Zoom" : "Zoom Pane", shortcut: "⌘⇧E") {
+                    isPresented = false
+                    withAnimation(Theme.chromeTransition) {
+                        store.toggleZoom(in: workspace, paneId: pane.id)
+                    }
+                }
+            }
         }
     }
 
@@ -781,9 +848,24 @@ private struct SplitContainer: View {
     private static let maxFraction: Double = 0.9
 
     var body: some View {
-        guard case .split(let orientation, let first, let second, let fraction) = node.content else {
+        guard case .split(let orientation, let first, let second, let storedFraction) = node.content else {
             return AnyView(EmptyView())
         }
+        // Pane zoom = "push the fraction on every split along the path to
+        // the zoomed pane all the way to one side, smoothly animated."
+        // Non-zoomed panes get squeezed to width 0 by SwiftUI's frame
+        // animation. NSViews follow the CALayer frame change, so the
+        // libghostty surface visibly scales (same mechanism as the
+        // sidebar's `.frame(width:)` morph) instead of cross-fading.
+        let firstContainsZoom = workspace.zoomedPaneId.map { first.contains(paneId: $0) } ?? false
+        let secondContainsZoom = !firstContainsZoom
+            && (workspace.zoomedPaneId.map { second.contains(paneId: $0) } ?? false)
+        let fraction: Double = {
+            if firstContainsZoom { return 1.0 }
+            if secondContainsZoom { return 0.0 }
+            return storedFraction
+        }()
+        let isZoomedAcrossThisSplit = firstContainsZoom || secondContainsZoom
         return AnyView(
             GeometryReader { geo in
                 let total: CGFloat = orientation == .horizontal ? geo.size.width : geo.size.height
@@ -791,30 +873,71 @@ private struct SplitContainer: View {
                 let firstSize = max(0, usable * fraction)
                 let secondSize = max(0, usable - firstSize)
                 let handleOffset = firstSize - Self.handleHitSize / 2 + Self.dividerThickness / 2
+                // Divider + handle hide during zoom-collapse so the
+                // collapsed side doesn't leave a 1pt hairline at the edge
+                // and the user can't accidentally drag an invisible handle.
+                let chromeVisible: Double = isZoomedAcrossThisSplit ? 0 : 1
+
+                // "Push" the non-zoomed side off the workspace edge while
+                // the zoomed side grows to fill — visually reads as
+                // "shoving the other pane out" instead of "collapsing in
+                // place". Offset magnitude = full split dimension so the
+                // pane is fully off-edge by animation end; `.clipped()`
+                // hides anything that sticks out during the transition.
+                let firstPushX: CGFloat = orientation == .horizontal && secondContainsZoom ? -geo.size.width : 0
+                let secondPushX: CGFloat = orientation == .horizontal && firstContainsZoom ? geo.size.width : 0
+                let firstPushY: CGFloat = orientation == .vertical && secondContainsZoom ? -geo.size.height : 0
+                let secondPushY: CGFloat = orientation == .vertical && firstContainsZoom ? geo.size.height : 0
 
                 ZStack(alignment: orientation == .horizontal ? .leading : .top) {
                     if orientation == .horizontal {
                         HStack(spacing: 0) {
-                            PaneTreeView(node: first, workspace: workspace, store: store).frame(width: firstSize)
-                            Rectangle().fill(Theme.chromeHairline).frame(width: Self.dividerThickness)
-                            PaneTreeView(node: second, workspace: workspace, store: store).frame(width: secondSize)
+                            PaneTreeView(node: first, workspace: workspace, store: store)
+                                .frame(width: firstSize)
+                                .offset(x: firstPushX, y: firstPushY)
+                                .clipped()
+                            Rectangle().fill(Theme.chromeHairline)
+                                .frame(width: Self.dividerThickness)
+                                .opacity(chromeVisible)
+                            PaneTreeView(node: second, workspace: workspace, store: store)
+                                .frame(width: secondSize)
+                                .offset(x: secondPushX, y: secondPushY)
+                                .clipped()
                         }
                         DividerHandle(orientation: .horizontal)
                             .frame(width: Self.handleHitSize, height: geo.size.height)
                             .offset(x: handleOffset, y: 0)
+                            .opacity(chromeVisible)
+                            .allowsHitTesting(!isZoomedAcrossThisSplit)
                             .gesture(dragGesture(orientation: orientation, total: total))
                     } else {
                         VStack(spacing: 0) {
-                            PaneTreeView(node: first, workspace: workspace, store: store).frame(height: firstSize)
-                            Rectangle().fill(Theme.chromeHairline).frame(height: Self.dividerThickness)
-                            PaneTreeView(node: second, workspace: workspace, store: store).frame(height: secondSize)
+                            PaneTreeView(node: first, workspace: workspace, store: store)
+                                .frame(height: firstSize)
+                                .offset(x: firstPushX, y: firstPushY)
+                                .clipped()
+                            Rectangle().fill(Theme.chromeHairline)
+                                .frame(height: Self.dividerThickness)
+                                .opacity(chromeVisible)
+                            PaneTreeView(node: second, workspace: workspace, store: store)
+                                .frame(height: secondSize)
+                                .offset(x: secondPushX, y: secondPushY)
+                                .clipped()
                         }
                         DividerHandle(orientation: .vertical)
                             .frame(width: geo.size.width, height: Self.handleHitSize)
                             .offset(x: 0, y: handleOffset)
+                            .opacity(chromeVisible)
+                            .allowsHitTesting(!isZoomedAcrossThisSplit)
                             .gesture(dragGesture(orientation: orientation, total: total))
                     }
                 }
+                .clipped()
+                // Animation now driven by `withAnimation(Theme.chromeTransition)`
+                // at the toggle call sites — that propagates to the outer
+                // PaneStatusBar visibility too, so the chrome row that
+                // hosts the zoom button can animate in/out together with
+                // the split-tree morph.
             }
         )
     }

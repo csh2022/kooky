@@ -783,6 +783,169 @@ final class WorkspaceStoreTests: XCTestCase {
         store.discardTab(tab, in: ws)
         XCTAssertNil(store.reopenLastClosedTab(), "discardTab must not feed the reopen stack")
     }
+
+    // MARK: - Pane zoom
+
+    func testToggleZoomNoOpOnSinglePane() {
+        // Single pane → nothing to zoom into, guard rejects.
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        store.toggleZoom(in: ws, paneId: pane.id)
+        XCTAssertNil(ws.zoomedPaneId)
+    }
+
+    func testToggleZoomOnMultiPaneSetsZoomAndActivates() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let firstPane = self.firstPane(ws)
+        guard let newPane = store.splitPane(firstPane, orientation: .horizontal, in: ws) else {
+            return XCTFail("split failed")
+        }
+        // Force active to first so toggleZoom on second has to also
+        // activate (regression: clicking a non-active pane's button must
+        // zoom THAT pane, not the active one).
+        store.activateTab(firstPane.tabs[0], in: ws)
+        XCTAssertEqual(ws.activePaneId, firstPane.id)
+
+        store.toggleZoom(in: ws, paneId: newPane.id)
+        XCTAssertEqual(ws.zoomedPaneId, newPane.id)
+        XCTAssertEqual(ws.activePaneId, newPane.id, "zoom must activate the targeted pane")
+    }
+
+    func testToggleZoomTwiceClears() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let pane = firstPane(ws)
+        store.splitPane(pane, orientation: .horizontal, in: ws)
+        store.toggleZoom(in: ws, paneId: pane.id)
+        store.toggleZoom(in: ws, paneId: pane.id)
+        XCTAssertNil(ws.zoomedPaneId)
+    }
+
+    func testToggleZoomOnDifferentPaneSwitchesTarget() {
+        // While pane A is zoomed, clicking zoom on pane B should switch
+        // the zoom target to B (not unzoom). Matches the "make THIS pane
+        // fullscreen" muscle memory the docstring promises.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let paneA = firstPane(ws)
+        guard let paneB = store.splitPane(paneA, orientation: .horizontal, in: ws) else {
+            return XCTFail("split failed")
+        }
+        store.toggleZoom(in: ws, paneId: paneA.id)
+        XCTAssertEqual(ws.zoomedPaneId, paneA.id)
+        store.toggleZoom(in: ws, paneId: paneB.id)
+        XCTAssertEqual(ws.zoomedPaneId, paneB.id)
+    }
+
+    func testSplitWhileZoomedClearsZoom() {
+        // splitPane → user wants to see the new pane, drop zoom.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let paneA = firstPane(ws)
+        store.splitPane(paneA, orientation: .horizontal, in: ws)
+        store.toggleZoom(in: ws, paneId: paneA.id)
+        XCTAssertEqual(ws.zoomedPaneId, paneA.id)
+        store.splitPane(paneA, orientation: .vertical, in: ws)
+        XCTAssertNil(ws.zoomedPaneId)
+    }
+
+    func testClosingZoomedPaneClearsZoom() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let paneA = firstPane(ws)
+        guard let paneB = store.splitPane(paneA, orientation: .horizontal, in: ws) else {
+            return XCTFail("split failed")
+        }
+        store.toggleZoom(in: ws, paneId: paneB.id)
+        XCTAssertEqual(ws.zoomedPaneId, paneB.id)
+        store.closePane(paneB, in: ws)
+        XCTAssertNil(ws.zoomedPaneId)
+    }
+
+    func testCanZoomReflectsTreeShape() {
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        XCTAssertFalse(ws.canZoom, "single-pane workspace can't zoom")
+        let pane = firstPane(ws)
+        store.splitPane(pane, orientation: .horizontal, in: ws)
+        XCTAssertTrue(ws.canZoom, "multi-pane workspace can zoom")
+    }
+
+    func testFocusPaneWhileZoomedClearsZoom() {
+        // Regression (Codex P2 — `WorkspaceStore.swift:528-529`): cycling
+        // focus via ⌘[ / ⌘] off the zoomed pane previously left
+        // `zoomedPaneId` pointing at the old pane while `activePaneId`
+        // moved on, routing subsequent ⌘D / ⌘T at the hidden active
+        // pane. Focus change to a different pane must drop zoom.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let paneA = firstPane(ws)
+        guard let paneB = store.splitPane(paneA, orientation: .horizontal, in: ws) else {
+            return XCTFail("split failed")
+        }
+        store.toggleZoom(in: ws, paneId: paneA.id)
+        XCTAssertEqual(ws.zoomedPaneId, paneA.id)
+        store.focusPane(paneB, in: ws)
+        XCTAssertNil(ws.zoomedPaneId, "focusing a different pane while zoomed must exit zoom")
+        XCTAssertEqual(ws.activePaneId, paneB.id)
+    }
+
+    func testActivateTabOnDifferentPaneWhileZoomedClearsZoom() {
+        // Same regression on the activateTab path — clicking a tab in a
+        // different (hidden) pane while zoomed must auto-exit so the
+        // newly-focused pane becomes visible.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let paneA = firstPane(ws)
+        guard let paneB = store.splitPane(paneA, orientation: .horizontal, in: ws) else {
+            return XCTFail("split failed")
+        }
+        store.toggleZoom(in: ws, paneId: paneA.id)
+        XCTAssertEqual(ws.zoomedPaneId, paneA.id)
+        store.activateTab(paneB.tabs[0], in: ws)
+        XCTAssertNil(ws.zoomedPaneId)
+        XCTAssertEqual(ws.activePaneId, paneB.id)
+    }
+
+    func testActivateTabOnZoomedPaneKeepsZoom() {
+        // Switching tabs WITHIN the zoomed pane (or just re-activating)
+        // doesn't change pane focus → zoom stays. Guards against an
+        // over-eager "any activateTab clears zoom" interpretation of the
+        // fix above.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let paneA = firstPane(ws)
+        store.splitPane(paneA, orientation: .horizontal, in: ws)
+        let secondTab = store.addTab(in: ws, pane: paneA)
+        store.toggleZoom(in: ws, paneId: paneA.id)
+        store.activateTab(paneA.tabs[0], in: ws)
+        XCTAssertEqual(ws.zoomedPaneId, paneA.id, "switching tabs in the zoomed pane keeps zoom")
+        store.activateTab(secondTab, in: ws)
+        XCTAssertEqual(ws.zoomedPaneId, paneA.id)
+    }
+
+    func testToggleZoomSuspendsSizePropagationDuringAnimation() {
+        // The animation window must skip per-frame `set_size` propagation
+        // — otherwise each animation frame fires its own SIGWINCH burst
+        // (the documented conda-init scrollback-wipe path). Verifies the
+        // flag is set immediately after toggle; the async restore lives
+        // on a 0.25s delay we don't wait for here.
+        let store = makeStore()
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let paneA = firstPane(ws)
+        guard let paneB = store.splitPane(paneA, orientation: .horizontal, in: ws) else {
+            return XCTFail("split failed")
+        }
+        let engineA = engine(paneA.tabs[0])
+        let engineB = engine(paneB.tabs[0])
+        XCTAssertFalse(engineA.suspendsSizePropagation)
+        XCTAssertFalse(engineB.suspendsSizePropagation)
+        store.toggleZoom(in: ws, paneId: paneA.id)
+        XCTAssertTrue(engineA.suspendsSizePropagation, "every engine in the workspace gets suspended")
+        XCTAssertTrue(engineB.suspendsSizePropagation)
+    }
 }
 
 private extension PersistedPaneNode {

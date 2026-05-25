@@ -264,6 +264,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             .separator,
             selfRow("Split Right", #selector(handleSplitRight), "d"),
             selfRow("Split Down", #selector(handleSplitDown), "d", modifiers: [.command, .shift]),
+            selfRow("Zoom Pane", #selector(handleToggleZoom), "e", modifiers: [.command, .shift]),
             selfRow("Focus Previous Pane", #selector(handleFocusPreviousPane), "["),
             selfRow("Focus Next Pane", #selector(handleFocusNextPane), "]"),
             .separator,
@@ -491,6 +492,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         guard let store = activeStore, let workspace = store.active,
               let pane = workspace.activePane else { return }
         store.splitPane(pane, orientation: .vertical, in: workspace)
+    }
+
+    @objc private func handleToggleZoom() {
+        guard let store = activeStore, let workspace = store.active else { return }
+        // `withAnimation` (matching `handleToggleSidebar`) propagates the
+        // transaction to *every* view change triggered by the mutation —
+        // SplitContainer's fraction/offset morph AND the outer
+        // PaneStatusBar visibility transition both animate together.
+        withAnimation(Theme.chromeTransition) {
+            store.toggleZoom(in: workspace)
+        }
     }
 
     @objc private func handleFocusNextPane() {

@@ -29,6 +29,10 @@ final class TestEngine: TerminalEngine {
         terminateCount += 1
     }
 
+    var suspendsSizePropagation: Bool = false
+    private(set) var flushSizeCount: Int = 0
+    func flushSize() { flushSizeCount += 1 }
+
     private(set) var performedActions: [String] = []
     @discardableResult
     func performAction(_ name: String) -> Bool {

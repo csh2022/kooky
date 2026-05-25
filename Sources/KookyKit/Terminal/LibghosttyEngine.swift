@@ -273,6 +273,15 @@ final class LibghosttyEngine: TerminalEngine {
         surfaceView.releaseSurface()
     }
 
+    var suspendsSizePropagation: Bool {
+        get { surfaceView.suspendsSizePropagation }
+        set { surfaceView.suspendsSizePropagation = newValue }
+    }
+
+    func flushSize() {
+        surfaceView.flushPropagateSize()
+    }
+
     @discardableResult
     func performAction(_ name: String) -> Bool {
         guard let surface = surfaceView.surface else { return false }
@@ -544,11 +553,23 @@ final class GhosttySurfaceView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// Toggled true around animated layout changes (pane zoom). Per-frame
+    /// `setFrameSize` callbacks then skip the SIGWINCH-propagating
+    /// `ghostty_surface_set_size` and the caller pushes one final size
+    /// sync via `flushPropagateSize` after the animation settles.
+    var suspendsSizePropagation: Bool = false
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         // AppKit calls this whenever this view's own frame changes — single
         // canonical hook. The legacy `resizeSubviews(withOldSize:)` would
         // double-propagate.
+        if !suspendsSizePropagation {
+            propagateSizeToSurface()
+        }
+    }
+
+    func flushPropagateSize() {
         propagateSizeToSurface()
     }
 

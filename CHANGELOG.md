@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.16.3 — 2026-05-25
+
+- **Pane zoom (⌘⇧E)** — expand the active pane to fill the workspace; the other panes slide off-screen but their processes keep running. Toggle from ⌘⇧E, the zoom button in each pane's bottom status bar, the View menu, or right-click → "Zoom Pane".
+
 ## v0.16.2 — 2026-05-25
 
 - **Settings → Status Bar** — drag to reorder the pane bottom status bar's slots (Python venv / Node version / Proxy / Git branch / Git diff), toggle individual ones off, or hide the whole row. Reset to defaults if you change your mind.

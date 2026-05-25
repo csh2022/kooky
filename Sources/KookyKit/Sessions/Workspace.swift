@@ -14,6 +14,20 @@ final class Workspace: Identifiable {
     /// Currently focused leaf-pane id. Splits/closes update this so cwd
     /// tracking and ⌘D act on what the user is looking at.
     var activePaneId: UUID?
+    /// When non-nil, `PaneTreeView` renders only this pane and hides the
+    /// rest of the split tree (pane zoom). Runtime-only — never persisted,
+    /// so a kooky relaunch never strands the user in zoom. `closePane` /
+    /// `splitPane` clear this automatically when the zoomed pane changes
+    /// shape.
+    var zoomedPaneId: UUID?
+
+    /// Is `paneId` the currently zoomed pane?
+    func isZoomed(_ paneId: UUID) -> Bool { zoomedPaneId == paneId }
+
+    /// True when ⌘⇧E / the zoom button has something to do — either there
+    /// are multiple panes to choose between, or the workspace is already
+    /// zoomed (so toggling un-zooms).
+    var canZoom: Bool { root.hasMultiplePanes || zoomedPaneId != nil }
     /// Empty / whitespace input via `renameWorkspace` clears this back to
     /// `nil` so the sidebar label resumes tracking the cwd.
     var customTitle: String? = nil
