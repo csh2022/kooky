@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.16.0 — 2026-05-25
+
+- **Quick Open (⌘P)** — fuzzy-search across every window's workspaces and tabs, plus every visible agent and Terminal preset. Type to filter, ↑↓ to navigate, Enter to jump; clicking a workspace or tab focuses its owning window, picking an agent or preset spawns a new tab with it. Triggers from ⌘P or the search pill in the top chrome.
+
 ## v0.15.0 — 2026-05-25
 
 - **Terminal presets** — define "Terminal at <path>" entries that show up in the `+` menu, each opening a new tab at a fixed folder regardless of the active workspace. Configure under Settings → Terminals: name + path (with `~/foo` shorthand or a folder picker), drag to reorder, toggle visibility, delete. Handy when you keep jumping to the same project folders.

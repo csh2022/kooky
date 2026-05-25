@@ -218,6 +218,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             selfRow("New Workspace", #selector(handleNewWorkspace), "n"),
             selfRow("New Window", #selector(handleNewWindow), "n", modifiers: [.command, .shift]),
             .separator,
+            selfRow("Quick Open…", #selector(handleQuickOpen), "p"),
             selfRow("Open Folder…", #selector(handleOpenFolder), "o"),
             .separator,
             selfRow("Close Tab", #selector(handleCloseTab), "w"),
@@ -385,6 +386,53 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleNewWorkspace() {
         activeStore?.addWorkspace()
+    }
+
+    /// Internal (not `private`) so `#selector` in `ContentView` can typecheck.
+    /// The runtime dispatch goes through Obj-C selectors either way.
+    @objc func handleQuickOpen() {
+        // Built fresh every open so a workspace added / tab renamed since
+        // the panel was last shown reflects in the index without us
+        // tracking invalidations. `toggle` makes ⌘P symmetric — press to
+        // open, press again (or Esc) to dismiss.
+        CommandPaletteWindowController.shared.toggle(
+            items: { [weak self] in
+                guard let self else { return [] }
+                return PaletteIndex.build(controllers: self.windowControllers, model: KookySettingsModel.shared)
+            },
+            anchor: activeController?.window,
+            onActivate: { [weak self] item in self?.activate(item) }
+        )
+    }
+
+    /// Routes a palette pick to the owning window + workspace. Workspace
+    /// and tab picks raise their owning window first so a cross-window
+    /// jump lands in front. Agent / preset picks spawn in the *currently*
+    /// active workspace (matches the muscle memory of ⌘T).
+    private func activate(_ item: PaletteItem) {
+        switch item.kind {
+        case .workspace(let wsId, let winId):
+            guard let target = windowControllers.first(where: { $0.windowId == winId }),
+                  let ws = target.store.workspaces.first(where: { $0.id == wsId }) else { return }
+            target.window?.makeKeyAndOrderFront(nil)
+            target.store.activateWorkspace(ws)
+        case .tab(let sId, let wsId, let winId):
+            // `pane(containingSessionId:)` short-circuits on the first
+            // matching pane; the codebase prefers it over `allPanes.first(where:)`
+            // for tree walks (per PaneNode.swift doc).
+            guard let target = windowControllers.first(where: { $0.windowId == winId }),
+                  let ws = target.store.workspaces.first(where: { $0.id == wsId }),
+                  let pane = ws.root.pane(containingSessionId: sId),
+                  let session = pane.tabs.first(where: { $0.id == sId }) else { return }
+            target.window?.makeKeyAndOrderFront(nil)
+            target.store.activateWorkspace(ws)
+            target.store.activateTab(session, in: ws)
+        case .agent(let templateId):
+            guard let store = activeStore, let ws = store.active else { return }
+            let template = AgentTemplate.visibleOrdered(model: KookySettingsModel.shared)
+                .first(where: { $0.id == templateId }) ?? .terminal
+            store.addTab(in: ws, template: template)
+        }
     }
 
     @objc private func handleOpenFolder() {

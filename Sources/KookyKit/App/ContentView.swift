@@ -21,22 +21,30 @@ struct ContentView: View {
         .ignoresSafeArea(.all)
     }
 
-    /// Top 32pt strip. `window.isMovable = false` is set globally, so this
-    /// `WindowDragHandle` is the only place AppKit allows window dragging.
+    /// Top 32pt strip. `window.isMovable = false` is set globally, so the
+    /// `WindowDragHandle` background is the only place AppKit allows
+    /// window dragging. The centered `SearchTriggerPill` sits *above* the
+    /// drag handle in the ZStack so clicks on the pill open the palette
+    /// while drags on the surrounding empty area still move the window.
     private var topStrip: some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: 82).allowsHitTesting(false)
-            HoverableIconButton(
-                systemName: "sidebar.left",
-                fontSize: 12,
-                size: 28,
-                help: sidebarTooltip
-            ) {
-                withAnimation(Theme.chromeTransition) {
-                    store.setSidebarMode(store.sidebarMode.next)
+        ZStack {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 82).allowsHitTesting(false)
+                HoverableIconButton(
+                    systemName: "sidebar.left",
+                    fontSize: 12,
+                    size: 28,
+                    help: sidebarTooltip
+                ) {
+                    withAnimation(Theme.chromeTransition) {
+                        store.setSidebarMode(store.sidebarMode.next)
+                    }
                 }
+                WindowDragHandle()
             }
-            WindowDragHandle()
+            SearchTriggerPill {
+                NSApp.sendAction(#selector(AppDelegate.handleQuickOpen), to: nil, from: nil)
+            }
         }
         .frame(height: 32)
     }
