@@ -23,28 +23,34 @@ struct ContentView: View {
 
     /// Top 32pt strip. `window.isMovable = false` is set globally, so the
     /// `WindowDragHandle` background is the only place AppKit allows
-    /// window dragging. The centered `SearchTriggerPill` sits *above* the
-    /// drag handle in the ZStack so clicks on the pill open the palette
-    /// while drags on the surrounding empty area still move the window.
+    /// window dragging. The `SearchTriggerPill` lives in an *inner* ZStack
+    /// scoped to the drag-handle area (not the whole strip) so it centers
+    /// in the available space and can't overlap the sidebar toggle when
+    /// the window is dragged narrow. `ViewThatFits` drops the pill
+    /// entirely once even the inner area can't hold its 280pt frame —
+    /// `⌘P` + the File menu still reach the palette.
     private var topStrip: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                Color.clear.frame(width: 82).allowsHitTesting(false)
-                HoverableIconButton(
-                    systemName: "sidebar.left",
-                    fontSize: 12,
-                    size: 28,
-                    help: sidebarTooltip
-                ) {
-                    withAnimation(Theme.chromeTransition) {
-                        store.setSidebarMode(store.sidebarMode.next)
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 82).allowsHitTesting(false)
+            HoverableIconButton(
+                systemName: "sidebar.left",
+                fontSize: 12,
+                size: 28,
+                help: sidebarTooltip
+            ) {
+                withAnimation(Theme.chromeTransition) {
+                    store.setSidebarMode(store.sidebarMode.next)
+                }
+            }
+            WindowDragHandle()
+                .overlay {
+                    ViewThatFits(in: .horizontal) {
+                        SearchTriggerPill {
+                            NSApp.sendAction(#selector(AppDelegate.handleQuickOpen), to: nil, from: nil)
+                        }
+                        EmptyView()
                     }
                 }
-                WindowDragHandle()
-            }
-            SearchTriggerPill {
-                NSApp.sendAction(#selector(AppDelegate.handleQuickOpen), to: nil, from: nil)
-            }
         }
         .frame(height: 32)
     }

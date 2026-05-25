@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.16.1 — 2026-05-25
+
+- Fixed the Quick Open search pill overlapping the sidebar toggle when the window was dragged narrow. The pill now stays in the drag-handle area and hides automatically when there isn't room for it — ⌘P and the File menu still open the palette.
+
 ## v0.16.0 — 2026-05-25
 
 - **Quick Open (⌘P)** — fuzzy-search across every window's workspaces and tabs, plus every visible agent and Terminal preset. Type to filter, ↑↓ to navigate, Enter to jump; clicking a workspace or tab focuses its owning window, picking an agent or preset spawns a new tab with it. Triggers from ⌘P or the search pill in the top chrome.

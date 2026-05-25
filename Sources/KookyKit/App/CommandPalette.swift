@@ -371,12 +371,13 @@ final class CommandPaletteWindowController: NSWindowController {
 
 // MARK: - Top-chrome trigger pill
 
-/// Clicks the floating palette open — same target as ⌘P. Lives inside
-/// the 32pt top strip, *above* `WindowDragHandle` in the ZStack so the
-/// pill consumes its own clicks while drags on the surrounding empty
-/// area still move the window. Visually minimal — just a faint white
-/// wash that brightens on hover, no border (relies on the contrast wash
-/// against the chrome background instead of a hairline outline).
+/// Clicks the floating palette open — same target as ⌘P. Rendered as
+/// an overlay on `WindowDragHandle` (scoped to the area right of the
+/// sidebar toggle) so the pill consumes its own clicks while drags on
+/// the surrounding empty area still move the window; `ContentView`'s
+/// `ViewThatFits` wrapper drops the pill entirely when the window is
+/// too narrow to hold its 280pt frame. Visually minimal — just a faint
+/// white wash that brightens on hover.
 struct SearchTriggerPill: View {
     let onOpen: () -> Void
     @State private var isHovered: Bool = false
