@@ -18,21 +18,21 @@
 
 **一键启动各种 agent。** Claude Code · Codex · Gemini CLI · OpenCode · Amp · Cursor CLI · Copilot CLI · Grok Build · Antigravity CLI。`+` 菜单里选一个,agent 会在第一个 prompt 出现前启动。Claude 对话还会跨 kooky 重启自动 resume,关掉 tab 再打开能从离开的地方接上。
 
-**右键选中 → "Ask <agent>"。** 在 terminal 里选中一段 error / 日志 / 文件路径,右键挑任意 agent,新 tab 起来时 selection 已经作为第一条 prompt 提交给它,直接开始答 —— 不用 ⌘C / ⌘V 来回切。
+**右键选中 → "Ask <agent>"。** 在 terminal 里选中一段 error / 日志 / 文件路径,右键挑任意 agent,新 tab 一打开,selection 已经作为第一条 prompt 发出去了,直接开始回答 —— 不用 ⌘C / ⌘V 来回切。
 
-**快速打开(⌘P)。** 一个浮动面板模糊搜索所有 window 的 workspaces、tabs、agents、Terminal presets。输入过滤,↑↓ 切换,Enter 跳转或新开。⌘P 或顶部 chrome 的 search pill 触发。
+**快速打开(⌘P)。** 一个浮动面板模糊搜索所有 window 的 workspaces、tabs、agents、Terminal presets。输入关键字筛选,↑↓ 选,Enter 跳过去或者新开一个。⌘P 或顶部 chrome 上的 search pill 都能触发。
 
-**输入摩擦极小。** 在 zsh 提示行点任意位置即可移动光标(不用按 modifier,跟 ghostty.app 一致)。从 Finder 拖一个文件或文件夹到任意 pane,绝对路径自动 escape 后插入光标处。
+**输入顺手。** 在 zsh 提示行点哪儿光标就跳哪儿(不用按 modifier,跟 ghostty.app 一致)。从 Finder 把文件或文件夹拖到任意 pane,绝对路径会自动 escape 后插到光标位置。
 
 **Agent 状态实时展示。** 侧边栏圆点显示每个 agent 的状态：运行中（蓝）、等待你处理（琥珀）、空闲（无色）。上一条命令非零退出时，tab 和 workspace 会同步显示红点；悬停可看到 `exit N · 12.4s`。
 
-**工作区状态和环境一眼可见。** pane 底部状态栏显示 Git 分支 + diff（`N files +X −Y`）、Python venv、Node 版本，以及生效的代理（`https_proxy` / `http_proxy` / `all_proxy`）。Agent 的 Bash tool 切分支或者其他终端改了 git 状态都会自动刷新。Node 版本和 Git 分支点一下直接切换，代理点开能看完整 `name=value` 并复制。
+**工作区状态和环境一眼可见。** pane 底部状态栏显示 Git 分支 + diff（`N files +X −Y`）、Python venv、Node 版本，以及当前生效的代理（`https_proxy` / `http_proxy` / `all_proxy`）。Agent 用 Bash 切分支也好,你在别的终端改了 git 状态也好,这里都会自动刷新。Node 版本和 Git 分支点一下就能切,代理点开能看完整 `name=value` 并复制。
 
-**SwiftUI 原生开发，简约风格。** Onest + JetBrains Mono 字体。自定义 About 面板、带快捷键提示的原生菜单、中日韩等 IME 都支持。
+**SwiftUI 原生开发，简约风格。** Onest + JetBrains Mono 字体。自定义 About 面板、带快捷键提示的原生菜单,中日韩 IME 输入完整支持。
 
-**可配置。** Settings 面板（`⌘,`）走侧边栏布局：**General**（字体 / 光标 / 字号;选一个 `+` 和 `⌘T` 默认开什么）、**Terminals**(配多个「Terminal at /path」预设,每个钉死一个文件夹,出现在 `+` 菜单 —— 拖动排序、开关可见)、**Agents**（拖拽排序、开关可见、为每个 agent 单独配启动参数比如 `--model opus`、定义自己的 custom agent —— 基于 Claude Code 的可以配自己的 endpoint / API key,指向镜像或代理站）、**Status Bar**(拖动排序 pane 底部各项 —— Python venv / Node version / Proxy / Git branch / Git diff —— 或单独关掉)、**Advanced**（直接打开 raw JSON）。所有覆盖落在 `~/.kooky/settings.json` —— kooky 先读你的 `~/.config/ghostty/config`，再用 settings.json 覆盖；首次启动会询问是否导入现有 ghostty 配置。
+**可配置。** Settings 面板（`⌘,`）侧边栏布局：**General**（字体 / 光标 / 字号;挑一个 `+` 和 `⌘T` 默认开什么）、**Terminals**(配置多个「Terminal at /path」预设,每个固定到一个文件夹,出现在 `+` 菜单 —— 拖动排序、随时切换显隐)、**Agents**（拖动排序、切换显隐、给每个 agent 单独配启动参数比如 `--model opus`、定义自己的 custom agent —— 基于 Claude Code 的还能配自己的 endpoint / API key,指向镜像或代理站）、**Status Bar**(拖动排序 pane 底部状态栏的各项 —— Python venv / Node version / Proxy / Git branch / Git diff —— 也可以单独关掉)、**Advanced**（直接打开 raw JSON）。所有自定义都写到 `~/.kooky/settings.json` —— kooky 先读你的 `~/.config/ghostty/config`,再用 settings.json 覆盖;首次启动会问要不要导入现有 ghostty 配置。
 
-**默认本地。** 不需要账号，不做遥测，没有云同步。kooky 自己的状态都保存在本机。
+**默认本地。** 不需要账号，不做遥测，没有云同步。kooky 的状态都留在本机。
 
 **基于 libghostty。** 使用和 ghostty 同源的 GPU 终端渲染引擎。
 
