@@ -30,7 +30,7 @@ A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / 
 
 **SwiftUI-native, minimal chrome.** Onest + JetBrains Mono. Custom About panel, native menus with shortcut hints, full IME support.
 
-**Configurable.** Settings (`⌘,`) with a sidebar layout: **General** (font / cursor / size; pick the default `+` / `⌘T` action), **Terminals** (define "Terminal at /path" presets that show up in the `+` menu, each pinned to a folder — drag to reorder, toggle visibility), **Agents** (drag to reorder, toggle visibility, set per-agent launch options like `--model opus`, define your own custom agents — point a Claude Code-based one at a mirror or proxy with its own endpoint and API key), **Advanced** (open raw JSON). All overrides live in `~/.kooky/settings.json` — ghostty's own `~/.config/ghostty/config` is read first and your overrides layer on top; first-launch offers to import an existing ghostty setup.
+**Configurable.** Settings (`⌘,`) with a sidebar layout: **General** (font / cursor / size; pick the default `+` / `⌘T` action), **Terminals** (define "Terminal at /path" presets that show up in the `+` menu, each pinned to a folder — drag to reorder, toggle visibility), **Agents** (drag to reorder, toggle visibility, set per-agent launch options like `--model opus`, define your own custom agents — point a Claude Code-based one at a mirror or proxy with its own endpoint and API key), **Status Bar** (drag to reorder the pane bottom slots — Python venv / Node version / Proxy / Git branch / Git diff — or toggle individual ones off), **Advanced** (open raw JSON). All overrides live in `~/.kooky/settings.json` — ghostty's own `~/.config/ghostty/config` is read first and your overrides layer on top; first-launch offers to import an existing ghostty setup.
 
 **Local by default.** No accounts, no telemetry, no cloud sync. Kooky keeps its own state on your device.
 
@@ -84,7 +84,7 @@ Requires Xcode 26+ and macOS 14+ (Sonoma — `@Observable` is the floor).
 ./scripts/setup-libghostty.sh        # one-time: fetch the libghostty xcframework
 swift build
 swift run                            # dev mode
-swift test                           # 187 unit tests
+swift test                           # 189 unit tests
 
 ./scripts/build-app.sh               # writes dist/Kooky.app
 ./scripts/build-dmg.sh --build       # writes dist/Kooky-vX.Y.Z.dmg
