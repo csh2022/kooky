@@ -1,5 +1,11 @@
 # kooky
 
+[![License](https://img.shields.io/github/license/iAmCorey/kooky?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/iAmCorey/kooky?style=flat-square)](https://github.com/iAmCorey/kooky/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-007AFF?style=flat-square)](https://github.com/iAmCorey/kooky/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/iAmCorey/kooky/total?style=flat-square)](https://github.com/iAmCorey/kooky/releases)
+[![Stars](https://img.shields.io/github/stars/iAmCorey/kooky?style=flat-square)](https://github.com/iAmCorey/kooky/stargazers)
+
 > *A minimal modern terminal for AI coding.*
 
 🇬🇧 English  ·  🇨🇳 [中文](README_CN.md)
