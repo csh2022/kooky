@@ -79,6 +79,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
         // `addWindow` keys each as it's created, so the last restored window
         // ends up frontmost — kooky doesn't persist which window was key.
+        //
+        // Worktree two-way reconcile runs off the main actor so launch
+        // isn't blocked by N × `git worktree list` subprocesses. Sidebar
+        // paints first; adoptions / zombie removals trickle in once each
+        // store's reconcile returns.
+        for controller in windowControllers {
+            Task { [store = controller.store] in
+                await store.reconcileWorktrees()
+            }
+        }
     }
 
     /// Creates a window + its own `WorkspaceStore`. A fresh `windowId` (the
@@ -539,7 +549,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleCloseWorkspace() {
         guard let store = activeStore, let workspace = store.active else { return }
-        store.closeWorkspace(workspace)
+        store.requestCloseWorkspace(workspace)
     }
 
     // MARK: - NSMenuDelegate

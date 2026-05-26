@@ -9,6 +9,11 @@ struct HoverableIconButton: View {
     let size: CGFloat
     let help: String?
     let action: () -> Void
+    /// Optional rotation in degrees applied to the symbol. Animated via
+    /// `easeOut(0.15)` so toggle controls (sidebar disclosure chevron) get
+    /// a smooth state transition; default 0 leaves static buttons (× / +)
+    /// untouched.
+    var rotation: Double = 0
 
     @State private var isHovered = false
 
@@ -16,6 +21,8 @@ struct HoverableIconButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: fontSize, weight: .medium))
+                .rotationEffect(.degrees(rotation))
+                .animation(.easeOut(duration: 0.15), value: rotation)
                 .frame(width: size, height: size)
                 .background(isHovered ? Color.white.opacity(0.12) : .clear)
                 .clipShape(RoundedRectangle(cornerRadius: 5))

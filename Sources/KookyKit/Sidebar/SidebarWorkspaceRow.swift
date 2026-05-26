@@ -1,6 +1,14 @@
 import SwiftUI
 
 struct SidebarWorkspaceRow: View {
+    /// Disclosure state for a source workspace that owns worktree children.
+    /// `toggle` is wired by the sidebar's parent — the row only renders the
+    /// chevron and forwards the click.
+    struct WorktreeDisclosure {
+        let isCollapsed: Bool
+        let toggle: () -> Void
+    }
+
     let workspace: Workspace
     let isActive: Bool
     let isCompact: Bool
@@ -10,6 +18,12 @@ struct SidebarWorkspaceRow: View {
     let onCloseOthers: () -> Void
     let onDuplicate: () -> Void
     let onRename: (String) -> Void
+    var disclosure: WorktreeDisclosure? = nil
+    /// Non-nil for source (top-level, non-worktree) workspaces — the
+    /// right-click menu surfaces a "Create Worktree…" entry that the
+    /// sidebar wires to a sheet. Nil on worktree rows so worktree
+    /// nesting stays disabled.
+    var onCreateWorktree: (() -> Void)? = nil
 
     @State private var isHovered = false
     @State private var isContextMenuOpen = false
@@ -55,6 +69,15 @@ struct SidebarWorkspaceRow: View {
                     isContextMenuOpen = false
                     onDuplicate()
                 }
+                if let onCreateWorktree {
+                    KookyMenuRow(title: "Create Worktree…") {
+                        isContextMenuOpen = false
+                        // Defer one runloop tick so the menu popover finishes
+                        // dismissing before the sheet anchors — back-to-back
+                        // popovers/sheets off the same view glitch otherwise.
+                        DispatchQueue.main.async { onCreateWorktree() }
+                    }
+                }
                 KookyMenuDivider()
                 KookyMenuRow(title: "Reveal in Finder") {
                     isContextMenuOpen = false
@@ -76,6 +99,7 @@ struct SidebarWorkspaceRow: View {
 
     private func fullBody(agents: [AgentTemplate], dotColor: Color?) -> some View {
         HStack(spacing: Theme.space2) {
+            disclosureChevron
             agentIcons(agents: agents)
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.title)
@@ -126,6 +150,28 @@ struct SidebarWorkspaceRow: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 9)
+    }
+
+    /// Chevron column at the row's leading edge. Renders for source
+    /// workspaces with at least one worktree (caller passes a non-nil
+    /// `disclosure`); otherwise an empty zero-width view so worktree rows
+    /// align via the sidebar's `worktreeIndent` instead. Reuses
+    /// `HoverableIconButton` so hover affordance (bg tint + corner
+    /// radius + size) matches the trailing close (×) button.
+    @ViewBuilder
+    private var disclosureChevron: some View {
+        if let disclosure {
+            HoverableIconButton(
+                systemName: "chevron.right",
+                fontSize: 9,
+                size: 20,
+                help: nil,
+                action: disclosure.toggle,
+                rotation: disclosure.isCollapsed ? 0 : 90
+            )
+        } else {
+            EmptyView()
+        }
     }
 
     @ViewBuilder

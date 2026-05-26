@@ -159,21 +159,275 @@ final class WorkspaceStore {
     // MARK: - Workspaces
 
     @discardableResult
-    func addWorkspace(workingDirectory: URL? = nil) -> Workspace {
+    func addWorkspace(
+        workingDirectory: URL? = nil,
+        worktreeParent: Workspace? = nil,
+        worktreeBranch: String? = nil,
+        template: AgentTemplate = .terminal,
+        preserveActive: Bool = false
+    ) -> Workspace {
         let dir = workingDirectory
             ?? active?.workingDirectory
             ?? URL(fileURLWithPath: NSHomeDirectory())
         let pane = Pane()
         let root = PaneNode(pane: pane)
         let workspace = Workspace(workingDirectory: dir, root: root)
-        let session = spawnSession(template: .terminal, initialCwd: dir)
+        workspace.worktreeParentId = worktreeParent?.id
+        workspace.worktreeBranch = worktreeBranch
+        // Pin worktreePath at create time so `git worktree remove` always
+        // targets the disk root, no matter where the user cd's later.
+        // `.standardizedFileURL` resolves `/tmp` → `/private/tmp` etc. so
+        // a later reconcile comparison against `git worktree list`
+        // output (which is already realpath'd) lines up.
+        if worktreeParent != nil {
+            workspace.worktreePath = dir.standardizedFileURL
+        }
+        let session = spawnSession(template: template, initialCwd: dir)
         wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
         pane.tabs.append(session)
         pane.activeTabId = session.id
-        workspaces.append(workspace)
-        activeWorkspaceId = workspace.id
+        // Worktrees insert right after their source (or after the source's
+        // existing worktrees) — compact-mode sidebar walks `workspaces`
+        // in array order, so this visual grouping is load-bearing there.
+        if let parent = worktreeParent,
+           let parentIdx = workspaces.firstIndex(where: { $0 === parent }) {
+            var insertAt = parentIdx + 1
+            while insertAt < workspaces.count
+                  && workspaces[insertAt].worktreeParentId == parent.id {
+                insertAt += 1
+            }
+            workspaces.insert(workspace, at: insertAt)
+        } else {
+            workspaces.append(workspace)
+        }
+        // Reconcile's orphan-adopt path passes `preserveActive: true` so a
+        // launch with disk-only orphans doesn't silently overwrite the
+        // user's persisted active-workspace choice.
+        if !preserveActive {
+            activeWorkspaceId = workspace.id
+        }
         scheduleSave()
         return workspace
+    }
+
+    /// Creates a git worktree of `source` and adds the resulting directory
+    /// as a child workspace under it. `git worktree add` runs on a detached
+    /// task so the SwiftUI sheet stays responsive; on failure the stderr
+    /// goes back via the outcome so the sheet shows it inline.
+    func createWorktree(
+        source: Workspace,
+        request: CreateWorktreeSheet.Request
+    ) async -> CreateWorktreeSheet.CreateOutcome {
+        guard let repoPath = WorktreeManager.repoRoot(near: source.workingDirectory) else {
+            return .failure("not inside a git repository")
+        }
+        let path = request.path
+        let mode = request.mode
+        let result = await Task.detached(priority: .userInitiated) {
+            WorktreeManager.add(repoPath: repoPath, path: path, mode: mode)
+        }.value
+        if case .failure(let err) = result {
+            return .failure(err.description)
+        }
+        addWorkspace(
+            workingDirectory: path,
+            worktreeParent: source,
+            worktreeBranch: request.branchForDisplay,
+            template: request.template
+        )
+        return .success
+    }
+
+    /// Worktree workspaces close through this request first so the
+    /// sidebar can pop the brutalist confirm sheet before anything
+    /// destructive runs. Plain workspaces skip the prompt and go
+    /// straight to `closeWorkspace`. Set non-nil to mean "user asked to
+    /// close this worktree, sidebar please ask them about the dir";
+    /// cleared by the sheet on dismiss / confirm.
+    var pendingRemovalRequest: Workspace?
+
+    /// Payload for the "close source workspace, take its worktrees with
+    /// it" confirm sheet. A source can't simply close on its own — its
+    /// worktrees would either show as orphan rows (the sidebar fallback)
+    /// or vanish silently. Either way the user's mental model breaks.
+    struct CloseSourceRequest {
+        let source: Workspace
+        let worktrees: [Workspace]
+    }
+
+    /// Set when a top-level workspace with worktrees is being closed and
+    /// the sidebar should pop the bulk confirm sheet. Plain top-level
+    /// workspaces (no worktrees) close inline and never park here.
+    var pendingCloseSourceRequest: CloseSourceRequest?
+
+    /// UI-level close request. Callers from the sidebar (× button, right-
+    /// click menu) and the ⌘⇧W menu item both funnel here so the
+    /// confirm prompt only lives in one place.
+    func requestCloseWorkspace(_ workspace: Workspace) {
+        if workspace.worktreeParentId != nil {
+            pendingRemovalRequest = workspace
+            return
+        }
+        let worktrees = workspaces.filter { $0.worktreeParentId == workspace.id }
+        if worktrees.isEmpty {
+            closeWorkspace(workspace)
+            return
+        }
+        pendingCloseSourceRequest = CloseSourceRequest(source: workspace, worktrees: worktrees)
+    }
+
+    /// Performs the deferred source-with-worktrees close from the sheet.
+    /// Always `git worktree remove`s every worktree before closing the
+    /// source — the sidebar = disk invariant. First failing git remove
+    /// aborts and surfaces stderr.
+    func performCloseSource(_ request: CloseSourceRequest) async -> String? {
+        for worktree in request.worktrees {
+            if let message = await removeWorktreeDirectory(worktree) {
+                return message
+            }
+        }
+        for worktree in request.worktrees { closeWorkspace(worktree) }
+        closeWorkspace(request.source)
+        pendingCloseSourceRequest = nil
+        return nil
+    }
+
+    /// Two-way sync between sidebar worktree workspaces and what `git
+    /// worktree list` reports on disk. Runs once at app launch (AppDelegate
+    /// calls it after every window's store is restored). Disk is treated
+    /// as the source of truth — sidebar mirrors disk, matching the
+    /// Crystal / Conductor model.
+    ///
+    /// Subprocess fan-out runs off the main actor in a TaskGroup so a
+    /// user with N source repos doesn't pay N × ~100ms blocked on launch.
+    /// Results apply back on the main actor in source order.
+    func reconcileWorktrees() async {
+        // Snapshot inputs on the main actor before hopping off — Workspace
+        // is @MainActor so the closure can't touch its properties from
+        // background tasks.
+        let inputs: [(index: Int, sourceId: UUID, cwd: URL)] = workspaces.enumerated().compactMap { index, source in
+            guard source.worktreeParentId == nil else { return nil }
+            return (index, source.id, source.workingDirectory)
+        }
+        guard !inputs.isEmpty else { return }
+
+        let results: [(index: Int, sourceId: UUID, repoRoot: URL, infos: [WorktreeManager.Info])] = await withTaskGroup(
+            of: (index: Int, sourceId: UUID, repoRoot: URL, infos: [WorktreeManager.Info])?.self
+        ) { group in
+            for input in inputs {
+                group.addTask {
+                    guard let repoRoot = WorktreeManager.repoRoot(near: input.cwd),
+                          case .success(let infos) = WorktreeManager.list(repoPath: repoRoot) else {
+                        return nil
+                    }
+                    return (input.index, input.sourceId, repoRoot, infos)
+                }
+            }
+            var collected: [(index: Int, sourceId: UUID, repoRoot: URL, infos: [WorktreeManager.Info])] = []
+            for await result in group { if let result { collected.append(result) } }
+            return collected.sorted { $0.index < $1.index }
+        }
+
+        for result in results {
+            guard let source = workspaces.first(where: { $0.id == result.sourceId }) else { continue }
+            reconcile(source: source, sourceRoot: result.repoRoot, diskWorktrees: result.infos)
+        }
+    }
+
+    /// `internal` so tests can drive it with synthetic `diskWorktrees`
+    /// without spinning up a real git repo. `reconcileWorktrees` is the
+    /// production entry point.
+    func reconcile(source: Workspace, sourceRoot: URL? = nil, diskWorktrees: [WorktreeManager.Info]) {
+        let sourceRootPath = (sourceRoot ?? WorktreeManager.repoRoot(near: source.workingDirectory) ?? source.workingDirectory)
+            .standardizedFileURL
+            .path
+        // Drop the source workspace's own working-tree root so we're
+        // comparing only sibling worktrees against the sidebar. This must
+        // use a stable repo root, not `Workspace.workingDirectory`, because
+        // that property follows the active shell's cwd and may be `/repo/sub`.
+        let satellites = diskWorktrees.filter { $0.path.standardizedFileURL.path != sourceRootPath }
+        let sidebar = workspaces.filter { $0.worktreeParentId == source.id }
+        guard !satellites.isEmpty || !sidebar.isEmpty else { return }
+
+        // Compare against the pinned worktreePath, not workingDirectory —
+        // a sidebar row whose user cd'd to ~/Downloads still matches its
+        // disk root via worktreePath.
+        let pathFor: (Workspace) -> String = { wt in
+            (wt.worktreePath ?? wt.workingDirectory).standardizedFileURL.path
+        }
+
+        for wt in sidebar where !satellites.contains(where: {
+            $0.path.standardizedFileURL.path == pathFor(wt)
+        }) {
+            closeWorkspace(wt)
+        }
+
+        // Dedup against the whole workspace list — if the user has the
+        // same repo opened as two top-level workspaces (⌘O twice), each
+        // reconcile pass would otherwise re-adopt worktrees its twin has
+        // already attached.
+        for diskWt in satellites where !workspaces.contains(where: {
+            pathFor($0) == diskWt.path.standardizedFileURL.path
+        }) {
+            addWorkspace(
+                workingDirectory: diskWt.path,
+                worktreeParent: source,
+                worktreeBranch: diskWt.branch,
+                preserveActive: true
+            )
+        }
+    }
+
+    /// Runs `git worktree remove --force <path>` on a detached task. The
+    /// caller closes the workspace separately — this method only touches
+    /// disk. `--force` because the close-confirm sheet already gathered
+    /// the user's intent; refusing on dirty state here would just bounce
+    /// them back to terminal commands. Returns nil on success, otherwise
+    /// the error message to surface inline in the sheet.
+    func removeWorktreeDirectory(_ workspace: Workspace) async -> String? {
+        guard workspace.worktreeParentId != nil else {
+            return "workspace is not a worktree"
+        }
+        // Pinned disk root, not the wandering OSC-7 cwd. Falls back to
+        // workingDirectory for state.json written by pre-worktreePath
+        // builds so upgraded users don't see "not a working tree" on
+        // their first close.
+        let path = workspace.worktreePath ?? workspace.workingDirectory
+        let parent = workspace.worktreeParentId.flatMap { parentId in
+            workspaces.first(where: { $0.id == parentId })
+        }
+        let repoPath = parent
+            .flatMap { WorktreeManager.repoRoot(near: $0.workingDirectory) }
+            ?? WorktreeManager.repoRoot(near: path)
+            ?? (isDirectory(path) ? path : nil)
+        guard let repoPath else {
+            // Parent and worktree directory are already gone. Let the caller
+            // close the stranded sidebar row; there is no disk left to delete.
+            pruneRecentlyClosed(under: workspace)
+            return nil
+        }
+        let result = await Task.detached(priority: .userInitiated) {
+            WorktreeManager.remove(repoPath: repoPath, path: path, force: true)
+        }.value
+        if case .failure(let err) = result {
+            return err.description
+        }
+        pruneRecentlyClosed(under: workspace)
+        return nil
+    }
+
+    /// Drops `recentlyClosed` entries for a worktree workspace we just
+    /// `git worktree remove`-d — without this, ⌘⇧T would respawn a tab
+    /// at a deleted cwd and `resolvedSpawnCwd` would silently route it
+    /// to `$HOME`, surfacing a "Terminal at ~" the user never closed.
+    private func pruneRecentlyClosed(under workspace: Workspace) {
+        let root = (workspace.worktreePath ?? workspace.workingDirectory).standardizedFileURL.path
+        recentlyClosed.removeAll { entry in
+            let cwd = entry.cwd.standardizedFileURL.path
+            return entry.workspaceId == workspace.id
+                || cwd == root
+                || cwd.hasPrefix(root + "/")
+        }
     }
 
     func closeWorkspace(_ workspace: Workspace) {
@@ -221,14 +475,80 @@ final class WorkspaceStore {
         guard sourceIndex != destIndex,
               (0..<workspaces.count).contains(sourceIndex),
               (0..<workspaces.count).contains(destIndex) else { return }
-        let ws = workspaces.remove(at: sourceIndex)
-        workspaces.insert(ws, at: destIndex)
+        let source = workspaces[sourceIndex]
+        let rootId = source.worktreeParentId ?? source.id
+        let movingIndices = workspaces.indices.filter { idx in
+            let ws = workspaces[idx]
+            return ws.id == rootId || ws.worktreeParentId == rootId
+        }
+        guard !movingIndices.contains(destIndex) else { return }
+
+        let movingIds = Set(movingIndices.map { workspaces[$0].id })
+        let moving = workspaces.filter { movingIds.contains($0.id) }
+        var remaining = workspaces.filter { !movingIds.contains($0.id) }
+        let insertAt = min(max(destIndex, 0), remaining.count)
+        remaining.insert(contentsOf: moving, at: insertAt)
+        workspaces = remaining
         scheduleSave()
     }
 
+    /// Payload for the "Close Other Workspaces" confirm sheet — captured
+    /// when at least one of the workspaces about to close is a worktree,
+    /// so the sheet can show the count and make the directory deletion
+    /// explicit before running it.
+    struct BulkRemovalRequest {
+        let keeping: Workspace
+        let others: [Workspace]
+        let worktreeOthers: [Workspace]
+
+        @MainActor
+        init(keeping: Workspace, others: [Workspace]) {
+            self.keeping = keeping
+            self.others = others
+            self.worktreeOthers = others.filter { $0.worktreeParentId != nil }
+        }
+    }
+
+    /// Set when `closeOtherWorkspaces` detects a worktree among the
+    /// workspaces about to close; sidebar's onChange listener pops the
+    /// summary sheet from here. Plain bulk closes skip this and run
+    /// inline.
+    var pendingCloseOthersRequest: BulkRemovalRequest?
+
     func closeOtherWorkspaces(keeping workspace: Workspace) {
-        let others = workspaces.filter { $0.id != workspace.id }
+        // Keep the workspace's worktree family intact so we never strand
+        // a worktree without its source (and vice versa):
+        //  - keeping a source: also keep every worktree under it
+        //  - keeping a worktree: also keep its source (siblings still close)
+        var keepIds: Set<UUID> = [workspace.id]
+        if let parentId = workspace.worktreeParentId {
+            keepIds.insert(parentId)
+        } else {
+            for ws in workspaces where ws.worktreeParentId == workspace.id {
+                keepIds.insert(ws.id)
+            }
+        }
+        let others = workspaces.filter { !keepIds.contains($0.id) }
+        if others.contains(where: { $0.worktreeParentId != nil }) {
+            pendingCloseOthersRequest = BulkRemovalRequest(keeping: workspace, others: others)
+            return
+        }
         for ws in others { closeWorkspace(ws) }
+    }
+
+    /// Performs the deferred bulk close from the confirm sheet. Always
+    /// `git worktree remove`s every worktree in the others list — the
+    /// "keep dir" branch was dropped to enforce the sidebar = disk
+    /// invariant. First failing git remove aborts.
+    func performCloseOthers(_ request: BulkRemovalRequest) async -> String? {
+        for worktree in request.worktreeOthers {
+            if let message = await removeWorktreeDirectory(worktree) {
+                return message
+            }
+        }
+        for ws in request.others { closeWorkspace(ws) }
+        pendingCloseOthersRequest = nil
+        return nil
     }
 
     // MARK: - Tabs
@@ -425,6 +745,17 @@ final class WorkspaceStore {
     private func closeTab(_ session: Session, in workspace: Workspace, recordHistory: Bool) {
         guard let pane = pane(containing: session, in: workspace),
               let idx = pane.tabs.firstIndex(where: { $0.id == session.id }) else { return }
+        // Closing the last tab of a worktree workspace cascades through
+        // detachSession → closePane → closeWorkspace, which would bypass
+        // the confirm sheet. Reroute here before any state mutates so
+        // the sheet's cancel path can keep the tab open.
+        let isLastTabInWorktree = workspace.worktreeParentId != nil
+            && workspace.root.allPanes.count == 1
+            && pane.tabs.count == 1
+        if isLastTabInWorktree {
+            requestCloseWorkspace(workspace)
+            return
+        }
         if recordHistory {
             recordClosedTab(session, pane: pane, workspace: workspace)
         }
@@ -590,6 +921,13 @@ final class WorkspaceStore {
     /// take the parent split's place.
     func closePane(_ pane: Pane, in workspace: Workspace) {
         guard let leafNode = workspace.root.paneNode(paneId: pane.id) else { return }
+        // Worktree last-pane cascade — route through the confirm sheet
+        // before any engines get terminated, so a sheet cancel leaves
+        // the user's work intact.
+        if leafNode === workspace.root && workspace.worktreeParentId != nil {
+            requestCloseWorkspace(workspace)
+            return
+        }
         if workspace.zoomedPaneId == pane.id { workspace.zoomedPaneId = nil }
         for tab in pane.tabs { tab.engine.terminate() }
         // Object identity, not id equality. After `splitPane`, the workspace
@@ -751,6 +1089,9 @@ final class WorkspaceStore {
                 root: root
             )
             workspace.customTitle = ws.customTitle
+            workspace.worktreeParentId = ws.worktreeParentId
+            workspace.worktreeBranch = ws.worktreeBranch
+            workspace.worktreePath = ws.worktreePath.map { URL(fileURLWithPath: $0) }
             // Wire engines now that workspace is constructed (engines need
             // the workspace ref for cwd-sync callbacks).
             for pane in workspace.root.allPanes {

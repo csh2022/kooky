@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.18.0 — 2026-05-26
+
+- **Git worktrees** — right-click a git workspace → "Create Worktree…" to spin one up on a new branch (or check out an existing one). Each worktree gets its own sidebar entry nested under its source repo, its own tabs, and its own agent — work on a feature branch with Claude without touching what's running on main. Closing a worktree deletes the directory; closing a source repo removes its whole worktree group in one confirm. Worktrees you create from the command line show up automatically next launch.
+
 ## v0.17.0 — 2026-05-26
 
 - **Theme picker** — choose a theme in Settings. Theme changes apply immediately across the terminal and the whole window.

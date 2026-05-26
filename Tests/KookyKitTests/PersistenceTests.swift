@@ -101,4 +101,49 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(a.load(), stateA)
         XCTAssertEqual(b.load(), stateB)
     }
+
+    // MARK: - Worktree fields
+
+    func testPersistedWorkspaceRoundtripsWorktreeFields() throws {
+        let parentId = UUID()
+        let dir = "/tmp/parent-feat-x"
+        let tab = PersistedTab(id: UUID(), agentId: "terminal", currentDirectoryPath: dir)
+        let pane = PersistedPane(id: UUID(), tabs: [tab], activeTabId: tab.id)
+        let node = PersistedPaneNode(id: pane.id, kind: .pane(pane))
+        let ws = PersistedWorkspace(
+            id: UUID(),
+            workingDirectoryPath: dir,
+            root: node,
+            worktreeParentId: parentId,
+            worktreeBranch: "feat-x",
+            worktreePath: dir
+        )
+        let data = try JSONEncoder().encode(ws)
+        let decoded = try JSONDecoder().decode(PersistedWorkspace.self, from: data)
+        XCTAssertEqual(decoded.worktreeParentId, parentId)
+        XCTAssertEqual(decoded.worktreeBranch, "feat-x")
+        XCTAssertEqual(decoded.worktreePath, dir)
+    }
+
+    func testPersistedWorkspaceDecodesNilWhenWorktreeFieldsMissing() throws {
+        // Pre-worktree state.json files omit both keys — decode must succeed
+        // and leave the fields nil so plain workspaces stay plain on upgrade.
+        let json = """
+        {
+          "id": "\(UUID().uuidString)",
+          "workingDirectoryPath": "/tmp",
+          "root": {
+            "id": "\(UUID().uuidString)",
+            "kind": { "pane": { "id": "\(UUID().uuidString)", "tabs": [] } }
+          }
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            PersistedWorkspace.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertNil(decoded.worktreeParentId)
+        XCTAssertNil(decoded.worktreeBranch)
+        XCTAssertNil(decoded.worktreePath)
+    }
 }

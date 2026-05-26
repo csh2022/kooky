@@ -29,6 +29,15 @@ struct PersistedWorkspace: Codable, Equatable {
     var root: PersistedPaneNode
     var activePaneId: UUID?
     var customTitle: String?
+    /// nil = top-level workspace; non-nil = this is a git worktree whose
+    /// source workspace persisted with this id. Decoded with
+    /// `decodeIfPresent` so pre-worktree `state.json` files still load.
+    var worktreeParentId: UUID?
+    var worktreeBranch: String?
+    /// Disk root captured at worktree-create time. Separate from
+    /// `workingDirectoryPath` so the latter can drift with OSC 7 cwd
+    /// reports without breaking close/reconcile path lookups.
+    var worktreePath: String?
 
     @MainActor
     init(_ ws: Workspace) {
@@ -37,18 +46,25 @@ struct PersistedWorkspace: Codable, Equatable {
         self.root = PersistedPaneNode(ws.root)
         self.activePaneId = ws.activePaneId
         self.customTitle = ws.customTitle
+        self.worktreeParentId = ws.worktreeParentId
+        self.worktreeBranch = ws.worktreeBranch
+        self.worktreePath = ws.worktreePath?.path
     }
 
-    init(id: UUID, workingDirectoryPath: String, root: PersistedPaneNode, activePaneId: UUID? = nil, customTitle: String? = nil) {
+    init(id: UUID, workingDirectoryPath: String, root: PersistedPaneNode, activePaneId: UUID? = nil, customTitle: String? = nil, worktreeParentId: UUID? = nil, worktreeBranch: String? = nil, worktreePath: String? = nil) {
         self.id = id
         self.workingDirectoryPath = workingDirectoryPath
         self.root = root
         self.activePaneId = activePaneId
         self.customTitle = customTitle
+        self.worktreeParentId = worktreeParentId
+        self.worktreeBranch = worktreeBranch
+        self.worktreePath = worktreePath
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, workingDirectoryPath, root, activePaneId, customTitle
+        case worktreeParentId, worktreeBranch, worktreePath
         // Legacy keys
         case tabs, activeTabId
     }
@@ -60,6 +76,9 @@ struct PersistedWorkspace: Codable, Equatable {
         try c.encode(root, forKey: .root)
         try c.encodeIfPresent(activePaneId, forKey: .activePaneId)
         try c.encodeIfPresent(customTitle, forKey: .customTitle)
+        try c.encodeIfPresent(worktreeParentId, forKey: .worktreeParentId)
+        try c.encodeIfPresent(worktreeBranch, forKey: .worktreeBranch)
+        try c.encodeIfPresent(worktreePath, forKey: .worktreePath)
     }
 
     init(from decoder: Decoder) throws {
@@ -67,6 +86,9 @@ struct PersistedWorkspace: Codable, Equatable {
         id = try c.decode(UUID.self, forKey: .id)
         workingDirectoryPath = try c.decode(String.self, forKey: .workingDirectoryPath)
         customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
+        worktreeParentId = try c.decodeIfPresent(UUID.self, forKey: .worktreeParentId)
+        worktreeBranch = try c.decodeIfPresent(String.self, forKey: .worktreeBranch)
+        worktreePath = try c.decodeIfPresent(String.self, forKey: .worktreePath)
         if let root = try c.decodeIfPresent(PersistedPaneNode.self, forKey: .root) {
             self.root = root
             self.activePaneId = try c.decodeIfPresent(UUID.self, forKey: .activePaneId)

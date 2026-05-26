@@ -32,11 +32,33 @@ final class Workspace: Identifiable {
     /// `nil` so the sidebar label resumes tracking the cwd.
     var customTitle: String? = nil
 
+    /// When non-nil, this workspace is a git worktree whose source workspace
+    /// has this id. Sidebar groups worktrees under their source via a
+    /// disclosure triangle. Set at creation and never changes for the
+    /// workspace's lifetime — re-parenting a worktree is not a supported op.
+    var worktreeParentId: UUID? = nil
+    /// Branch the worktree was created on, shown next to its sidebar row.
+    /// Captured at creation; the pane status bar still owns the live branch
+    /// readout if the user checks out something else inside the worktree.
+    var worktreeBranch: String? = nil
+    /// Disk root of this worktree, captured at creation. Distinct from
+    /// `workingDirectory` because the latter follows OSC 7 cwd reports —
+    /// `cd ~/Downloads` inside a worktree tab drifts `workingDirectory`
+    /// off the worktree, but `worktreePath` stays pinned to the directory
+    /// `git worktree add` produced. The close / reconcile paths must use
+    /// this, not `workingDirectory`, so `git worktree remove` doesn't
+    /// target the wrong path.
+    var worktreePath: URL? = nil
+
     var title: String {
         if let custom = customTitle, !custom.isEmpty { return custom }
         // Mirror the active tab's OSC title so an `ssh` session shows the
         // remote host in the sidebar, not the stale local directory.
         if let reported = activeSession?.terminalTitle, !reported.isEmpty { return reported }
+        // For a worktree, fall back to its branch before the cwd basename —
+        // `<repo>-<branch>` directory names read as noise; the branch alone
+        // is the worktree's actual identity.
+        if let branch = worktreeBranch, !branch.isEmpty { return branch }
         if workingDirectory.path == NSHomeDirectory() { return "Home" }
         let last = workingDirectory.lastPathComponent
         return last.isEmpty ? workingDirectory.path : last
