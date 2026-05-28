@@ -46,6 +46,34 @@ final class ShellIntegrationTests: XCTestCase {
         }
     }
 
+    /// Tool-call lifecycle subscriptions added for the activity strip. These
+    /// differ from lifecycle hooks: the third command argv preserves the raw
+    /// event name (`PreToolUse` / `PostToolUse`) because `main.swift` reads
+    /// stdin and routes through `KookyHookKit.parseToolEventPayload` for
+    /// these — not a `HookEvent` rawValue.
+    func testClaudeHooksObjectSubscribesToolCallEvents() throws {
+        let object = KookyShellIntegration.claudeHooksObject(hookCmd: Self.stubHook)
+        let hooks = try XCTUnwrap(object["hooks"] as? [String: Any])
+
+        for event in ["PreToolUse", "PostToolUse"] {
+            let entries = try XCTUnwrap(hooks[event] as? [[String: Any]], "missing event \(event)")
+            let inner = try XCTUnwrap((entries.first?["hooks"] as? [[String: Any]])?.first)
+            XCTAssertEqual(inner["type"] as? String, "command")
+            // argv[2] = raw Claude event name (not a HookEvent rawValue)
+            XCTAssertEqual(inner["command"] as? String, "'\(Self.stubHook)' claude \(event)")
+        }
+    }
+
+    /// Regression guard — Gemini wrapper doesn't expose tool-level hooks
+    /// (per CLAUDE.md M5.x); its passthroughEvents stays empty. If we ever
+    /// add tool events to Gemini, update this test deliberately.
+    func testGeminiHooksObjectDoesNotSubscribeToolEvents() throws {
+        let object = KookyShellIntegration.geminiDefaultsObject(hookCmd: Self.stubHook)
+        let hooks = try XCTUnwrap(object["hooks"] as? [String: Any])
+        XCTAssertNil(hooks["PreToolUse"])
+        XCTAssertNil(hooks["PostToolUse"])
+    }
+
     func testBracketWrapperPassesThroughWhenSurfaceIdMissing() {
         let script = KookyShellIntegration.bracketWrapperScript(slug: "amp")
 

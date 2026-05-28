@@ -334,15 +334,27 @@ enum KookyShellIntegration {
 
     /// Wired via `claude --settings <path>`. SessionStart promotes manually-typed
     /// `claude` immediately; without it the tab icon waits for the user's first
-    /// prompt.
+    /// prompt. PreToolUse / PostToolUse / PostToolUseFailure subscribe Claude's
+    /// tool-call lifecycle so the activity strip can render pills — they pass
+    /// their raw event name as `argv[2]` (not a `HookEvent` rawValue) because
+    /// `main.swift` reads stdin for those events and routes through
+    /// `parseToolEventPayload`, not `buildLifecyclePayload`. Without
+    /// `PostToolUseFailure`, a failed tool call's Pre record sits in `.running`
+    /// for 60s before flipping to `.stalled` instead of immediately showing the
+    /// red failure pill.
     static func claudeHooksObject(hookCmd: String) -> [String: Any] {
-        hooksObject(slug: "claude", hookCmd: hookCmd, events: [
-            "SessionStart":      .running,
-            "UserPromptSubmit":  .running,
-            "Stop":              .attention,
-            "Notification":      .attention,
-            "SessionEnd":        .ended,
-        ])
+        hooksObject(
+            slug: "claude",
+            hookCmd: hookCmd,
+            events: [
+                "SessionStart":      .running,
+                "UserPromptSubmit":  .running,
+                "Stop":              .attention,
+                "Notification":      .attention,
+                "SessionEnd":        .ended,
+            ],
+            passthroughEvents: ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
+        )
     }
 
     /// Path to a per-custom-agent Claude settings file. Same directory as
@@ -438,11 +450,34 @@ enum KookyShellIntegration {
     /// "command": "..."}]}]}}` shape (Claude Code, Gemini CLI). Routing
     /// `HookEvent` cases through `.rawValue` keeps the wrapper-emitted strings
     /// in sync with the receiver in `HookServer`.
+    /// Builds a Claude / Gemini-style hooks JSON object. `events` maps hook
+    /// names → lifecycle state (running / attention / idle / ended); kooky-hook
+    /// is invoked with the state's rawValue as `argv[2]`. `passthroughEvents`
+    /// is for events whose handler needs the raw event name preserved (e.g.
+    /// Claude's `PreToolUse` / `PostToolUse` — kooky-hook reads stdin for
+    /// those and dispatches via `parseToolEventPayload`, so the raw name is
+    /// what main.swift gates on, not a HookEvent rawValue).
     private static func hooksObject(
         slug: String,
         hookCmd: String,
-        events: [String: HookEvent]
+        events: [String: HookEvent],
+        passthroughEvents: [String] = []
     ) -> [String: Any] {
+        // `events` and `passthroughEvents` MUST be disjoint — a collision
+        // would silently overwrite the lifecycle dispatch with the passthrough
+        // variant (or vice versa, depending on the loop order below). Better
+        // to crash here at install time than ship a hook config that drops
+        // an .attention/.running ping with no test failure. Currently disjoint
+        // (Claude lifecycle = SessionStart/UserPromptSubmit/Stop/Notification/
+        // SessionEnd, passthrough = PreToolUse/PostToolUse), but any new
+        // caller adding richer payloads needs to pick a side per event.
+        let lifecycleKeys = Set(events.keys)
+        let passthroughSet = Set(passthroughEvents)
+        precondition(
+            lifecycleKeys.isDisjoint(with: passthroughSet),
+            "hooksObject: events and passthroughEvents share key(s) \(lifecycleKeys.intersection(passthroughSet)) — collision would silently drop a hook"
+        )
+
         var hooks: [String: Any] = [:]
         // Claude / Gemini run `command` through `/bin/sh -c`, so an unquoted
         // `KookyHook` path breaks the moment the app lives under a path with
@@ -450,6 +485,9 @@ enum KookyShellIntegration {
         let quotedCmd = quote(hookCmd)
         for (event, state) in events {
             hooks[event] = [["hooks": [["type": "command", "command": "\(quotedCmd) \(slug) \(state.rawValue)"]]]]
+        }
+        for event in passthroughEvents {
+            hooks[event] = [["hooks": [["type": "command", "command": "\(quotedCmd) \(slug) \(event)"]]]]
         }
         return ["hooks": hooks]
     }

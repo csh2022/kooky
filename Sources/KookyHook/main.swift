@@ -1,9 +1,12 @@
 import Darwin
 import Foundation
+import KookyHookKit
 
 // kooky-hook: invoked by an agent's hook system (Claude Code's `--settings`
 // hooks, Codex equivalents, …) and the shell precmd hook (`env` mode) to
-// ping the running kooky app over a unix socket.
+// ping the running kooky app over a unix socket. Payload building +
+// stdin parsing live in `KookyHookKit` so they're unit-testable; this
+// file stays a thin dispatcher.
 //
 // Exit codes:
 //   0 — IPC succeeded, OR caller is outside kooky (no surface id) / args
@@ -16,111 +19,83 @@ import Foundation
 //
 // Usage: kooky-hook <agent> <event>
 //   <agent> ∈ claude | codex (or any AgentTemplate.id)
-//   <event> ∈ running | attention | idle
+//   <event> ∈ running | attention | idle    (lifecycle events)
+//           | PreToolUse | PostToolUse      (tool events — Claude only,
+//                                            requires stdin JSON)
 // Usage: kooky-hook env <VIRTUAL_ENV> <CONDA_DEFAULT_ENV> <NVM_BIN> <NVM_DIR> <NODE_VERSION> <https_proxy> <http_proxy> <all_proxy>
 // Reads:  $KOOKY_SURFACE_ID       UUID of the originating session
-// Reads:  stdin                   Claude pipes a JSON object — when `agent`
-//                                 is `claude` and the JSON carries
-//                                 `session_id`, we send a second payload
-//                                 (`kind: conversationId`) so kooky can
-//                                 persist the value and prepend
+// Reads:  stdin                   Claude pipes a JSON object on every
+//                                 hook event. For PreToolUse/PostToolUse
+//                                 it's the primary input; for lifecycle
+//                                 events we use it to mirror `session_id`
+//                                 back as a separate `kind: conversationId`
+//                                 payload so kooky can prepend
 //                                 `--resume <id>` on next launch.
 
 let surface = ProcessInfo.processInfo.environment["KOOKY_SURFACE_ID"] ?? ""
 guard !surface.isEmpty else { exit(0) }
 
-let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-let socketPath = support.appendingPathComponent("kooky/socket").path
+let socketPath = KookyHookKit.socketPath
 
-func arg(_ index: Int) -> String {
-    CommandLine.arguments.indices.contains(index) ? CommandLine.arguments[index] : ""
-}
-
-/// One-shot socket write. Returns true on success. Each invocation of
-/// kooky-hook may emit 1–2 of these (event payload + optional Claude
-/// conversation-id payload); HookServer accepts one payload per connection.
-func sendPayload(_ object: [String: String]) -> Bool {
-    guard var payload = try? JSONSerialization.data(withJSONObject: object) else { return false }
-    payload.append(0x0A)
-
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else { return false }
-    defer { close(fd) }
-
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(socketPath.utf8)
-    guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return false }
-    withUnsafeMutableBytes(of: &addr.sun_path) { dst in
-        pathBytes.withUnsafeBufferPointer { src in
-            dst.baseAddress?.copyMemory(from: src.baseAddress!, byteCount: src.count)
-        }
-    }
-
-    let len = socklen_t(MemoryLayout<sockaddr_un>.size)
-    let connected = withUnsafePointer(to: &addr) { addrPtr in
-        addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            connect(fd, $0, len)
-        }
-    }
-    guard connected == 0 else { return false }
-
-    let written = payload.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-    return written >= 0
-}
+// Drain stdin once up-front. Both the tool-event parser (PreToolUse /
+// PostToolUse argv) and the conversationId mirror (Claude lifecycle
+// events) read the same Claude-supplied JSON; reading twice would block
+// the second read (stdin is single-pass). `isatty == 0` says stdin is a
+// pipe / regular file — safe to drain to EOF without stranding the tab
+// when the wrapper's "binary not installed" branch leaves stdin attached
+// to the user's tty.
+let stdinData: Data = (isatty(fileno(stdin)) == 0)
+    ? ((try? FileHandle.standardInput.readToEnd()) ?? Data())
+    : Data()
 
 let payloadObject: [String: String]
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "env" {
-    payloadObject = [
-        "kind": "env",
-        "surface": surface,
-        "VIRTUAL_ENV": arg(2),
-        "CONDA_DEFAULT_ENV": arg(3),
-        "NVM_BIN": arg(4),
-        "NVM_DIR": arg(5),
-        "KOOKY_NODE_VERSION": arg(6),
-        "https_proxy": arg(7),
-        "http_proxy": arg(8),
-        "all_proxy": arg(9),
-    ]
+    let envArgs = Array(CommandLine.arguments.dropFirst(2))
+    payloadObject = KookyHookKit.buildEnvPayload(surface: surface, args: envArgs)
 } else if CommandLine.arguments.count >= 3 {
-    payloadObject = [
-        "agent": CommandLine.arguments[1],
-        "event": CommandLine.arguments[2],
-        "surface": surface,
-    ]
+    let agent = CommandLine.arguments[1]
+    let event = CommandLine.arguments[2]
+    if event == "PreToolUse" || event == "PostToolUse" || event == "PostToolUseFailure" {
+        // Tool event: stdin JSON is mandatory. Bail silently if it's
+        // missing or malformed — pill UI just won't render this call.
+        guard let tool = KookyHookKit.parseToolEventPayload(
+            from: stdinData,
+            surface: surface,
+            agent: agent
+        ) else { exit(0) }
+        payloadObject = tool
+    } else {
+        payloadObject = KookyHookKit.buildLifecyclePayload(
+            agent: agent,
+            event: event,
+            surface: surface
+        )
+    }
 } else {
     exit(0)
 }
 
-let eventSent = sendPayload(payloadObject)
+let eventSent = KookyHookKit.sendPayload(payloadObject, to: socketPath)
 
-// Claude pipes a JSON object on stdin with every hook event (SessionStart,
-// UserPromptSubmit, Stop, SessionEnd, …). The relevant field for us is
-// `session_id` — its conversation identifier. We mirror it back to kooky
-// as a separate payload so WorkspaceStore can persist it on Session and
-// reuse it as `--resume <id>` on the next launch. Other agents either
-// don't pipe stdin or don't expose a session id, so this branch is a
-// silent no-op for them.
-if payloadObject["agent"] == "claude", isatty(fileno(stdin)) == 0 {
-    // Claude pipes the JSON; `readToEnd()` blocks until it closes stdin —
-    // perfect when stdin is a pipe. But the `claude` wrapper script also
-    // invokes us with `claude ended` from its "binary not installed"
-    // branch (see ShellIntegration.swift `wrapperPreamble`), where stdin
-    // is still the user's terminal. `readToEnd()` would block forever
-    // waiting for EOF on the tty and strand the tab. `isatty == 0` says
-    // stdin is a pipe / regular file → safe to drain to EOF.
-    let stdinData = (try? FileHandle.standardInput.readToEnd()) ?? Data()
-    if !stdinData.isEmpty,
-       let parsed = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any],
-       let sessionId = parsed["session_id"] as? String,
-       !sessionId.isEmpty {
-        _ = sendPayload([
-            "kind": "conversationId",
-            "surface": surface,
-            "conversationId": sessionId,
-        ])
-    }
+// Bonus payload: Claude pipes `session_id` on every hook (lifecycle +
+// tool). Mirror it so `WorkspaceStore` can persist the conversation id
+// on `Session` and prepend `--resume <id>` on next launch. Gated on:
+//   1. `agent == "claude"` — non-Claude agents skip it
+//   2. `kind != "tool"` — tool payloads fire 10-100× per Claude turn and
+//      each one ALSO carries session_id; mirroring on every Pre/PostToolUse
+//      would multiply IPC by N tool calls per turn. Lifecycle events
+//      (SessionStart/UserPromptSubmit/Stop/Notification/SessionEnd) carry
+//      the same id and fire 5× per turn — plenty to keep WorkspaceStore's
+//      `--resume` field fresh. applyConversationId dedups same-value writes
+//      but each call still pays a socket connect+write+close roundtrip.
+if payloadObject["agent"] == "claude",
+   payloadObject["kind"] != "tool",
+   let conversationId = KookyHookKit.parseClaudeConversationId(from: stdinData) {
+    let payload = KookyHookKit.buildConversationIdPayload(
+        surface: surface,
+        conversationId: conversationId
+    )
+    _ = KookyHookKit.sendPayload(payload, to: socketPath)
 }
 
 exit(eventSent ? 0 : 1)

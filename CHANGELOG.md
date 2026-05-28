@@ -2,6 +2,12 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.19.0 — 2026-05-28
+
+- Watch Claude Code work in real time — kooky now shows a pill in the bottom status bar with the tool Claude is running (Bash / Edit / Read / etc.), how long it's been running, and whether it succeeded or failed. Click the pill to see the full session history.
+- Failed tool calls turn red immediately, not after a 60-second wait.
+- Settings → Status Bar gets a Claude Code section with a toggle for the activity pill.
+
 ## v0.18.3 — 2026-05-28
 
 - Worktree close is safe by default — closing a worktree now only removes it from the sidebar; the directory and branch stay on disk. Tick "also delete worktree directory and branch" in the confirm sheet for the v0.18.x destructive behaviour.

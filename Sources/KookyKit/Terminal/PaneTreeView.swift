@@ -34,6 +34,13 @@ private struct PaneView: View {
 
     @State private var contextMenuOpen = false
     @State private var contextMenuAnchor: UnitPoint = .center
+    /// Bumped on each status-bar visibility transition so rapid back-to-back
+    /// toggles don't have an earlier restore Task prematurely clear a still-
+    /// in-flight suspension window. Same pattern as `WorkspaceStore.toggleZoom`
+    /// (per CLAUDE.md M5.ddd) — without this token, two toggles within 250ms
+    /// produce two restore Tasks where the first un-suspends mid-second
+    /// animation and the documented conda-scrollback-wipe regression returns.
+    @State private var sigwinchSuspensionGeneration = 0
 
     var body: some View {
         let paneOpacity = isFocused ? 1.0 : Self.inactivePaneOpacity
@@ -90,6 +97,32 @@ private struct PaneView: View {
         }
         .opacity(paneOpacity)
         .animation(Theme.chromeTransition, value: isFocused)
+        .onChange(of: pane.activeTab.map { paneStatusBarHasData(session: $0) } ?? false) { _, _ in
+            // Status bar visibility transition (activity pill arrives, all
+            // git/env signals clear, zoom button appears/disappears) changes
+            // chrome height ±28pt → libghostty re-frames the surface →
+            // SIGWINCH burst → conda init's precmd hook would wipe scrollback
+            // (CLAUDE.md Known issues). Reuse v0.17.0 (M5.ddd) pane-zoom
+            // pattern: suspend SIGWINCH on EVERY tab's engine in the pane
+            // (background tabs share the parent NSView geometry, not just
+            // the active one), then flush once stable, gated on a
+            // generation token so a rapid second toggle doesn't have its
+            // in-flight animation prematurely un-suspended by a stale Task.
+            let engines = pane.tabs.map(\.engine)
+            for engine in engines { engine.suspendsSizePropagation = true }
+
+            sigwinchSuspensionGeneration &+= 1
+            let token = sigwinchSuspensionGeneration
+
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 250_000_000)  // covers Theme.chromeTransition
+                guard token == sigwinchSuspensionGeneration else { return }
+                for engine in engines {
+                    engine.suspendsSizePropagation = false
+                    engine.flushSize()
+                }
+            }
+        }
     }
 }
 
@@ -99,6 +132,12 @@ private struct PaneView: View {
 /// add the rendering branch in `PaneStatusBar.segment(for:)`, and add the
 /// data-presence branch in `paneStatusBarHasData`.
 enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
+    /// Claude-only tool-call activity pill. Special-positioned on the
+    /// left of the bar (not inside the right-aligned `FlowLayout`) so the
+    /// rotating-content piece doesn't compete with the static signals.
+    /// Settings entry here only controls visibility; reordering this kind
+    /// has no visible effect because rendering bypasses `visibleItems`.
+    case toolCallActivity = "tool-call-activity"
     case pythonVenv = "python-venv"
     case nodeVersion = "node-version"
     case proxy
@@ -107,6 +146,7 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
 
     var displayName: String {
         switch self {
+        case .toolCallActivity: return "Tool calls"
         case .pythonVenv: return "Python venv"
         case .nodeVersion: return "Node version"
         case .proxy: return "Proxy"
@@ -115,8 +155,13 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
         }
     }
 
-    var symbol: String {
+    /// SF Symbol used by Settings → Status Bar to label each row. nil for
+    /// kinds whose Settings row inherits its iconography from a section
+    /// header instead (currently `.toolCallActivity`, whose Claude Code
+    /// section already carries the agent mark).
+    var symbol: String? {
         switch self {
+        case .toolCallActivity: return nil
         case .pythonVenv: return "p.circle.fill"
         case .nodeVersion: return "n.circle.fill"
         case .proxy: return "network"
@@ -126,20 +171,29 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     }
 
     /// Default order shipped with kooky — used when the user hasn't
-    /// touched Settings → Status Bar.
+    /// touched Settings → Status Bar. Tool-call activity goes first so a
+    /// fresh Settings → Status Bar list renders it at the top.
     static let defaultOrder: [StatusBarItemKind] = [
-        .pythonVenv, .nodeVersion, .proxy, .gitBranch, .gitDiff,
+        .toolCallActivity, .pythonVenv, .nodeVersion, .proxy, .gitBranch, .gitDiff,
     ]
 }
 
 /// Decides whether to draw the status-bar hairline + row. Returns false
 /// when every enabled kind has no data, so a bottom chrome divider
-/// doesn't draw over an empty row.
+/// doesn't draw over an empty row. Includes the activity pill — when a
+/// Claude session is alive but no other slot has data (no git repo, no
+/// venv), the bar appears just to host the pill.
 @MainActor
 func paneStatusBarHasData(session: Session) -> Bool {
     let model = KookySettingsModel.shared
     for item in model.statusBarItems where !model.hiddenStatusBarItems.contains(item) {
+        // The outer `where` clause already filters hidden kinds, so each
+        // case body only needs the pure data-presence check — no kind-
+        // enabled re-check. Activity pill: ask only the session-level
+        // question (is Claude active in this tab?) since the kind-enabled
+        // gate already lives in the loop predicate.
         switch item {
+        case .toolCallActivity: if sessionWantsToolCallActivity(session) { return true }
         case .pythonVenv: if session.environment.pythonVenv != nil { return true }
         case .nodeVersion: if session.environment.nodeVersion != nil { return true }
         case .proxy: if session.environment.proxy != nil { return true }
@@ -148,6 +202,20 @@ func paneStatusBarHasData(session: Session) -> Bool {
         }
     }
     return false
+}
+
+/// Session-level half of the activity-pill visibility predicate — `true`
+/// when the tab's agent is Claude (or a custom Claude-base) AND a session
+/// is currently alive (activityState != .idle). Settings → Status Bar
+/// kind-enabled gate is the other half; combined in
+/// `showToolCallActivityPill` for the chrome-render call site, but
+/// `paneStatusBarHasData` only needs this half because its outer loop
+/// already enforces the kind-enabled filter.
+@MainActor
+func sessionWantsToolCallActivity(_ session: Session) -> Bool {
+    let isClaude = session.agent.id == AgentTemplate.claudeCodeID
+        || session.agent.baseAgentId == AgentTemplate.claudeCodeID
+    return isClaude && session.activityState != .idle
 }
 
 /// Chrome status bar pinned to the bottom of the active pane — Warp-style
@@ -178,6 +246,13 @@ private struct PaneStatusBar: View {
             // would be unreachable by mouse).
             if workspace.canZoom {
                 zoomButton
+            }
+            // Tool-call activity pill — Claude-only, shows the latest
+            // tool call + click-to-popover for history. Sits on the left
+            // (after zoom) so the rotating-content piece doesn't compete
+            // with the trailing-aligned static signals (git / env / etc.).
+            if showToolCallActivityPill(for: session) {
+                ToolCallActivityPill(session: session)
             }
             // Flow wraps overflowing segments to a new row instead of hiding
             // them — narrow panes still surface every status at the cost of
@@ -236,13 +311,20 @@ private struct PaneStatusBar: View {
         .animation(Theme.chromeTransition, value: isZoomed)
     }
 
+    /// Items that render inside the right-aligned `FlowLayout`. Activity
+    /// pill is excluded — it has its own hardcoded slot on the left of
+    /// the bar (driven by `showToolCallActivityPill`, which already
+    /// honors the kind's hidden/visible state).
     private var visibleItems: [StatusBarItemKind] {
-        model.statusBarItems.filter { !model.hiddenStatusBarItems.contains($0) }
+        model.statusBarItems.filter {
+            $0 != .toolCallActivity && !model.hiddenStatusBarItems.contains($0)
+        }
     }
 
     @ViewBuilder
     private func segment(for item: StatusBarItemKind) -> some View {
         switch item {
+        case .toolCallActivity: EmptyView()  // rendered separately on the left
         case .pythonVenv: pythonSegment
         case .nodeVersion: nodeSegment
         case .proxy: proxySegment

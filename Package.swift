@@ -23,7 +23,15 @@ let package = Package(
         // — keeps the binary fast and dependency-free.
         .executableTarget(
             name: "KookyHook",
+            dependencies: ["KookyHookKit"],
             path: "Sources/KookyHook"
+        ),
+        // Payload builders + stdin parsing extracted out of `main.swift` so
+        // they're unit-testable without spawning a subprocess. Foundation /
+        // Darwin only — must not depend on KookyKit (would bloat the CLI).
+        .target(
+            name: "KookyHookKit",
+            path: "Sources/KookyHookKit"
         ),
         .target(
             name: "KookyKit",
@@ -60,6 +68,11 @@ let package = Package(
             name: "KookyKitTests",
             dependencies: ["KookyKit"],
             path: "Tests/KookyKitTests"
+        ),
+        .testTarget(
+            name: "KookyHookKitTests",
+            dependencies: ["KookyHookKit"],
+            path: "Tests/KookyHookKitTests"
         ),
     ]
 )

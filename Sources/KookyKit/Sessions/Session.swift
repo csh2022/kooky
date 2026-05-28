@@ -9,6 +9,35 @@ enum SessionActivityState: Equatable {
     case attention
 }
 
+/// State of one Claude tool-call event captured by the activity strip.
+/// `running` is the in-flight default after PreToolUse; `success` / `failed`
+/// transition on PostToolUse with the hook's heuristic success flag;
+/// `stalled` is the orphan terminal — set 60s after PreToolUse if no
+/// matching PostToolUse arrived (Claude crashed / network dropped / etc.).
+enum ToolCallEventState: Equatable {
+    case running, success, failed, stalled
+}
+
+/// One PreToolUse / PostToolUse pair represented as a single record in
+/// `Session.toolCallEvents`. Runtime only — never persisted (`Persistence`
+/// drops the field by Codable design: the field doesn't appear in
+/// `PersistedTab` so the encoder simply skips it).
+///
+/// Matched on the post side by `toolUseId` when Claude provided one (the
+/// only correct identity for concurrent same-tool calls — two parallel
+/// `Grep "TODO"` calls share `toolName` + `identifier`); falls back to
+/// (`toolName`, `identifier`) for older Claude versions that omit the id.
+/// `toolUseId` nil → fallback path; non-nil → primary key.
+struct ToolCallEvent: Identifiable, Equatable {
+    let id: UUID
+    let toolUseId: String?
+    let toolName: String
+    let identifier: String
+    let startedAt: Date
+    var completedAt: Date?
+    var state: ToolCallEventState
+}
+
 @MainActor
 @Observable
 final class Session: Identifiable {
@@ -77,6 +106,152 @@ final class Session: Identifiable {
     /// snapshots are not reliable after `nvm use` / `activate` mutate the
     /// running shell, so this takes priority when present.
     var shellEnvironment: [String: String] = [:]
+
+    /// Rolling buffer of recent Claude tool-call events (PreToolUse +
+    /// PostToolUse pairs collapsed into one record each), rendered as
+    /// pills in the activity strip. Capped at 200 (oldest evicted on
+    /// overflow). Runtime only — `Persistence` does not encode this field,
+    /// so app restart / `--resume` starts the strip empty.
+    var toolCallEvents: [ToolCallEvent] = []
+    static let toolCallEventsCap = 200
+    /// 60s without a matching PostToolUse → `.running` flips to `.stalled`.
+    /// Matches the "Claude crashed mid-tool" case the activity strip's
+    /// design doc calls out.
+    static let toolCallOrphanThreshold: TimeInterval = 60
+
+    /// Background timer that periodically sweeps `.running` events for
+    /// orphan status. Started lazily on first `recordToolCallStart`; ends
+    /// itself when the sweep finds no `.running` events left. `[weak self]`
+    /// means Session deinit naturally tears it down without explicit
+    /// cleanup. Single timer per session (5s tick) regardless of how many
+    /// concurrent tool calls are running.
+    private var orphanCheckTimer: Task<Void, Never>?
+
+    /// Appends a PreToolUse record (state = .running) and enforces the
+    /// rolling cap. Caller (`WorkspaceStore.applyToolCallEvent`) is
+    /// `@MainActor`-isolated so direct array mutation is safe.
+    func recordToolCallStart(
+        toolName: String,
+        identifier: String,
+        toolUseId: String? = nil,
+        startedAt: Date = Date()
+    ) {
+        appendToolCallEvent(ToolCallEvent(
+            id: UUID(),
+            toolUseId: toolUseId,
+            toolName: toolName,
+            identifier: identifier,
+            startedAt: startedAt,
+            completedAt: nil,
+            state: .running
+        ))
+        scheduleOrphanCheckIfNeeded()
+    }
+
+    /// Resolves a PostToolUse: looks up the matching pre record (prefer
+    /// `toolUseId` when both sides have one; fall back to oldest
+    /// `.running`-or-`.stalled` matching `toolName` + `identifier`) and
+    /// flips it to `.success` / `.failed`. The `.stalled` fallback is
+    /// deliberate: a Claude tool that ran >60s is marked stalled by the
+    /// orphan sweep, but if the Post eventually arrives we'd rather revive
+    /// the original record (with accurate completedAt) than synthesise a
+    /// 0s ghost record alongside the now-misleading stalled one.
+    func recordToolCallEnd(
+        toolName: String,
+        identifier: String,
+        success: Bool,
+        toolUseId: String? = nil,
+        completedAt: Date = Date()
+    ) {
+        // Match priority:
+        //   1. tool_use_id exact match (any non-terminal state) — Claude's
+        //      stable per-call id; only correct option for concurrent
+        //      same-tool calls with truncated identifiers
+        //   2. oldest (toolName + identifier) running OR stalled — legacy
+        //      payloads without tool_use_id, or stalled record revival
+        let matchIndex: Int? = {
+            if let toolUseId, !toolUseId.isEmpty {
+                if let i = toolCallEvents.firstIndex(where: { $0.toolUseId == toolUseId }) {
+                    return i
+                }
+            }
+            return toolCallEvents.firstIndex {
+                $0.toolName == toolName
+                    && $0.identifier == identifier
+                    && ($0.state == .running || $0.state == .stalled)
+            }
+        }()
+
+        if let i = matchIndex {
+            toolCallEvents[i].completedAt = completedAt
+            toolCallEvents[i].state = success ? .success : .failed
+        } else {
+            // Orphan post — synthesise a record so the call still appears
+            // in the strip. startedAt = completedAt (no duration possible
+            // without the pre). Rare; usually means a hook race or kooky
+            // restart between Pre and Post.
+            appendToolCallEvent(ToolCallEvent(
+                id: UUID(),
+                toolUseId: toolUseId,
+                toolName: toolName,
+                identifier: identifier,
+                startedAt: completedAt,
+                completedAt: completedAt,
+                state: success ? .success : .failed
+            ))
+        }
+    }
+
+    /// Append + enforce the 200-event rolling cap. Single source of truth
+    /// for the cap policy — `recordToolCallStart` and the orphan-post
+    /// branch of `recordToolCallEnd` both route through here so a future
+    /// change to the eviction rule (ring buffer, eviction-by-state, etc.)
+    /// only touches one site.
+    private func appendToolCallEvent(_ event: ToolCallEvent) {
+        toolCallEvents.append(event)
+        if toolCallEvents.count > Self.toolCallEventsCap {
+            toolCallEvents.removeFirst(toolCallEvents.count - Self.toolCallEventsCap)
+        }
+    }
+
+    /// Marks `.running` events older than 60s (`toolCallOrphanThreshold`)
+    /// as `.stalled` and stamps `completedAt` with the sweep time so the
+    /// duration label freezes at the stall threshold (not the pill's
+    /// fallback `Date()` clock that grows forever). Returns true if any
+    /// `.running` events survived the sweep — the orphan timer uses this
+    /// to decide whether to keep ticking.
+    @discardableResult
+    func checkStalledToolCallEvents(now: Date = Date()) -> Bool {
+        var anyStillRunning = false
+        for i in toolCallEvents.indices where toolCallEvents[i].state == .running {
+            if now.timeIntervalSince(toolCallEvents[i].startedAt) > Self.toolCallOrphanThreshold {
+                toolCallEvents[i].state = .stalled
+                toolCallEvents[i].completedAt = now
+            } else {
+                anyStillRunning = true
+            }
+        }
+        return anyStillRunning
+    }
+
+    private func scheduleOrphanCheckIfNeeded() {
+        guard orphanCheckTimer == nil else { return }
+        orphanCheckTimer = Task { @MainActor [weak self] in
+            // 5s tick — coarse enough that 200 events × N sessions stays
+            // cheap (single array scan per session) but fine enough that
+            // a 60s orphan transitions within ~1 tick of the threshold.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if Task.isCancelled { break }
+                guard let self else { break }
+                let stillRunning = self.checkStalledToolCallEvents()
+                if !stillRunning {
+                    self.orphanCheckTimer = nil
+                    break
+                }
+            }
+        }
+    }
 
     /// Tab-pill name. Precedence: `customTitle` (manual rename) wins, then
     /// `terminalTitle` (OSC title from the running program, e.g. an `ssh`

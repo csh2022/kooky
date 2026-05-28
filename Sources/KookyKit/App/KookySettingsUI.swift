@@ -131,10 +131,28 @@ final class KookySettingsModel {
                 seen.insert(item)
                 return item
             }
-            // Append any items shipped in a kooky version newer than the
-            // user's saved file so a new kind doesn't silently disappear.
+            // Insert any items shipped in a kooky version newer than the
+            // user's saved file at the position they hold in `defaultOrder`,
+            // not blindly appended. Appending would break the equality
+            // check at `statusOrderIsDefault` for upgrading users whose
+            // saved order was the old default — they'd start writing an
+            // explicit (now non-default) `statusbar.order` block to
+            // settings.json on first save and `hasCustomisation` would
+            // report true forever even though they never customised.
             let missing = StatusBarItemKind.allCases.filter { !seen.contains($0) }
-            statusBarItems = parsedOrder + missing
+            var rebuilt = parsedOrder
+            for newKind in missing {
+                // The default position is the slot it occupies in defaultOrder.
+                // Anchor relative to the nearest already-present neighbour so
+                // user-customised orders preserve the intent (e.g., if the
+                // user moved gitDiff first, .toolCallActivity still inserts
+                // before pythonVenv — its defaultOrder right neighbour).
+                let defaultIndex = StatusBarItemKind.defaultOrder.firstIndex(of: newKind) ?? rebuilt.count
+                let rightNeighbours = StatusBarItemKind.defaultOrder.suffix(from: defaultIndex + 1)
+                let insertBefore = rebuilt.firstIndex(where: { rightNeighbours.contains($0) }) ?? rebuilt.count
+                rebuilt.insert(newKind, at: insertBefore)
+            }
+            statusBarItems = rebuilt
         } else {
             statusBarItems = StatusBarItemKind.defaultOrder
         }
@@ -1362,14 +1380,25 @@ private struct StatusBarReorderList: View {
     @State private var draggingItem: StatusBarItemKind?
     @State private var endTargeted: Bool = false
 
+    /// Items that participate in drag-reorder + right-side FlowLayout
+    /// rendering. Excludes `.toolCallActivity` because its visual position
+    /// is hardcoded (leftmost in the bar) and reordering wouldn't change
+    /// anything visible. It still appears in the list under the "claude
+    /// code" section, but without a drag handle.
+    private var reorderableItems: [StatusBarItemKind] {
+        model.statusBarItems.filter { $0 != .toolCallActivity }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(model.statusBarItems.enumerated()), id: \.element) { index, item in
+            sectionHeader("Environment")
+            ForEach(Array(reorderableItems.enumerated()), id: \.element) { index, item in
                 if index > 0 { SettingsHairline() }
                 StatusBarRow(
                     item: item,
                     visible: !model.hiddenStatusBarItems.contains(item),
                     isDragging: draggingItem == item,
+                    reorderable: true,
                     onToggleVisible: { toggleVisible(item) },
                     onBeginDrag: { draggingItem = item },
                     onDrop: { droppedItem in
@@ -1378,6 +1407,17 @@ private struct StatusBarReorderList: View {
                     }
                 )
             }
+            SettingsHairline()
+            sectionHeader("Claude Code", agentAsset: AgentTemplate.claudeCode.iconAsset)
+            StatusBarRow(
+                item: .toolCallActivity,
+                visible: !model.hiddenStatusBarItems.contains(.toolCallActivity),
+                isDragging: false,
+                reorderable: false,
+                onToggleVisible: { toggleVisible(.toolCallActivity) },
+                onBeginDrag: nil,
+                onDrop: nil
+            )
             Color.clear
                 .frame(height: 10)
                 .contentShape(Rectangle())
@@ -1385,7 +1425,9 @@ private struct StatusBarReorderList: View {
                 .dropDestination(for: String.self) { items, _ in
                     defer { draggingItem = nil }
                     guard let raw = items.first,
-                          let dropped = StatusBarItemKind(rawValue: raw) else { return false }
+                          let dropped = StatusBarItemKind(rawValue: raw),
+                          dropped != .toolCallActivity
+                    else { return false }
                     return moveToEnd(dropped)
                 } isTargeted: { endTargeted = $0 }
 
@@ -1402,6 +1444,24 @@ private struct StatusBarReorderList: View {
             .padding(.horizontal, 28)
             .padding(.top, 14)
         }
+    }
+
+    /// Brutalist mono section heading. `agentAsset`, when set, prepends
+    /// the agent's iconAsset (e.g. `AgentTemplate.claudeCode.iconAsset`
+    /// → the AgentIconView's rendered Claude mark) so a section belonging
+    /// to a specific agent reads at a glance without a wall of text.
+    private func sectionHeader(_ text: String, agentAsset: String? = nil) -> some View {
+        HStack(spacing: 8) {
+            if let agentAsset {
+                AgentIconView(asset: agentAsset, fallbackSymbol: "sparkles", size: 16)
+            }
+            Text(text)
+                .font(Theme.mono(12, weight: .medium))
+                .foregroundStyle(Theme.chromeMuted)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
     }
 
     private var hasCustomisation: Bool {
@@ -1446,18 +1506,35 @@ private struct StatusBarRow: View {
     let item: StatusBarItemKind
     let visible: Bool
     let isDragging: Bool
+    /// When `false` the drag handle is replaced by an invisible spacer
+    /// (matching `ReorderHandle`'s 22pt frame so the icon column stays
+    /// aligned) and the row no longer hosts a `ReorderDropZone`. Used by
+    /// the `.toolCallActivity` row whose position is hardcoded in the bar.
+    let reorderable: Bool
     let onToggleVisible: () -> Void
-    let onBeginDrag: () -> Void
-    let onDrop: (StatusBarItemKind) -> Bool
+    let onBeginDrag: (() -> Void)?
+    let onDrop: ((StatusBarItemKind) -> Bool)?
 
     var body: some View {
         HStack(spacing: 12) {
-            ReorderHandle(payload: item.rawValue, onBeginDrag: onBeginDrag)
-            Image(systemName: item.symbol)
-                .imageScale(.small)
-                .foregroundStyle(visible ? Theme.chromeForeground : Theme.chromeMuted)
-                .frame(width: 14)
-                .opacity(visible ? 1.0 : 0.4)
+            if reorderable, let onBeginDrag {
+                ReorderHandle(payload: item.rawValue, onBeginDrag: onBeginDrag)
+            }
+            // No else — non-reorderable rows skip the handle column
+            // entirely and the label hugs the row's left edge. Their
+            // visual alignment matches the section header above (both
+            // start 22pt in from the panel edge via the row padding).
+            if let symbol = item.symbol {
+                // Kinds with their own SF Symbol surface it here (Python
+                // venv "p.circle.fill" etc.). `.toolCallActivity` returns
+                // nil — its visual identity comes from the "Claude Code"
+                // section header's agent mark rather than a per-row glyph.
+                Image(systemName: symbol)
+                    .imageScale(.small)
+                    .foregroundStyle(visible ? Theme.chromeForeground : Theme.chromeMuted)
+                    .frame(width: 14)
+                    .opacity(visible ? 1.0 : 0.4)
+            }
             Text(item.displayName)
                 .font(Theme.mono(12.5))
                 .foregroundStyle(visible ? Theme.chromeForeground : Theme.chromeMuted)
@@ -1469,9 +1546,18 @@ private struct StatusBarRow: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
-        .background(ReorderDropZone(row: item, isDragging: isDragging,
-                                    decode: StatusBarItemKind.init(rawValue:),
-                                    onDrop: onDrop))
+        .background(reorderableBackground)
         .opacity(isDragging ? 0.35 : 1.0)
+    }
+
+    @ViewBuilder
+    private var reorderableBackground: some View {
+        if reorderable, let onDrop {
+            ReorderDropZone(row: item, isDragging: isDragging,
+                            decode: StatusBarItemKind.init(rawValue:),
+                            onDrop: onDrop)
+        } else {
+            EmptyView()
+        }
     }
 }

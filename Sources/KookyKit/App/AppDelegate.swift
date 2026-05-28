@@ -43,6 +43,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                 store.applyShellEnvironment(env, sessionId: sessionId)
             case .conversationId(let conversationId, let sessionId):
                 store.applyConversationId(conversationId: conversationId, sessionId: sessionId)
+            case .toolCall(let agent, let toolName, let identifier, let event, let success, let toolUseId, let sessionId):
+                store.applyToolCallEvent(
+                    agent: agent,
+                    toolName: toolName,
+                    identifier: identifier,
+                    event: event,
+                    success: success,
+                    toolUseId: toolUseId,
+                    sessionId: sessionId
+                )
             }
         }
     }

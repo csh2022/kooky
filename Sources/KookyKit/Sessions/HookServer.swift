@@ -22,6 +22,14 @@ enum HookEvent: String {
     }
 }
 
+/// PreToolUse / PostToolUse phase carried on `HookMessage.toolCall`. Pre
+/// fires before Claude runs the tool; Post fires after — duration / orphan
+/// timing are computed `WorkspaceStore`-side from the gap between matched
+/// events (KookyHook is fork-per-event and can't keep state).
+enum HookToolEvent: String {
+    case pre, post
+}
+
 enum HookMessage {
     case agent(agent: AgentTemplate, event: HookEvent, sessionId: UUID)
     case shellEnvironment(env: [String: String], sessionId: UUID)
@@ -32,6 +40,23 @@ enum HookMessage {
     /// pipes session_id today) and the consumer doesn't dispatch per-agent
     /// — so the payload only carries surface + id.
     case conversationId(conversationId: String, sessionId: UUID)
+    /// PreToolUse / PostToolUse event for the activity strip. `agent` is
+    /// the base AgentTemplate the slug resolves to (Claude builtin today —
+    /// custom Claude-based agents share its slug since `from(hookSlug:)`
+    /// matches by `initialCommand`). `success` is non-nil only for
+    /// `.post` events. `toolUseId` is Claude's per-call stable id when
+    /// present (used by `Session.recordToolCallEnd` to match Pre/Post
+    /// pairs even when two concurrent calls share `toolName` + truncated
+    /// identifier).
+    case toolCall(
+        agent: AgentTemplate,
+        toolName: String,
+        identifier: String,
+        event: HookToolEvent,
+        success: Bool?,
+        toolUseId: String?,
+        sessionId: UUID
+    )
 }
 
 @MainActor
@@ -153,6 +178,44 @@ final class HookServer {
            let conversationId = dict["conversationId"] as? String,
            !conversationId.isEmpty {
             return .conversationId(conversationId: conversationId, sessionId: id)
+        }
+
+        if dict["kind"] as? String == "tool" {
+            guard
+                let agentSlug = dict["agent"] as? String,
+                let agent = AgentTemplate.from(hookSlug: agentSlug),
+                let toolName = dict["tool_name"] as? String, !toolName.isEmpty,
+                let identifier = dict["identifier"] as? String,
+                let eventRaw = dict["event"] as? String,
+                let event = HookToolEvent(rawValue: eventRaw)
+            else { return nil }
+
+            // success ships as a literal "true" / "false" string on .post;
+            // .pre omits it. Strict equality with "true" — any other value
+            // ("TRUE", "1", "yes", "") coerces to false. KookyHookKit owns
+            // the wire shape and ships exactly "true" / "false", so the
+            // strict check is a wire-protocol contract not a parse heuristic.
+            // Missing field on .post leaves success nil — the consumer
+            // (WorkspaceStore.applyToolCallEvent) treats nil as success
+            // (rather than guess-fail an unparseable response).
+            var success: Bool? = nil
+            if event == .post, let s = dict["success"] as? String {
+                success = (s == "true")
+            }
+
+            // tool_use_id ships only when Claude includes it (recent CLI);
+            // nil-tolerant on the consumer side so old payloads still work.
+            let toolUseId = (dict["tool_use_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+
+            return .toolCall(
+                agent: agent,
+                toolName: toolName,
+                identifier: identifier,
+                event: event,
+                success: success,
+                toolUseId: toolUseId,
+                sessionId: id
+            )
         }
 
         guard

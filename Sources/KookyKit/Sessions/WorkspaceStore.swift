@@ -1075,6 +1075,42 @@ final class WorkspaceStore {
         scheduleSave()
     }
 
+    /// Routes a Claude tool-call event (PreToolUse / PostToolUse) to the
+    /// originating Session's rolling `toolCallEvents` buffer. Runtime-only
+    /// — no `scheduleSave()` because `toolCallEvents` isn't persisted.
+    /// Unknown sessionIds (race: tab closed mid-flight) drop silently;
+    /// other UI keeps rendering.
+    func applyToolCallEvent(
+        agent: AgentTemplate,
+        toolName: String,
+        identifier: String,
+        event: HookToolEvent,
+        success: Bool?,
+        toolUseId: String?,
+        sessionId: UUID
+    ) {
+        guard let session = findSession(id: sessionId) else { return }
+
+        switch event {
+        case .pre:
+            session.recordToolCallStart(
+                toolName: toolName,
+                identifier: identifier,
+                toolUseId: toolUseId
+            )
+        case .post:
+            // Missing success flag (parse miss / wire malformed) defaults
+            // to true — better to show the call as succeeded than to
+            // falsely flag failure on a Claude that ran fine.
+            session.recordToolCallEnd(
+                toolName: toolName,
+                identifier: identifier,
+                success: success ?? true,
+                toolUseId: toolUseId
+            )
+        }
+    }
+
     /// The workspace + pane holding the session with `id`, or nil. One DFS
     /// per workspace, stopping at the first hit.
     private func location(ofSessionId id: UUID) -> (workspace: Workspace, pane: Pane)? {
