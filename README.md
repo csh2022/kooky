@@ -8,9 +8,9 @@
 
 > *A minimal modern terminal for AI coding.*
 
-🇬🇧 English  ·  🇨🇳 [中文](README_CN.md)
+🇬🇧 English  ·  🇨🇳 [中文](README_CN.md)  ·  🇯🇵 [日本語](README_JA.md)
 
-![kooky — sidebar with three workspaces, two panes running Claude Code and Codex side by side, the `+` menu showing the seven built-in agent templates](screenshot.png)
+![kooky screenshot](screenshot.png)
 
 A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / vertical split panes; one-click agent launch; per-agent activity readout; live workspace state with one-click Node and branch switching. Open-source, MIT-licensed. No accounts, no telemetry; app state stays local. GPU rendering via [libghostty](https://github.com/ghostty-org/ghostty).
 
@@ -92,7 +92,7 @@ Requires Xcode 26+ and macOS 14+ (Sonoma — `@Observable` is the floor).
 ./scripts/setup-libghostty.sh        # one-time: fetch the libghostty xcframework
 swift build
 swift run                            # dev mode
-swift test                           # 206 unit tests
+swift test                           # 252 unit tests
 
 ./scripts/build-app.sh               # writes dist/Kooky.app
 ./scripts/build-dmg.sh --build       # writes dist/Kooky-vX.Y.Z.dmg
