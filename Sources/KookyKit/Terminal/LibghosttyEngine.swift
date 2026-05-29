@@ -348,6 +348,13 @@ final class GhosttySurfaceView: NSView {
         total <= len || offset + len >= total
     }
 
+    /// Last backing scale we propagated to libghostty. libghostty captures the
+    /// scale once at surface creation and never hears about display moves on
+    /// its own, so we re-push it from `viewDidChangeBackingProperties`. Tracked
+    /// so a colorspace-only backing change (same scale) doesn't fire a
+    /// gratuitous resize. Seeded at surface creation.
+    private var lastBackingScale: CGFloat?
+
     var pendingConfig: TerminalSessionConfig?
     var onPwdChange: ((String) -> Void)?
     var onTitleChange: ((String) -> Void)?
@@ -519,6 +526,9 @@ final class GhosttySurfaceView: NSView {
         // Pin contentsScale so Core Animation doesn't double-scale ghostty's
         // already-pixel-correct render.
         layer?.contentsScale = scale
+        // Seed so the first viewDidChangeBackingProperties on this display is a
+        // no-op; only a real cross-display scale change re-pushes (issue #8).
+        lastBackingScale = window.backingScaleFactor
 
         let workingDir = config.workingDirectory ?? NSHomeDirectory()
         // Merge our wrapper ZDOTDIR into the caller's env dict. AgentTemplate
@@ -613,6 +623,25 @@ final class GhosttySurfaceView: NSView {
     }
 
     func flushPropagateSize() {
+        propagateSizeToSurface()
+    }
+
+    /// Fires when the window moves to a display with a different backing scale
+    /// (e.g. a Retina laptop screen → a 1x external monitor) — or on a
+    /// colorspace change. libghostty captured the scale at surface creation and
+    /// has no other way to learn the window changed displays; left stale, it
+    /// keeps sizing the cell grid at the old DPI while receiving the new
+    /// display's pixel dimensions, so the grid no longer fills the surface — a
+    /// blank gutter on the right and input overflowing the viewport (issue #8).
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        guard let surface, let scale = window?.backingScaleFactor else { return }
+        // Skip colorspace-only changes (same scale) so we don't fire a
+        // gratuitous set_size → SIGWINCH (conda scrollback-wipe known issue).
+        guard scale != lastBackingScale else { return }
+        lastBackingScale = scale
+        layer?.contentsScale = scale
+        ghostty_surface_set_content_scale(surface, scale, scale)
         propagateSizeToSurface()
     }
 

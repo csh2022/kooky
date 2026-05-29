@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.19.2 — 2026-05-29
+
+- Fixed the layout breaking when you drag the window between displays with different scale factors (e.g. a Retina laptop screen and a 1x external monitor) — the terminal now re-flows to the new display's resolution instead of leaving a blank gutter on the right or letting input overflow the viewport. (Resolves #8.)
+
 ## v0.19.1 — 2026-05-29
 
 - Fixed the terminal getting stuck mid-screen after a resize, fullscreen toggle, or the status bar appearing — when an agent like Claude Code is streaming output, the view now stays pinned to the latest output and the input box instead of stranding them below the fold. Scroll up to read history and it stays where you left it. (Resolves #7.)
