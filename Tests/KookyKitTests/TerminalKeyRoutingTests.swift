@@ -39,6 +39,21 @@ final class TerminalKeyRoutingTests: XCTestCase {
         )
     }
 
+    func testViewportAtBottomDetection() {
+        // ghostty's scrollbar offset is measured from the top; the bottom
+        // (active area) is offset + len == total. This predicate gates the
+        // resize re-pin that fixes issue #7.
+
+        // Pinned to the bottom: viewport spans down to the last row.
+        XCTAssertTrue(GhosttySurfaceView.isViewportAtBottom(total: 100, offset: 76, len: 24))
+        // Scrolled up into scrollback: top of viewport above the active area.
+        XCTAssertFalse(GhosttySurfaceView.isViewportAtBottom(total: 100, offset: 0, len: 24))
+        XCTAssertFalse(GhosttySurfaceView.isViewportAtBottom(total: 100, offset: 50, len: 24))
+        // Content fits on screen (no scrollback): trivially at the bottom.
+        XCTAssertTrue(GhosttySurfaceView.isViewportAtBottom(total: 24, offset: 0, len: 24))
+        XCTAssertTrue(GhosttySurfaceView.isViewportAtBottom(total: 10, offset: 0, len: 24))
+    }
+
     func testGhosttyCursorKeyTracksApplicationCursorMode() throws {
         guard let app = LibghosttyApp.shared.app else {
             throw XCTSkip("libghostty app did not initialize")

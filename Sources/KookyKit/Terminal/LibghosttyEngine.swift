@@ -333,6 +333,20 @@ final class GhosttySurfaceView: NSView {
     private var drawTimer: Timer?
     private let scrollIndicator = ScrollIndicator()
     private var lastScrollbar: (total: UInt64, offset: UInt64, len: UInt64)?
+    /// Whether the viewport is currently pinned to the bottom (latest output).
+    /// Tracked from every SCROLLBAR action so `propagateSizeToSurface` can
+    /// re-pin to the bottom after a resize without yanking a user who has
+    /// scrolled up into scrollback. Starts true: a fresh surface whose content
+    /// fits on screen is trivially at the bottom.
+    private var viewportAtBottom = true
+
+    /// ghostty's scrollbar `offset` is measured from the TOP (0 = top of
+    /// scrollback); the viewport sits at the bottom (active area) when it spans
+    /// down to the last row, i.e. `offset + len == total`. Content that fits on
+    /// screen (`total <= len`) is trivially at the bottom.
+    static func isViewportAtBottom(total: UInt64, offset: UInt64, len: UInt64) -> Bool {
+        total <= len || offset + len >= total
+    }
 
     var pendingConfig: TerminalSessionConfig?
     var onPwdChange: ((String) -> Void)?
@@ -982,6 +996,10 @@ final class GhosttySurfaceView: NSView {
     /// the layout pass entirely when the values haven't changed (libghostty
     /// emits these liberally).
     func applyScrollbar(total: UInt64, offset: UInt64, len: UInt64) {
+        // Track bottom-pinned state on every tick — including the ones we skip
+        // below for indicator purposes — so the resize re-pin in
+        // propagateSizeToSurface always sees a current value.
+        viewportAtBottom = Self.isViewportAtBottom(total: total, offset: offset, len: len)
         guard total > len, len > 0 else { return }
         let next = (total: total, offset: offset, len: len)
         let previous = lastScrollbar
@@ -1053,6 +1071,20 @@ final class GhosttySurfaceView: NSView {
         // never fully recovers, so the visible buffer creeps upward each swap.
         guard widthPx > 0, heightPx > 0 else { return }
         ghostty_surface_set_size(surface, widthPx, heightPx)
+        // ghostty does NOT re-pin the viewport to the bottom on resize — it only
+        // follows the latest output when a PTY write or keystroke calls
+        // scroll(.active). A resize (live window drag → SIGWINCH-per-frame,
+        // status-bar appear/disappear flush, pane-zoom flush, fullscreen) can
+        // therefore strand the viewport above the active area while output is
+        // streaming, leaving the prompt + newest output rendered below the fold
+        // (issue #7). ghostty's `scroll-to-bottom = output` config that would
+        // paper over this is unimplemented upstream, so re-pin ourselves — but
+        // only when we were already at the bottom, so a user reading scrollback
+        // isn't yanked down mid-resize.
+        if viewportAtBottom {
+            let action = "scroll_to_bottom"
+            action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
+        }
     }
 }
 

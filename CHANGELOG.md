@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.19.1 — 2026-05-29
+
+- Fixed the terminal getting stuck mid-screen after a resize, fullscreen toggle, or the status bar appearing — when an agent like Claude Code is streaming output, the view now stays pinned to the latest output and the input box instead of stranding them below the fold. Scroll up to read history and it stays where you left it. (Resolves #7.)
+
 ## v0.19.0 — 2026-05-28
 
 - Watch Claude Code work in real time — kooky now shows a pill in the bottom status bar with the tool Claude is running (Bash / Edit / Read / etc.), how long it's been running, and whether it succeeded or failed. Click the pill to see the full session history.
