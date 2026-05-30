@@ -192,6 +192,8 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(grokConfig.environment["KOOKY_AGENT"], "grok")
         let antigravityConfig = AgentTemplate.antigravity.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(antigravityConfig.environment["KOOKY_AGENT"], "agy")
+        let kimiConfig = AgentTemplate.kimi.makeSessionConfig(resumeId: "abc-123")
+        XCTAssertEqual(kimiConfig.environment["KOOKY_AGENT"], "kimi")
     }
 
     func testSupportsResumeMatchesResumeFlag() {
@@ -200,6 +202,7 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertFalse(AgentTemplate.copilot.supportsResume)
         XCTAssertFalse(AgentTemplate.grok.supportsResume)
         XCTAssertFalse(AgentTemplate.antigravity.supportsResume)
+        XCTAssertFalse(AgentTemplate.kimi.supportsResume)
     }
 
     func testMakeSessionConfigInjectsResumeForClaudeBasedCustom() {
@@ -229,6 +232,11 @@ final class AgentTemplateTests: XCTestCase {
     func testMakeSessionConfigFlagPromptForAntigravity() {
         let config = AgentTemplate.antigravity.makeSessionConfig(initialPrompt: "fix this error")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "agy -i 'fix this error'")
+    }
+
+    func testMakeSessionConfigFlagPromptForKimi() {
+        let config = AgentTemplate.kimi.makeSessionConfig(initialPrompt: "fix this error")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "kimi -p 'fix this error'")
     }
 
     func testMakeSessionConfigPositionalPromptForCodexCursorGeminiOpencodeGrok() {

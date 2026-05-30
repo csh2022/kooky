@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.20.0 — 2026-05-30
+
+- **Kimi Code** — Moonshot AI's `kimi` CLI joins the agent launcher. Pick it from the `+` menu or set it as your default agent; the sidebar activity dot tracks when it's running.
+
 ## v0.19.3 — 2026-05-30
 
 - **Custom Ghostty themes** — themes in your Ghostty themes folder now appear in Settings and recolor the terminal and whole window when selected. (Resolves #17.)

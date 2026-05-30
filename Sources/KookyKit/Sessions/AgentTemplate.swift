@@ -332,9 +332,35 @@ extension AgentTemplate {
         promptLaunchFlag: "-i"
     )
 
-    /// The 10 templates shipped with kooky. User-defined custom agents are
+    /// Kimi Code — Moonshot AI's coding CLI; binary `kimi` (npm
+    /// `@moonshot-ai/kimi-code`). Bracket wrapper only: Kimi ships a
+    /// Claude-style lifecycle-hook system, but declares it in TOML
+    /// (`~/.kimi-code/config.toml` `[[hooks]]`) with no system-settings
+    /// env-var override (no `GEMINI_CLI_SYSTEM_SETTINGS_PATH` analogue), so
+    /// kooky can't inject hooks non-invasively the way it does for
+    /// Claude / Gemini. running/ended come from the wrapper; mid-run
+    /// attention + tool-call pills are deferred until that TOML-merge path
+    /// is built.
+    ///
+    /// `-p` (`--prompt`) is Kimi's only prompt-passing flag and is
+    /// non-interactive (streams the answer to stdout, then exits) — there's
+    /// no interactive-with-prompt flag like Antigravity's `-i`, so
+    /// "Ask Kimi" single-shots rather than seeding a live session. Resume
+    /// (`--session` / `--continue`) stays unwired: like every non-Claude
+    /// agent, kooky has no id-capture path yet, so `resumeFlag` is nil.
+    static let kimi = AgentTemplate(
+        id: "kimi",
+        title: "Kimi Code",
+        symbol: "moon.fill",
+        iconAsset: "kimi",
+        tintHex: "C9C3D6",
+        initialCommand: "kimi",
+        promptLaunchFlag: "-p"
+    )
+
+    /// The 11 templates shipped with kooky. User-defined custom agents are
     /// merged on top via `all` at runtime.
-    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot, .grok, .antigravity]
+    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot, .grok, .antigravity, .kimi]
 
     /// All templates available right now — `builtin` plus the user's custom
     /// agents from Settings → Agents. MainActor-isolated because it

@@ -305,6 +305,7 @@ enum KookyShellIntegration {
         writeWrapper(name: "copilot", script: bracketWrapperScript(slug: "copilot"))
         writeWrapper(name: "grok", script: bracketWrapperScript(slug: "grok"))
         writeWrapper(name: "agy", script: antigravityWrapperScript)
+        writeWrapper(name: "kimi", script: bracketWrapperScript(slug: "kimi"))
 
         let hookCmd = kookyHookBinaryPath
         writeJSON(at: claudeHooksPath, object: claudeHooksObject(hookCmd: hookCmd))
@@ -315,6 +316,12 @@ enum KookyShellIntegration {
         // is a script directory driven by env vars (GROK_HOOK_EVENT /
         // GROK_SESSION_ID), so the bracket wrapper handles running/ended
         // and full lifecycle integration requires a different code path.
+        //
+        // Kimi Code's hooks are TOML-only (`~/.kimi-code/config.toml`
+        // `[[hooks]]`) with no system-settings env-var override — so unlike
+        // Gemini we can't point it at a kooky-owned defaults file, and unlike
+        // Copilot it has no per-event hooks directory; the bracket wrapper
+        // gives running/ended until a config.toml-merge path exists.
     }
 
     /// Writes the Copilot hooks JSON only when the user already has a

@@ -83,6 +83,18 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
     }
 
+    func testKimiWrapperBracketsRunningAndEnded() {
+        // Kimi's lifecycle hooks are TOML-only with no system-settings
+        // override, so it rides the generic bracket wrapper (running before
+        // exec, ended after exit) like grok / amp rather than a JSON hooks
+        // file. Regression guard for the v0.20.0 wiring.
+        let script = KookyShellIntegration.bracketWrapperScript(slug: "kimi")
+
+        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" kimi running"))
+        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" kimi ended"))
+        XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
+    }
+
     func testAntigravityWrapperGuardsAgainstIDEShim() {
         // Antigravity 2.0 IDE installs a launcher also called `agy` that
         // symlinks into `/Applications/Antigravity.app/...`. Without
