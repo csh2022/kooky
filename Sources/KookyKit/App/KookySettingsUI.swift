@@ -22,8 +22,9 @@ final class KookySettingsModel {
     var fontSize: Int? = nil
     var cursorStyle: String = "block"
     /// Picker selection for the terminal theme row. Values are one of:
-    /// `defaultThemeSelection`, `customThemeSelection`, or a bundled preset id.
+    /// `defaultThemeSelection`, `customThemeSelection`, or a theme choice id.
     var terminalThemeSelection: String = KookySettingsModel.defaultThemeSelection
+    var terminalThemeChoices: [KookyTerminalTheme] = KookyTerminalTheme.availableThemes()
     /// Unknown raw `terminal.theme` values from hand-edited settings.json.
     /// Kept so saving an unrelated Settings field doesn't delete a custom
     /// Ghostty theme path/name that the picker cannot represent as a preset.
@@ -81,6 +82,7 @@ final class KookySettingsModel {
 
     func load() {
         let parsed = KookySettings.loadParsed() ?? [:]
+        terminalThemeChoices = KookyTerminalTheme.availableThemes()
         let terminal = parsed["terminal"] as? [String: Any] ?? [:]
         fontFamily = (terminal["font-family"] as? String) ?? ""
         fontSize = nil
@@ -90,7 +92,10 @@ final class KookySettingsModel {
             fontSize = Int(d)
         }
         cursorStyle = (terminal["cursor-style"] as? String) ?? "block"
-        let themeState = Self.themeSelection(for: terminal["theme"] as? String)
+        let themeState = Self.themeSelection(
+            for: terminal["theme"] as? String,
+            in: terminalThemeChoices
+        )
         terminalThemeSelection = themeState.selection
         customTerminalThemeRawValue = themeState.customRawValue
 
@@ -211,7 +216,8 @@ final class KookySettingsModel {
         terminal["cursor-style"] = cursorStyle == "block" ? nil : cursorStyle
         terminal["theme"] = Self.persistedThemeValue(
             selection: terminalThemeSelection,
-            customRawValue: customTerminalThemeRawValue
+            customRawValue: customTerminalThemeRawValue,
+            in: terminalThemeChoices
         )
         parsed["terminal"] = terminal
 
@@ -302,28 +308,44 @@ final class KookySettingsModel {
     static let defaultThemeSelection = "__kooky-default-theme"
     static let customThemeSelection = "__kooky-custom-theme"
 
-    var terminalThemePresetId: String? {
-        KookyTerminalTheme.preset(for: terminalThemeSelection)?.id
+    var selectedTerminalTheme: KookyTerminalTheme? {
+        terminalThemeChoices.first { $0.id == terminalThemeSelection }
     }
 
     var customTerminalThemeLabel: String? {
+        guard terminalThemeSelection == Self.customThemeSelection else { return nil }
         guard let raw = customTerminalThemeRawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               !raw.isEmpty else { return nil }
         return "Custom (\(raw))"
     }
 
-    static func themeSelection(for rawTheme: String?) -> (selection: String, customRawValue: String?) {
+    var bundledTerminalThemes: [KookyTerminalTheme] {
+        terminalThemeChoices.filter(\.isBundled)
+    }
+
+    var ghosttyUserThemes: [KookyTerminalTheme] {
+        terminalThemeChoices.filter { !$0.isBundled }
+    }
+
+    static func themeSelection(
+        for rawTheme: String?,
+        in themes: [KookyTerminalTheme] = KookyTerminalTheme.presets
+    ) -> (selection: String, customRawValue: String?) {
         guard let rawTheme,
               !rawTheme.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return (defaultThemeSelection, nil)
         }
-        if let preset = KookyTerminalTheme.preset(for: rawTheme) {
-            return (preset.id, nil)
+        if let theme = KookyTerminalTheme.theme(for: rawTheme, in: themes) {
+            return (theme.id, nil)
         }
         return (customThemeSelection, rawTheme)
     }
 
-    static func persistedThemeValue(selection: String, customRawValue: String?) -> String? {
+    static func persistedThemeValue(
+        selection: String,
+        customRawValue: String?,
+        in themes: [KookyTerminalTheme] = KookyTerminalTheme.presets
+    ) -> String? {
         if selection == defaultThemeSelection {
             return nil
         }
@@ -331,7 +353,7 @@ final class KookySettingsModel {
             let raw = customRawValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return raw.isEmpty ? nil : raw
         }
-        return KookyTerminalTheme.preset(for: selection)?.id
+        return themes.first { $0.id == selection }?.storedValue
     }
 
     /// Appends a new blank custom agent. The id is `custom-N`, the title is
@@ -639,8 +661,14 @@ struct KookySettingsView: View {
                 Text(customLabel).tag(KookySettingsModel.customThemeSelection)
             }
             Divider()
-            ForEach(KookyTerminalTheme.presets) { preset in
+            ForEach(model.bundledTerminalThemes) { preset in
                 Text(preset.title).tag(preset.id)
+            }
+            if !model.ghosttyUserThemes.isEmpty {
+                Divider()
+                ForEach(model.ghosttyUserThemes) { theme in
+                    Text(theme.title).tag(theme.id)
+                }
             }
         }
         .labelsHidden()

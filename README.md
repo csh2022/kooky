@@ -38,7 +38,7 @@ A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / 
 
 **SwiftUI-native, minimal chrome.** Onest + JetBrains Mono. Custom About panel, native menus with shortcut hints, full IME support.
 
-**Configurable.** Settings (`⌘,`) covers themes, font, cursor, default new-tab behavior, Terminal presets, agents, and the pane status bar. Theme changes update the whole window immediately.
+**Configurable.** Settings (`⌘,`) covers themes, font, cursor, default new-tab behavior, Terminal presets, agents, and the pane status bar. Theme changes update the whole window immediately, including custom Ghostty themes in your themes folder.
 
 **Local by default.** No accounts, no telemetry, no cloud sync. Kooky keeps its own state on your device.
 

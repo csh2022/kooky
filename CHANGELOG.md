@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.19.3 — 2026-05-30
+
+- **Custom Ghostty themes** — themes in your Ghostty themes folder now appear in Settings and recolor the terminal and whole window when selected. (Resolves #17.)
+
 ## v0.19.2 — 2026-05-29
 
 - Fixed the layout breaking when you drag the window between displays with different scale factors (e.g. a Retina laptop screen and a 1x external monitor) — the terminal now re-flows to the new display's resolution instead of leaving a blank gutter on the right or letting input overflow the viewport. (Resolves #8.)

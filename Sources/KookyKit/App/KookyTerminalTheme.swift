@@ -1,11 +1,20 @@
 import Foundation
 
 struct KookyTerminalTheme: Identifiable, Hashable {
+    enum Source: Hashable {
+        case bundled
+        case ghosttyUser
+    }
+
     let id: String
     let title: String
+    let storedValue: String
     let backgroundHex: String
     let foregroundHex: String
     let lines: [String]
+    let source: Source
+
+    var isBundled: Bool { source == .bundled }
 
     static let presets: [KookyTerminalTheme] = [
         .init(
@@ -117,7 +126,54 @@ struct KookyTerminalTheme: Identifiable, Hashable {
 
     static func preset(for storedValue: String) -> KookyTerminalTheme? {
         let trimmed = storedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return presets.first { $0.id == trimmed || $0.title == trimmed }
+        return presets.first { $0.matches(storedValue: trimmed) }
+    }
+
+    static func availableThemes(userThemeDirectory: URL = ghosttyUserThemesDirectory()) -> [KookyTerminalTheme] {
+        presets + userThemes(in: userThemeDirectory)
+    }
+
+    static func theme(for storedValue: String, in themes: [KookyTerminalTheme]) -> KookyTerminalTheme? {
+        let trimmed = storedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return themes.first { $0.matches(storedValue: trimmed) }
+    }
+
+    static func ghosttyUserThemesDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        if let xdg = environment["XDG_CONFIG_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !xdg.isEmpty {
+            return URL(fileURLWithPath: xdg, isDirectory: true)
+                .appendingPathComponent("ghostty/themes", isDirectory: true)
+        }
+        return homeDirectory
+            .appendingPathComponent(".config/ghostty/themes", isDirectory: true)
+    }
+
+    static func userThemes(in directory: URL) -> [KookyTerminalTheme] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return urls.sorted { lhs, rhs in
+            lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedAscending
+        }.compactMap { url -> KookyTerminalTheme? in
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            let values = parseGhosttyConfigLines(text)
+            return KookyTerminalTheme(
+                userThemeName: url.lastPathComponent,
+                background: values["background"],
+                foreground: values["foreground"]
+            )
+        }
+    }
+
+    func matches(storedValue: String) -> Bool {
+        id == storedValue || title == storedValue || self.storedValue == storedValue
     }
 
     private init(
@@ -132,8 +188,10 @@ struct KookyTerminalTheme: Identifiable, Hashable {
     ) {
         self.id = id
         self.title = title
+        self.storedValue = id
         self.backgroundHex = background
         self.foregroundHex = foreground
+        self.source = .bundled
         self.lines = [
             "background = \(background)",
             "foreground = \(foreground)",
@@ -143,5 +201,36 @@ struct KookyTerminalTheme: Identifiable, Hashable {
         ] + palette.enumerated().map { idx, color in
             "palette = \(idx)=\(color)"
         }
+    }
+
+    private init(userThemeName: String, background: String?, foreground: String?) {
+        self.id = "ghostty-user:\(userThemeName)"
+        self.title = userThemeName
+        self.storedValue = userThemeName
+        self.backgroundHex = background ?? "#282C34"
+        self.foregroundHex = foreground ?? "#EFEFF1"
+        self.lines = []
+        self.source = .ghosttyUser
+    }
+
+    private static func parseGhosttyConfigLines(_ text: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard let eq = trimmed.firstIndex(of: "=") else { continue }
+            let key = String(trimmed[..<eq]).trimmingCharacters(in: .whitespaces)
+            let rawValue = String(trimmed[trimmed.index(after: eq)...])
+                .trimmingCharacters(in: .whitespaces)
+            values[key] = unwrapQuotes(rawValue)
+        }
+        return values
+    }
+
+    private static func unwrapQuotes(_ raw: String) -> String {
+        guard raw.count >= 2,
+              raw.first == raw.last,
+              raw.first == "\"" || raw.first == "'" else { return raw }
+        return String(raw.dropFirst().dropLast())
     }
 }

@@ -38,7 +38,7 @@
 
 **SwiftUI 原生开发，简约风格。** Onest + JetBrains Mono 字体。自定义 About 面板、带快捷键提示的原生菜单,中日韩 IME 输入完整支持。
 
-**可配置。** Settings 面板（`⌘,`）可以调主题、字体、光标、默认新 tab 行为、Terminal 预设、agents 和 pane 底部状态栏。切换主题时整个窗口会一起立即换色。
+**可配置。** Settings 面板（`⌘,`）可以调主题、字体、光标、默认新 tab 行为、Terminal 预设、agents 和 pane 底部状态栏。切换主题时整个窗口会一起立即换色，也支持 themes 目录里的自定义 Ghostty 主题。
 
 **默认本地。** 不需要账号，不做遥测，没有云同步。kooky 的状态都留在本机。
 

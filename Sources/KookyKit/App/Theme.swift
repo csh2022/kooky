@@ -27,18 +27,21 @@ enum Theme {
         NSAppearance(named: resolved.isLight ? .aqua : .darkAqua)
     }
 
-    /// `Theme.resolved` reads `KookySettingsModel.shared.terminalThemePresetId` so
+    /// `Theme.resolved` reads `KookySettingsModel.shared.selectedTerminalTheme` so
     /// SwiftUI's `@Observable` machinery registers the dependency on every
     /// body that touches a chrome token — without that read, body
-    /// re-evaluation wouldn't fire on a theme switch. The cache (keyed by
-    /// the resolved id) skips the expensive work (linear preset scan +
-    /// hex parse + sRGB color-space conversion + `mix` math, ×7 tokens)
-    /// when the id is unchanged, so most SwiftUI renders pay just one
-    /// `@Observable` read + one optional-string `==`.
+    /// re-evaluation wouldn't fire on a theme switch. The cache key includes
+    /// parsed background / foreground colors so a user theme file refreshes
+    /// chrome when Settings reloads after the file changes.
     static var resolved: Resolved {
-        let id = KookySettingsModel.shared.terminalThemePresetId
-        if let cached = cachedResolved, cached.themeId == id { return cached }
-        let next = Resolved(themeId: id)
+        let theme = KookySettingsModel.shared.selectedTerminalTheme
+        let key = Resolved.CacheKey(
+            themeId: theme?.id,
+            backgroundHex: theme?.backgroundHex,
+            foregroundHex: theme?.foregroundHex
+        )
+        if let cached = cachedResolved, cached.cacheKey == key { return cached }
+        let next = Resolved(cacheKey: key, theme: theme)
         cachedResolved = next
         return next
     }
@@ -47,7 +50,13 @@ enum Theme {
     /// Snapshot of every token derived from one terminal theme. Computed once
     /// and reused until the theme id changes — see `Theme.resolved`.
     struct Resolved {
-        let themeId: String?
+        struct CacheKey: Equatable {
+            let themeId: String?
+            let backgroundHex: String?
+            let foregroundHex: String?
+        }
+
+        let cacheKey: CacheKey
         let backgroundColor: NSColor
         let foregroundColor: NSColor
         let chromeBackgroundColor: NSColor
@@ -59,11 +68,10 @@ enum Theme {
         let chromeActive: Color
 
         @MainActor
-        fileprivate init(themeId: String?) {
-            self.themeId = themeId
-            let preset = themeId.flatMap { KookyTerminalTheme.preset(for: $0) }
-            self.backgroundColor = preset.flatMap { NSColor(hex: $0.backgroundHex) } ?? defaultTerminalSurface
-            self.foregroundColor = preset.flatMap { NSColor(hex: $0.foregroundHex) } ?? defaultForeground
+        fileprivate init(cacheKey: CacheKey, theme: KookyTerminalTheme?) {
+            self.cacheKey = cacheKey
+            self.backgroundColor = theme.flatMap { NSColor(hex: $0.backgroundHex) } ?? defaultTerminalSurface
+            self.foregroundColor = theme.flatMap { NSColor(hex: $0.foregroundHex) } ?? defaultForeground
             self.isLight = backgroundColor.relativeLuminance > 0.55
             // Chrome sits one step off the surface so the terminal reads as
             // the framed canvas. Dark themes nudge toward black, light
