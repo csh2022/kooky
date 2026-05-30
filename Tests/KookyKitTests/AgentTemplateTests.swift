@@ -239,6 +239,29 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "kimi -p 'fix this error'")
     }
 
+    // MARK: - Monochrome icon theming
+
+    func testMonochromeIconSetReferencesRealBuiltinAssets() {
+        // A typo in `monochromeAssets` would silently skip theme-adaptive
+        // tinting for that agent, so pin every entry to a real builtin iconAsset.
+        let builtinAssets = Set(AgentTemplate.builtin.compactMap(\.iconAsset))
+        for name in AgentIcon.monochromeAssets {
+            XCTAssertTrue(builtinAssets.contains(name),
+                          "monochrome asset \(name) matches no builtin iconAsset")
+        }
+    }
+
+    func testMonochromeBrandsTintedAndColorBrandsRenderedAsIs() {
+        // The five white-mark brands get template-tinted so they survive a
+        // light theme; the color brands keep their own pixels on every theme.
+        for mono in ["opencode", "cursor", "githubcopilot", "grok", "kimi"] {
+            XCTAssertTrue(AgentIcon.isMonochrome(mono), "\(mono) should be template-tinted")
+        }
+        for color in ["claudecode", "codex", "gemini", "amp", "antigravity"] {
+            XCTAssertFalse(AgentIcon.isMonochrome(color), "\(color) is a color brand, render as-is")
+        }
+    }
+
     func testMakeSessionConfigPositionalPromptForCodexCursorGeminiOpencodeGrok() {
         let pairs: [(AgentTemplate, String)] = [
             (.codex, "codex"),

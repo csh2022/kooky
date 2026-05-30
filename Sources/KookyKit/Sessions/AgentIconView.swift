@@ -12,6 +12,21 @@ import SwiftUI
 enum AgentIcon {
     private static var cache: [String: NSImage] = [:]
 
+    /// Asset names whose bundled lobe-icon is a single-color (white) mark with
+    /// the glyph carried in the alpha channel. Drawn as-is they disappear on
+    /// light themes — the chrome inverts but the PNG stays white — so
+    /// `AgentIconView` template-renders these tinted with `Theme.chromeForeground`
+    /// instead. Color-brand marks (claudecode / codex / gemini / amp /
+    /// antigravity) are intentionally absent: they keep their own colors on
+    /// every theme. Keyed on `iconAsset`, so a custom agent based on a mono
+    /// brand inherits the treatment for free. `nonisolated` so the predicate
+    /// is reachable from tests without hopping to the main actor.
+    nonisolated static let monochromeAssets: Set<String> = ["opencode", "cursor", "githubcopilot", "grok", "kimi"]
+
+    nonisolated static func isMonochrome(_ asset: String) -> Bool {
+        monochromeAssets.contains(asset)
+    }
+
     /// NSImage with a 16×16 logical size suitable for SwiftUI menu items
     /// (`Image(nsImage:)` in a `Label` bridges to `NSMenuItem.image`, which
     /// uses `image.size` to lay out the menu row). Pixel data stays at 640×640
@@ -34,10 +49,7 @@ struct AgentIconView: View {
     var body: some View {
         Group {
             if let asset, let image = AgentIcon.nsImage(asset: asset) {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
+                styledIcon(image, monochrome: AgentIcon.isMonochrome(asset))
             } else {
                 Image(systemName: fallbackSymbol)
                     .resizable()
@@ -45,5 +57,24 @@ struct AgentIconView: View {
             }
         }
         .frame(width: size, height: size)
+    }
+
+    /// Mono marks (white-on-transparent lobe icons) template-render tinted with
+    /// `Theme.chromeForeground` so they adapt per theme instead of vanishing on
+    /// light chrome — reading that token also registers the theme observation so
+    /// they re-flip on a theme switch. Color brands render `.original` and are
+    /// left untinted, keeping their own pixels on every theme.
+    @ViewBuilder
+    private func styledIcon(_ image: NSImage, monochrome: Bool) -> some View {
+        let img = Image(nsImage: image)
+            .renderingMode(monochrome ? .template : .original)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+        if monochrome {
+            img.foregroundStyle(Theme.chromeForeground)
+        } else {
+            img
+        }
     }
 }

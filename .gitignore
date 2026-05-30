@@ -40,6 +40,9 @@ AGENT.md
 GEMINI.md
 .cursorrules
 .cursor/
+
+# Private design drafts — not for public history
+docs/rust-rewrite-design.md
 .clinerules
 .windsurfrules
 .continue/

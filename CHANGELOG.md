@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.20.1 — 2026-05-30
+
+- Agent icons now show on light themes — the monochrome marks (OpenCode, Cursor, Copilot, Grok, Kimi) were invisible on light color schemes and now adapt to the theme so they're visible everywhere.
+
 ## v0.20.0 — 2026-05-30
 
 - **Kimi Code** — Moonshot AI's `kimi` CLI joins the agent launcher. Pick it from the `+` menu or set it as your default agent; the sidebar activity dot tracks when it's running.
