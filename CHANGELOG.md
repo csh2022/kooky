@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.22.2 — 2026-06-01
+
+- Split a pane straight from its tab bar — two buttons on the right (split right / split down) do the same thing as ⌘D / ⌘⇧D, so splitting is right there instead of behind a shortcut.
+
 ## v0.22.1 — 2026-06-01
 
 - Pi sessions now show the tool Pi is running right now in the pane status bar (`bash` / `read` / `edit` / etc.) with elapsed time — click the pill for the full session history, the same readout Claude Code already had.

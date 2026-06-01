@@ -11,32 +11,63 @@ struct TabBarView: View {
     @State private var isAddMenuOpen = false
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(Array(pane.tabs.enumerated()), id: \.element.id) { index, tab in
-                    DraggableTabRow(
-                        tab: tab,
-                        pane: pane,
-                        workspace: workspace,
-                        store: store,
-                        myIndex: index,
-                        canCloseToRight: index < pane.tabs.count - 1
-                    )
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(Array(pane.tabs.enumerated()), id: \.element.id) { index, tab in
+                        DraggableTabRow(
+                            tab: tab,
+                            pane: pane,
+                            workspace: workspace,
+                            store: store,
+                            myIndex: index,
+                            canCloseToRight: index < pane.tabs.count - 1
+                        )
+                    }
+                    addButton
                 }
-                addButton
-                Spacer(minLength: 0)
+                .padding(.horizontal, Theme.space2)
             }
-            .padding(.horizontal, Theme.space2)
+            // Double-click on tab bar empty area triggers macOS Zoom (filled
+            // screen, dock/menu kept) — same gesture as the system title-bar
+            // double-click. SwiftUI arbitrates count: 2 alongside children's
+            // count: 1 taps so tab activation still fires on single click.
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                NSApplication.shared.keyWindow?.performZoom(nil)
+            }
+
+            // Split controls pinned to the trailing edge — outside the
+            // ScrollView so they stay put while the tabs scroll.
+            splitButtons
         }
         .frame(height: 40)
-        // Double-click on tab bar empty area triggers macOS Zoom (filled
-        // screen, dock/menu kept) — same gesture as the system title-bar
-        // double-click. SwiftUI arbitrates count: 2 alongside children's
-        // count: 1 taps so tab activation still fires on single click.
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            NSApplication.shared.keyWindow?.performZoom(nil)
+    }
+
+    /// Split-right / split-down buttons. Mirror ⌘D / ⌘⇧D exactly: Split
+    /// Right is the `.horizontal` orientation (panes side by side), Split
+    /// Down is `.vertical` (panes stacked) — same mapping as
+    /// `AppDelegate.handleSplitRight` / `handleSplitDown`.
+    private var splitButtons: some View {
+        HStack(spacing: 2) {
+            HoverableIconButton(
+                systemName: "square.split.2x1",
+                fontSize: 11,
+                size: 28,
+                help: "Split Right (⌘D)"
+            ) {
+                store.splitPane(pane, orientation: .horizontal, in: workspace)
+            }
+            HoverableIconButton(
+                systemName: "square.split.1x2",
+                fontSize: 11,
+                size: 28,
+                help: "Split Down (⌘⇧D)"
+            ) {
+                store.splitPane(pane, orientation: .vertical, in: workspace)
+            }
         }
+        .padding(.trailing, Theme.space2)
     }
 
     private var addButton: some View {
