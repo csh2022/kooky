@@ -32,7 +32,7 @@ AI コーディングのために作られた、ミニマルでモダンな macO
 
 **ストレスのない入力。** zsh の prompt 上のどこをクリックしても shell カーソルがそこに移動します (modifier 不要、ghostty.app と同じ操作感)。Finder からファイル / フォルダを pane にドラッグすると、エスケープ済みの絶対パスがカーソル位置に挿入されます。
 
-**Agent ステータスをリアルタイム表示。** サイドバーのドットが各 agent の状態を示します —— 実行中 (青)、ユーザー待ち (琥珀)、アイドル (なし)。直前のコマンドが非ゼロ終了したときは tab と workspace のドットが赤くなり、ホバーで `exit N · 12.4s` が確認できます。Claude Code セッションでは pane 下部のステータスバーに Claude が今走らせているツール (Bash / Edit / Read など) と経過時間も表示されます —— pill をクリックすればセッション全体の履歴を確認でき、失敗したツール呼び出しはすぐに赤くなります。
+**Agent ステータスをリアルタイム表示。** サイドバーのドットが各 agent の状態を示します —— 実行中 (青)、ユーザー待ち (琥珀)、アイドル (なし)。直前のコマンドが非ゼロ終了したときは tab と workspace のドットが赤くなり、ホバーで `exit N · 12.4s` が確認できます。Claude Code と Pi のセッションでは pane 下部のステータスバーに agent が今走らせているツール (Bash / Edit / Read など) と経過時間も表示されます —— pill をクリックすればセッション全体の履歴を確認でき、失敗したツール呼び出しはすぐに赤くなります。pill は Settings → Status Bar で agent ごとに表示/非表示を切り替えられます。
 
 **作業環境の状態が一目で見える。** pane 下部のステータスバーに Git branch + diff (`N files +X −Y`)、Python venv、Node バージョン、有効中の proxy (`https_proxy` / `http_proxy` / `all_proxy`) を表示。agent の Bash ツールや別ターミナルで branch を切り替えても自動で更新されます。Node バージョンや Git branch の pill をクリックすればコマンドを打たずに切り替え可能、proxy pill をクリックすると完全な `name=value` を表示してコピーできます。
 
@@ -92,7 +92,7 @@ Xcode 26+ と macOS 14+ (Sonoma —— `@Observable` の最低システム要件
 ./scripts/setup-libghostty.sh        # 初回のみ：プリビルドの libghostty xcframework を Vendor/ にダウンロード
 swift build
 swift run                            # 開発モードで直接起動
-swift test                           # 365 個のユニットテスト
+swift test                           # 380 個のユニットテスト
 
 ./scripts/build-app.sh               # dist/Kooky.app を出力
 ./scripts/build-dmg.sh --build       # dist/Kooky-vX.Y.Z.dmg を出力

@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.22.1 — 2026-06-01
+
+- Pi sessions now show the tool Pi is running right now in the pane status bar (`bash` / `read` / `edit` / etc.) with elapsed time — click the pill for the full session history, the same readout Claude Code already had.
+- Settings → Status Bar lets you show or hide the tool-call pill per agent, so Claude Code and Pi toggle independently.
+
 ## v0.22.0 — 2026-06-01
 
 - **Pi** — Earendil's `pi` coding agent ([pi.dev](https://pi.dev)) joins the launcher. Pick it from the `+` menu or set it as your default agent; the sidebar dot tracks when it's working and when it's waiting on you, and pi conversations resume across kooky restarts.

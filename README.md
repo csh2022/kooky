@@ -32,7 +32,7 @@ A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / 
 
 **Friction-free input.** Click anywhere on the zsh prompt to move the shell cursor there (no modifier needed, same UX as ghostty.app). Drag a file or folder from Finder onto any pane to drop its escaped absolute path at the cursor.
 
-**Agent activity readout.** Sidebar dot tracks each agent in real time — running (blue), waiting on you (amber), idle (none). Tab + workspace dots also turn red when the last command exited non-zero; hover for `exit N · 12.4s`. For Claude Code sessions, the pane status bar also shows the tool Claude is running right now (Bash / Edit / Read / etc.) and how long — click the pill for the full session history; failed calls turn red immediately.
+**Agent activity readout.** Sidebar dot tracks each agent in real time — running (blue), waiting on you (amber), idle (none). Tab + workspace dots also turn red when the last command exited non-zero; hover for `exit N · 12.4s`. For Claude Code and Pi sessions, the pane status bar also shows the tool the agent is running right now (Bash / Edit / Read / etc.) and how long — click the pill for the full session history; failed calls turn red immediately. Toggle the pill per agent in Settings → Status Bar.
 
 **Live workspace state.** Pane status bar shows git branch + diff (`N files +X −Y`), Python venv, Node version, and active proxy (`https_proxy` / `http_proxy` / `all_proxy`). Auto-refreshes when an agent's Bash tool or another terminal switches branches. Click the Node or branch pill to switch versions / branches without typing; click the proxy pill to see and copy the full `name=value`.
 
@@ -92,7 +92,7 @@ Requires Xcode 26+ and macOS 14+ (Sonoma — `@Observable` is the floor).
 ./scripts/setup-libghostty.sh        # one-time: fetch the libghostty xcframework
 swift build
 swift run                            # dev mode
-swift test                           # 365 unit tests
+swift test                           # 380 unit tests
 
 ./scripts/build-app.sh               # writes dist/Kooky.app
 ./scripts/build-dmg.sh --build       # writes dist/Kooky-vX.Y.Z.dmg

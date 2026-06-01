@@ -205,6 +205,24 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(body.contains("kooky-managed-do-not-edit"), "must carry the upgrade-safety marker")
     }
 
+    func testPiExtensionReportsToolCallsForActivityPill() {
+        let body = KookyShellIntegration.piExtensionScript
+        // Subscribes to pi's tool lifecycle and relays each to KookyHook's
+        // `tool` argv branch (pre carries the identifier, post the ok/fail).
+        XCTAssertTrue(body.contains("tool_execution_start"))
+        XCTAssertTrue(body.contains("tool_execution_end"))
+        XCTAssertTrue(body.contains(#"["pi", "tool", "pre""#), "pre must report the identifier")
+        XCTAssertTrue(body.contains(#"["pi", "tool", "post""#), "post must report the result")
+        XCTAssertTrue(body.contains("event.toolCallId"), "must thread pi's toolCallId for Pre/Post matching")
+        XCTAssertTrue(body.contains(#"event.isError ? "fail" : "ok""#), "post maps isError → ok/fail")
+        // identifier extraction uses pi's arg keys (`path`, not Claude's
+        // `file_path`) and lowercase tool names.
+        XCTAssertTrue(body.contains("toolIdentifier"))
+        XCTAssertTrue(body.contains("args.command"))
+        XCTAssertTrue(body.contains("args.path"))
+        XCTAssertTrue(body.contains("args.pattern"))
+    }
+
     func testAgentLaunchBlockRevertsIconAfterAgentReturns() {
         let block = KookyShellIntegration.agentLaunchBlock
         // The eagerly-promoted tab/sidebar icon must revert when the foreground

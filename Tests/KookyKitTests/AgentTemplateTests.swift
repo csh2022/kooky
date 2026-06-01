@@ -220,6 +220,27 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "pi --session abc-123")
     }
 
+    func testReportsToolCallsOnlyForToolFeedingAgents() {
+        // Claude (hooks) + Pi (extension tool_execution_* events) feed kooky
+        // per-tool-call activity; every other builtin (incl. shells) does not.
+        XCTAssertTrue(AgentTemplate.claudeCode.reportsToolCalls)
+        XCTAssertTrue(AgentTemplate.pi.reportsToolCalls)
+        XCTAssertFalse(AgentTemplate.terminal.reportsToolCalls)
+        XCTAssertFalse(AgentTemplate.codex.reportsToolCalls)
+        XCTAssertFalse(AgentTemplate.gemini.reportsToolCalls)
+        XCTAssertFalse(AgentTemplate.kimi.reportsToolCalls)
+        XCTAssertFalse(AgentTemplate.copilot.reportsToolCalls)
+    }
+
+    func testFromCustomInheritsReportsToolCallsFromBase() {
+        // A custom built on Claude / Pi inherits the tool-call pill; one built
+        // on a non-reporting base (or none) does not — mirrors resumeFlag.
+        XCTAssertTrue(AgentTemplate.fromCustom(CustomAgentData(id: "c1", baseAgentId: "claude-code")).reportsToolCalls)
+        XCTAssertTrue(AgentTemplate.fromCustom(CustomAgentData(id: "c2", baseAgentId: "pi")).reportsToolCalls)
+        XCTAssertFalse(AgentTemplate.fromCustom(CustomAgentData(id: "c3", baseAgentId: "codex")).reportsToolCalls)
+        XCTAssertFalse(AgentTemplate.fromCustom(CustomAgentData(id: "c4", baseAgentId: "")).reportsToolCalls)
+    }
+
     // MARK: - initialPrompt (Ask <agent> right-click path)
 
     func testMakeSessionConfigPositionalPromptForClaude() {

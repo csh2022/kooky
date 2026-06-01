@@ -58,6 +58,23 @@ final class ToolCallActivityPillTests: XCTestCase {
         XCTAssertEqual(ToolCallActivityPill.toolCounts(in: session.toolCallEvents).edit, 1)
     }
 
+    func testToolCountsBucketsPiLowercaseNames() {
+        // Pi's lowercase tool names bucket the same as Claude's capitalized.
+        let session = makeSession(agent: .pi)
+        session.toolCallEvents = [
+            event(tool: "bash", state: .success),
+            event(tool: "edit", state: .success),
+            event(tool: "write", state: .success),
+            event(tool: "read", state: .success),
+            event(tool: "find", state: .success),  // → other
+        ]
+        let counts = ToolCallActivityPill.toolCounts(in: session.toolCallEvents)
+        XCTAssertEqual(counts.bash, 1)
+        XCTAssertEqual(counts.edit, 2, "edit + write aggregate")
+        XCTAssertEqual(counts.read, 1)
+        XCTAssertEqual(counts.other, 1, "find buckets as other")
+    }
+
     func testToolCountsEmptyEventsZero() {
         let session = makeSession()
         let counts = ToolCallActivityPill.toolCounts(in: session.toolCallEvents)
@@ -122,6 +139,19 @@ final class ToolCallActivityPillTests: XCTestCase {
         XCTAssertEqual(ToolCallActivityPill.toolIcon("UnknownTool"), "questionmark.app")
     }
 
+    func testToolIconMatchesPiLowercaseNames() {
+        // Pi reports its tool names lowercase (bash / read / edit / …); the
+        // icon match is case-insensitive so they share Claude's icons, and
+        // Pi's find / ls (no Claude equivalent) get their own.
+        XCTAssertEqual(ToolCallActivityPill.toolIcon("bash"), "terminal")
+        XCTAssertEqual(ToolCallActivityPill.toolIcon("edit"), "pencil")
+        XCTAssertEqual(ToolCallActivityPill.toolIcon("write"), "pencil")
+        XCTAssertEqual(ToolCallActivityPill.toolIcon("read"), "doc.text")
+        XCTAssertEqual(ToolCallActivityPill.toolIcon("grep"), "magnifyingglass")
+        XCTAssertEqual(ToolCallActivityPill.toolIcon("find"), "magnifyingglass")
+        XCTAssertEqual(ToolCallActivityPill.toolIcon("ls"), "list.bullet")
+    }
+
     // MARK: Visibility predicate
 
     func testShowStripForClaudeAgentWithActivity() {
@@ -149,20 +179,55 @@ final class ToolCallActivityPillTests: XCTestCase {
         XCTAssertFalse(showToolCallActivityPill(for: session))
     }
 
+    func testShowStripForPiAgent() {
+        // Pi feeds tool calls via its extension, so it gets the pill too.
+        let session = makeSession(agent: .pi, activity: .running)
+        XCTAssertTrue(showToolCallActivityPill(for: session))
+    }
+
     func testShowStripForClaudeBaseCustomAgent() {
-        // Custom agent based on Claude Code (per CLAUDE.md M5.uu) — should
-        // get the strip even though its `id` differs from "claude-code"
-        // because `baseAgentId` resolves it to the Claude family.
-        let custom = AgentTemplate(
-            id: "claude-opus-custom",
-            title: "Claude Opus Custom",
-            symbol: "sparkles",
-            iconAsset: "claude",
-            tintHex: "FFFFFF",
-            initialCommand: "claude",
-            baseAgentId: AgentTemplate.claudeCodeID
-        )
+        // Custom agent based on Claude Code (per CLAUDE.md M5.uu) — gets the
+        // strip because `fromCustom` inherits the base's `reportsToolCalls`,
+        // even though its `id` differs from "claude-code".
+        let custom = AgentTemplate.fromCustom(CustomAgentData(id: "claude-opus-custom", baseAgentId: "claude-code"))
         let session = makeSession(agent: custom, activity: .running)
         XCTAssertTrue(showToolCallActivityPill(for: session))
+    }
+
+    func testHideStripForNonReportingCustomAgent() {
+        // A custom built on a non-reporting base (Codex) does NOT get the pill.
+        let custom = AgentTemplate.fromCustom(CustomAgentData(id: "codex-fork", baseAgentId: "codex"))
+        let session = makeSession(agent: custom, activity: .running)
+        XCTAssertFalse(showToolCallActivityPill(for: session))
+    }
+
+    // MARK: Per-agent visibility toggle (Settings → Status Bar → Tool Calls)
+
+    func testPerAgentToggleHidesOnlyThatAgent() {
+        let model = KookySettingsModel.shared
+        let saved = model.hiddenToolCallAgents
+        defer { model.hiddenToolCallAgents = saved }
+
+        // Hiding Pi suppresses only Pi's pill; Claude still shows.
+        model.hiddenToolCallAgents = ["pi"]
+        XCTAssertFalse(showToolCallActivityPill(for: makeSession(agent: .pi, activity: .running)))
+        XCTAssertTrue(showToolCallActivityPill(for: makeSession(agent: .claudeCode, activity: .running)))
+
+        // Hiding Claude instead flips it — Pi shows, Claude hidden.
+        model.hiddenToolCallAgents = ["claude-code"]
+        XCTAssertFalse(showToolCallActivityPill(for: makeSession(agent: .claudeCode, activity: .running)))
+        XCTAssertTrue(showToolCallActivityPill(for: makeSession(agent: .pi, activity: .running)))
+    }
+
+    func testPerAgentToggleFollowsBaseForCustom() {
+        // A Claude-based custom is governed by the "claude-code" toggle, since
+        // the gate keys on the base id.
+        let model = KookySettingsModel.shared
+        let saved = model.hiddenToolCallAgents
+        defer { model.hiddenToolCallAgents = saved }
+
+        model.hiddenToolCallAgents = ["claude-code"]
+        let custom = AgentTemplate.fromCustom(CustomAgentData(id: "claude-opus", baseAgentId: "claude-code"))
+        XCTAssertFalse(showToolCallActivityPill(for: makeSession(agent: custom, activity: .running)))
     }
 }

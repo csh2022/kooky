@@ -409,4 +409,69 @@ final class KookyHookKitTests: XCTestCase {
         XCTAssertTrue(KookyHookKit.detectSuccess(toolResponse: "all good output here"))
         XCTAssertTrue(KookyHookKit.detectSuccess(toolResponse: ""))
     }
+
+    // MARK: buildToolEventPayload (shared by Claude parser + Pi extension feed)
+
+    func testBuildToolEventPayloadPre() {
+        let p = KookyHookKit.buildToolEventPayload(
+            surface: "surf", agent: "pi", toolName: "bash", identifier: "ls -la",
+            event: "pre", toolUseId: "call_1", success: nil
+        )
+        XCTAssertEqual(p["kind"], "tool")
+        XCTAssertEqual(p["surface"], "surf")
+        XCTAssertEqual(p["agent"], "pi")
+        XCTAssertEqual(p["tool_name"], "bash")  // Pi's lowercase name passes through verbatim
+        XCTAssertEqual(p["identifier"], "ls -la")
+        XCTAssertEqual(p["event"], "pre")
+        XCTAssertEqual(p["tool_use_id"], "call_1")
+        XCTAssertNil(p["success"], "pre carries no success")
+    }
+
+    func testBuildToolEventPayloadPostOk() {
+        let p = KookyHookKit.buildToolEventPayload(
+            surface: "s", agent: "pi", toolName: "edit", identifier: "/x.swift",
+            event: "post", toolUseId: "call_2", success: true
+        )
+        XCTAssertEqual(p["event"], "post")
+        XCTAssertEqual(p["success"], "true")
+    }
+
+    func testBuildToolEventPayloadPostFail() {
+        let p = KookyHookKit.buildToolEventPayload(
+            surface: "s", agent: "pi", toolName: "bash", identifier: "boom",
+            event: "post", toolUseId: nil, success: false
+        )
+        XCTAssertEqual(p["success"], "false")
+        XCTAssertNil(p["tool_use_id"], "nil toolUseId is omitted")
+    }
+
+    func testBuildToolEventPayloadOmitsEmptyToolUseId() {
+        let p = KookyHookKit.buildToolEventPayload(
+            surface: "s", agent: "pi", toolName: "read", identifier: "/y",
+            event: "pre", toolUseId: "", success: nil
+        )
+        XCTAssertNil(p["tool_use_id"])
+    }
+
+    func testBuildToolEventPayloadSuccessIgnoredOnPre() {
+        // success only rides event=="post"; a stray Bool on a pre is dropped.
+        let p = KookyHookKit.buildToolEventPayload(
+            surface: "s", agent: "pi", toolName: "bash", identifier: "x",
+            event: "pre", toolUseId: nil, success: true
+        )
+        XCTAssertNil(p["success"])
+    }
+
+    func testBuildToolEventPayloadTruncatesAndStripsIdentifier() {
+        // Single source of truncation/control-stripping — the Pi argv feed
+        // doesn't pre-clean, so the helper must. Newline → space, 100→80 chars.
+        let raw = "line1\nline2" + String(repeating: "z", count: 100)
+        let p = KookyHookKit.buildToolEventPayload(
+            surface: "s", agent: "pi", toolName: "bash", identifier: raw,
+            event: "pre", toolUseId: nil, success: nil
+        )
+        XCTAssertEqual(p["identifier"]?.count, 80)
+        XCTAssertFalse(p["identifier"]?.contains("\n") ?? true)
+        XCTAssertTrue(p["identifier"]?.hasPrefix("line1 line2") ?? false)
+    }
 }

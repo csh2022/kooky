@@ -207,14 +207,18 @@ struct ToolCallActivityPill: View {
     // MARK: Pure helpers (also used by popover row + tests)
 
     static func toolIcon(_ toolName: String) -> String {
-        switch toolName {
-        case "Bash":                       return "terminal"
-        case "Edit", "Write", "MultiEdit": return "pencil"
-        case "Read":                       return "doc.text"
-        case "NotebookEdit":               return "book"
-        case "Glob", "Grep":               return "magnifyingglass"
-        case "WebFetch", "WebSearch":      return "globe"
-        case "Task":                       return "rectangle.stack"
+        // Lowercase the match so Pi's native lowercase tool names (bash /
+        // read / edit / grep / find / ls) hit the same icons as Claude's
+        // capitalized ones — and add Pi's find / ls which Claude lacks.
+        switch toolName.lowercased() {
+        case "bash":                       return "terminal"
+        case "edit", "write", "multiedit": return "pencil"
+        case "read":                       return "doc.text"
+        case "notebookedit":               return "book"
+        case "glob", "grep", "find":       return "magnifyingglass"
+        case "ls":                         return "list.bullet"
+        case "webfetch", "websearch":      return "globe"
+        case "task":                       return "rectangle.stack"
         default:                           return "questionmark.app"
         }
     }
@@ -254,10 +258,11 @@ struct ToolCallActivityPill: View {
     static func toolCounts(in events: [ToolCallEvent]) -> ToolCounts {
         var bash = 0, edit = 0, read = 0, other = 0
         for event in events {
-            switch event.toolName {
-            case "Bash":                       bash += 1
-            case "Edit", "Write", "MultiEdit": edit += 1
-            case "Read":                       read += 1
+            // Lowercased so Pi's lowercase tool names bucket with Claude's.
+            switch event.toolName.lowercased() {
+            case "bash":                       bash += 1
+            case "edit", "write", "multiedit": edit += 1
+            case "read":                       read += 1
             default:                           other += 1
             }
         }
@@ -414,8 +419,9 @@ private struct ToolCallHistoryPopover: View {
 /// Claude tab.
 @MainActor
 func showToolCallActivityPill(for session: Session) -> Bool {
-    let model = KookySettingsModel.shared
-    let kindEnabled = model.statusBarItems.contains(.toolCallActivity)
-        && !model.hiddenStatusBarItems.contains(.toolCallActivity)
-    return sessionWantsToolCallActivity(session) && kindEnabled
+    // Visibility is fully governed by `sessionWantsToolCallActivity` now that
+    // the pill has a per-agent Settings toggle (`hiddenToolCallAgents`) rather
+    // than one master `.toolCallActivity` switch — the per-agent check lives
+    // there because it keys off the session's agent.
+    return sessionWantsToolCallActivity(session)
 }

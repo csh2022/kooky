@@ -69,6 +69,13 @@ final class KookySettingsModel {
     /// in `statusBarItems` so the user can re-enable without losing their
     /// custom order.
     var hiddenStatusBarItems: Set<StatusBarItemKind> = []
+    /// Per-agent visibility of the tool-call activity pill, keyed by builtin
+    /// agent id (`claude-code`, `pi`). Empty = every tool-reporting agent
+    /// shows its pill (the default). An id in the set suppresses that agent's
+    /// pill only — Claude and Pi toggle independently. Customs follow their
+    /// base id, so a Claude-based custom honours the `claude-code` entry.
+    /// Persisted under `statusbar.toolCallHidden`.
+    var hiddenToolCallAgents: Set<String> = []
     /// When true, kooky launches Claude tabs with `--resume <id>` using the
     /// conversation id persisted on each tab (captured via Claude's hook
     /// payload). When false, every Claude tab starts fresh — but the
@@ -171,6 +178,7 @@ final class KookySettingsModel {
         }
         let rawHiddenStatus = (statusbar["hidden"] as? [String]) ?? []
         hiddenStatusBarItems = Set(rawHiddenStatus.compactMap(StatusBarItemKind.init(rawValue:)))
+        hiddenToolCallAgents = Set((statusbar["toolCallHidden"] as? [String]) ?? [])
 
         let terminals = parsed["terminals"] as? [String: Any] ?? [:]
         hiddenPresets = Set((terminals["hidden"] as? [String]) ?? [])
@@ -287,12 +295,13 @@ final class KookySettingsModel {
         }
 
         let statusOrderIsDefault = statusBarItems == StatusBarItemKind.defaultOrder
-        if statusOrderIsDefault && hiddenStatusBarItems.isEmpty {
+        if statusOrderIsDefault && hiddenStatusBarItems.isEmpty && hiddenToolCallAgents.isEmpty {
             parsed.removeValue(forKey: "statusbar")
         } else {
             var statusbar = parsed["statusbar"] as? [String: Any] ?? [:]
             statusbar["order"] = statusOrderIsDefault ? nil : statusBarItems.map(\.rawValue)
             statusbar["hidden"] = hiddenStatusBarItems.isEmpty ? nil : hiddenStatusBarItems.map(\.rawValue).sorted()
+            statusbar["toolCallHidden"] = hiddenToolCallAgents.isEmpty ? nil : Array(hiddenToolCallAgents).sorted()
             parsed["statusbar"] = statusbar
         }
 
@@ -412,6 +421,7 @@ final class KookySettingsModel {
     func resetStatusBar() {
         statusBarItems = StatusBarItemKind.defaultOrder
         hiddenStatusBarItems = []
+        hiddenToolCallAgents = []
         scheduleSave()
     }
 
@@ -459,7 +469,11 @@ struct KookySettingsView: View {
     @State private var selected: SettingsCategory = .general
 
     var body: some View {
-        HStack(spacing: 0) {
+        // The autosave `.onChange` observers are split across two statements
+        // via an intermediate `let`: a single chain this long (16 modifiers)
+        // overruns the Swift type-checker's budget ("unable to type-check in
+        // reasonable time"). Each half stays comfortably under the limit.
+        let core = HStack(spacing: 0) {
             sidebar
             Rectangle().fill(Theme.chromeHairline).frame(width: 1)
             ScrollView { detail }
@@ -475,13 +489,16 @@ struct KookySettingsView: View {
         .onChange(of: model.hiddenAgents) { _, _ in model.scheduleSave() }
         .onChange(of: model.agentOptions) { _, _ in model.scheduleSave() }
         .onChange(of: model.defaultAgentId) { _, _ in model.scheduleSave() }
-        .onChange(of: model.customAgents) { _, _ in model.scheduleSave() }
-        .onChange(of: model.resumeConversations) { _, _ in model.scheduleSave() }
-        .onChange(of: model.sshRemoteAgentDetection) { _, _ in model.scheduleSave() }
-        .onChange(of: model.terminalPresets) { _, _ in model.scheduleSave() }
-        .onChange(of: model.hiddenPresets) { _, _ in model.scheduleSave() }
-        .onChange(of: model.statusBarItems) { _, _ in model.scheduleSave() }
-        .onChange(of: model.hiddenStatusBarItems) { _, _ in model.scheduleSave() }
+
+        return core
+            .onChange(of: model.customAgents) { _, _ in model.scheduleSave() }
+            .onChange(of: model.resumeConversations) { _, _ in model.scheduleSave() }
+            .onChange(of: model.sshRemoteAgentDetection) { _, _ in model.scheduleSave() }
+            .onChange(of: model.terminalPresets) { _, _ in model.scheduleSave() }
+            .onChange(of: model.hiddenPresets) { _, _ in model.scheduleSave() }
+            .onChange(of: model.statusBarItems) { _, _ in model.scheduleSave() }
+            .onChange(of: model.hiddenStatusBarItems) { _, _ in model.scheduleSave() }
+            .onChange(of: model.hiddenToolCallAgents) { _, _ in model.scheduleSave() }
     }
 
     private var sidebar: some View {
@@ -1447,6 +1464,14 @@ private struct StatusBarReorderList: View {
         model.statusBarItems.filter { $0 != .toolCallActivity }
     }
 
+    /// Builtin agents that feed tool-call activity — each gets its own
+    /// section (header + tool-call toggle) in Settings → Status Bar. Derived
+    /// from `reportsToolCalls` so a future tool-reporting agent appears here
+    /// automatically.
+    private var toolCallAgents: [AgentTemplate] {
+        AgentTemplate.builtin.filter { $0.reportsToolCalls }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("Environment")
@@ -1465,17 +1490,22 @@ private struct StatusBarReorderList: View {
                     }
                 )
             }
-            SettingsHairline()
-            sectionHeader("Claude Code", agentAsset: AgentTemplate.claudeCode.iconAsset)
-            StatusBarRow(
-                item: .toolCallActivity,
-                visible: !model.hiddenStatusBarItems.contains(.toolCallActivity),
-                isDragging: false,
-                reorderable: false,
-                onToggleVisible: { toggleVisible(.toolCallActivity) },
-                onBeginDrag: nil,
-                onDrop: nil
-            )
+            // One section per tool-reporting agent — header is the agent
+            // (icon + name), the row under it is that agent's tool-call pill
+            // toggle. Grouped by agent, not by feature.
+            ForEach(toolCallAgents) { agent in
+                SettingsHairline()
+                sectionHeader(agent.title, agentAsset: agent.iconAsset)
+                StatusBarRow(
+                    item: .toolCallActivity,
+                    visible: !model.hiddenToolCallAgents.contains(agent.id),
+                    isDragging: false,
+                    reorderable: false,
+                    onToggleVisible: { toggleToolCallAgent(agent.id) },
+                    onBeginDrag: nil,
+                    onDrop: nil
+                )
+            }
             Color.clear
                 .frame(height: 10)
                 .contentShape(Rectangle())
@@ -1523,7 +1553,9 @@ private struct StatusBarReorderList: View {
     }
 
     private var hasCustomisation: Bool {
-        model.statusBarItems != StatusBarItemKind.defaultOrder || !model.hiddenStatusBarItems.isEmpty
+        model.statusBarItems != StatusBarItemKind.defaultOrder
+            || !model.hiddenStatusBarItems.isEmpty
+            || !model.hiddenToolCallAgents.isEmpty
     }
 
     private func toggleVisible(_ item: StatusBarItemKind) {
@@ -1531,6 +1563,14 @@ private struct StatusBarReorderList: View {
             model.hiddenStatusBarItems.remove(item)
         } else {
             model.hiddenStatusBarItems.insert(item)
+        }
+    }
+
+    private func toggleToolCallAgent(_ id: String) {
+        if model.hiddenToolCallAgents.contains(id) {
+            model.hiddenToolCallAgents.remove(id)
+        } else {
+            model.hiddenToolCallAgents.insert(id)
         }
     }
 
@@ -1585,8 +1625,8 @@ private struct StatusBarRow: View {
             if let symbol = item.symbol {
                 // Kinds with their own SF Symbol surface it here (Python
                 // venv "p.circle.fill" etc.). `.toolCallActivity` returns
-                // nil — its visual identity comes from the "Claude Code"
-                // section header's agent mark rather than a per-row glyph.
+                // nil — its visual identity comes from the tool-call section
+                // header's agent marks (Claude + Pi) rather than a per-row glyph.
                 Image(systemName: symbol)
                     .imageScale(.small)
                     .foregroundStyle(visible ? Theme.chromeForeground : Theme.chromeMuted)

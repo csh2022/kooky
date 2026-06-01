@@ -157,33 +157,58 @@ public enum KookyHookKit {
 
         let toolInput = parsed["tool_input"] as? [String: Any] ?? [:]
         let rawIdentifier = extractIdentifier(toolName: toolName, toolInput: toolInput)
-        let identifier = truncateForPayload(rawIdentifier)
 
+        // PostToolUseFailure forces success=false (Claude's own signal);
+        // PostToolUse falls back to the heuristic over `tool_response`. Pre
+        // carries no success.
+        let success: Bool? = event == "post"
+            ? (postSuccessOverride ?? detectSuccess(toolResponse: parsed["tool_response"]))
+            : nil
+
+        return buildToolEventPayload(
+            surface: surface,
+            agent: agent,
+            toolName: toolName,
+            identifier: rawIdentifier,
+            event: event,
+            toolUseId: parsed["tool_use_id"] as? String,
+            success: success
+        )
+    }
+
+    /// Assemble the agent-agnostic `kind:"tool"` payload routed to
+    /// `HookServer` → `WorkspaceStore.applyToolCallEvent` → the status-bar
+    /// pill. Single source for the wire shape so it can't drift between the
+    /// two producers: `parseToolEventPayload` (Claude — extracts these
+    /// fields from hook stdin JSON) and KookyHook's `tool` argv branch (Pi —
+    /// the extension hands the fields straight from `tool_execution_*`
+    /// events). `identifier` is control-stripped + truncated here, the one
+    /// place it happens; `toolUseId` is emitted only when non-empty (Pi's
+    /// `toolCallId` and Claude's `tool_use_id` both land here so Pre/Post
+    /// match by stable id); `success` only rides `event == "post"`.
+    public static func buildToolEventPayload(
+        surface: String,
+        agent: String,
+        toolName: String,
+        identifier: String,
+        event: String,
+        toolUseId: String?,
+        success: Bool?
+    ) -> [String: String] {
         var payload: [String: String] = [
             "kind":       "tool",
             "surface":    surface,
             "agent":      agent,
             "tool_name":  toolName,
-            "identifier": identifier,
+            "identifier": truncateForPayload(identifier),
             "event":      event,
         ]
-
-        // Thread Claude's per-call tool_use_id when present so HookServer
-        // / Session can match Pre and Post by stable id instead of
-        // (toolName + identifier) — fixes concurrent same-tool calls
-        // resolving the wrong .running record, and lets a late Post
-        // revive a .stalled record instead of synthesising a 0s ghost.
-        if let toolUseId = parsed["tool_use_id"] as? String, !toolUseId.isEmpty {
+        if let toolUseId, !toolUseId.isEmpty {
             payload["tool_use_id"] = toolUseId
         }
-
-        if event == "post" {
-            // PostToolUseFailure forces success=false (Claude's own signal);
-            // PostToolUse falls back to the heuristic over `tool_response`.
-            let success = postSuccessOverride ?? detectSuccess(toolResponse: parsed["tool_response"])
+        if event == "post", let success {
             payload["success"] = success ? "true" : "false"
         }
-
         return payload
     }
 

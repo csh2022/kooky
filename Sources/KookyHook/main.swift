@@ -18,10 +18,12 @@ import KookyHookKit
 //       cache permanently.
 //
 // Usage: kooky-hook <agent> <event>
-//   <agent> ∈ claude | codex (or any AgentTemplate.id)
+//   <agent> ∈ claude | codex | pi (or any AgentTemplate.id)
 //   <event> ∈ running | attention | idle    (lifecycle events)
-//           | PreToolUse | PostToolUse      (tool events — Claude only,
-//                                            requires stdin JSON)
+//           | PreToolUse | PostToolUse      (Claude tool events — stdin JSON)
+//           | conversation <id>             (extension-reported resume id — Pi)
+//           | tool <pre|post> <id> <name> <identifier> [ok|fail]
+//                                            (extension-reported tool call — Pi)
 // Usage: kooky-hook env <VIRTUAL_ENV> <CONDA_DEFAULT_ENV> <NVM_BIN> <NVM_DIR> <NODE_VERSION> <https_proxy> <http_proxy> <all_proxy>
 // Reads:  $KOOKY_SURFACE_ID       UUID of the originating session
 // Reads:  stdin                   Claude pipes a JSON object on every
@@ -64,6 +66,34 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "env" {
         let id = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : ""
         guard !id.isEmpty else { exit(0) }
         let payload = KookyHookKit.buildConversationIdPayload(surface: surface, conversationId: id)
+        exit(KookyHookKit.sendPayload(payload, to: socketPath) ? 0 : 1)
+    }
+    if event == "tool" {
+        // Extension-reported tool call (Pi): the extension hands the already-
+        // extracted fields as argv — no stdin JSON to parse (unlike Claude's
+        // `parseToolEventPayload`). Funnels through the same
+        // `buildToolEventPayload` so the `kind:"tool"` wire shape is identical
+        // across agents. argv layout:
+        //   kooky-hook <agent> tool pre  <toolCallId> <toolName> <identifier>
+        //   kooky-hook <agent> tool post <toolCallId> <toolName> <identifier> <ok|fail>
+        let args = CommandLine.arguments
+        func at(_ i: Int) -> String { args.indices.contains(i) ? args[i] : "" }
+        let phase = at(3)
+        let toolName = at(5)
+        guard phase == "pre" || phase == "post", !toolName.isEmpty else { exit(0) }
+        // Any value other than "fail" (incl. missing) is treated as success —
+        // the extension sends "ok"/"fail" off pi's `isError`.
+        let success: Bool? = phase == "post" ? (at(7) != "fail") : nil
+        let toolUseId = at(4)
+        let payload = KookyHookKit.buildToolEventPayload(
+            surface: surface,
+            agent: agent,
+            toolName: toolName,
+            identifier: at(6),
+            event: phase,
+            toolUseId: toolUseId.isEmpty ? nil : toolUseId,
+            success: success
+        )
         exit(KookyHookKit.sendPayload(payload, to: socketPath) ? 0 : 1)
     }
     if event == "PreToolUse" || event == "PostToolUse" || event == "PostToolUseFailure" {

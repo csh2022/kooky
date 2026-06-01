@@ -41,6 +41,14 @@ struct AgentTemplate: Identifiable, Hashable {
     /// this agent yet). Claude Code = `--resume`; Grok = `--session`. Drives
     /// `makeSessionConfig(resumeId:)` and `supportsResume`.
     let resumeFlag: String?
+    /// True when the agent feeds kooky per-tool-call activity — Claude via
+    /// its `--settings` hooks (`PreToolUse` / `PostToolUse`), Pi via its
+    /// extension's `tool_execution_start` / `_end` events. Drives the
+    /// status-bar tool-call activity pill (`sessionWantsToolCallActivity`).
+    /// Builtins set it explicitly; `fromCustom` inherits the base's value so
+    /// a Claude-/Pi-based custom agent gets the pill too. Off for shells and
+    /// agents without a tool feed (the pill simply never appears).
+    let reportsToolCalls: Bool
     /// Environment the agent launches with — populated only for custom
     /// agents (`parseEnv(CustomAgentData.env)` in `fromCustom`); builtins
     /// are `[:]`. Snapshot-frozen at `fromCustom` like `baseAgentId`. v1
@@ -73,6 +81,7 @@ struct AgentTemplate: Identifiable, Hashable {
         baseAgentId: String? = nil,
         promptLaunchFlag: String? = nil,
         resumeFlag: String? = nil,
+        reportsToolCalls: Bool = false,
         extraEnv: [String: String] = [:],
         extraCwd: String? = nil
     ) {
@@ -85,6 +94,7 @@ struct AgentTemplate: Identifiable, Hashable {
         self.baseAgentId = baseAgentId
         self.promptLaunchFlag = promptLaunchFlag
         self.resumeFlag = resumeFlag
+        self.reportsToolCalls = reportsToolCalls
         self.extraEnv = extraEnv
         self.extraCwd = extraCwd
     }
@@ -232,7 +242,8 @@ extension AgentTemplate {
         iconAsset: "claudecode",
         tintHex: "D97757",
         initialCommand: "claude",
-        resumeFlag: "--resume"
+        resumeFlag: "--resume",
+        reportsToolCalls: true
     )
 
     static let codex = AgentTemplate(
@@ -386,7 +397,8 @@ extension AgentTemplate {
         tintHex: "C2C5CE",
         initialCommand: "pi",
         promptLaunchFlag: "-p",
-        resumeFlag: "--session"
+        resumeFlag: "--session",
+        reportsToolCalls: true
     )
 
     /// The 12 templates shipped with kooky. User-defined custom agents are
@@ -475,14 +487,15 @@ extension AgentTemplate {
     /// skips half-configured customs.
     static func fromCustom(_ data: CustomAgentData) -> AgentTemplate {
         let base = builtin.first { $0.id == data.baseAgentId }
-        // `promptLaunchFlag` + `resumeFlag` follow the base unconditionally —
-        // they're properties of the binary (Copilot needs `-p`, Amp needs
-        // `-x`; Claude needs `--resume`, Grok needs `--session`), not
-        // something the user could meaningfully override per custom. Without
-        // inheritance, a "Copilot Beta" custom built on Copilot would lose
-        // the flag and right-click Ask would feed the prompt as a positional
-        // argv that Copilot ignores; a "Claude Opus" custom would lose
-        // conversation resume on relaunch.
+        // `promptLaunchFlag` + `resumeFlag` + `reportsToolCalls` follow the
+        // base unconditionally — they're properties of the binary (Copilot
+        // needs `-p`, Amp needs `-x`; Claude needs `--resume`, Grok needs
+        // `--session`; Claude / Pi feed tool-call activity), not something the
+        // user could meaningfully override per custom. Without inheritance, a
+        // "Copilot Beta" custom built on Copilot would lose the flag and
+        // right-click Ask would feed the prompt as a positional argv that
+        // Copilot ignores; a "Claude Opus" custom would lose conversation
+        // resume on relaunch and its tool-call pill.
         return AgentTemplate(
             id: data.id,
             title: data.title.isEmpty ? data.id : data.title,
@@ -493,6 +506,7 @@ extension AgentTemplate {
             baseAgentId: data.baseAgentId.isEmpty ? nil : data.baseAgentId,
             promptLaunchFlag: base?.promptLaunchFlag,
             resumeFlag: base?.resumeFlag,
+            reportsToolCalls: base?.reportsToolCalls ?? false,
             extraEnv: parseEnv(data.env)
         )
     }

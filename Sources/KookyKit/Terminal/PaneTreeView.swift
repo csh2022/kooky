@@ -132,11 +132,13 @@ private struct PaneView: View {
 /// add the rendering branch in `PaneStatusBar.segment(for:)`, and add the
 /// data-presence branch in `paneStatusBarHasData`.
 enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
-    /// Claude-only tool-call activity pill. Special-positioned on the
-    /// left of the bar (not inside the right-aligned `FlowLayout`) so the
-    /// rotating-content piece doesn't compete with the static signals.
-    /// Settings entry here only controls visibility; reordering this kind
-    /// has no visible effect because rendering bypasses `visibleItems`.
+    /// Tool-call activity pill, shown for agents that feed kooky their
+    /// tool calls (`AgentTemplate.reportsToolCalls` — Claude + Pi).
+    /// Special-positioned on the left of the bar (not inside the
+    /// right-aligned `FlowLayout`) so the rotating-content piece doesn't
+    /// compete with the static signals. Settings entry here only controls
+    /// visibility; reordering this kind has no visible effect because
+    /// rendering bypasses `visibleItems`.
     case toolCallActivity = "tool-call-activity"
     case pythonVenv = "python-venv"
     case nodeVersion = "node-version"
@@ -156,9 +158,9 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     }
 
     /// SF Symbol used by Settings → Status Bar to label each row. nil for
-    /// kinds whose Settings row inherits its iconography from a section
-    /// header instead (currently `.toolCallActivity`, whose Claude Code
-    /// section already carries the agent mark).
+    /// `.toolCallActivity`: its row lives under a per-agent section whose
+    /// header already carries that agent's mark (Settings renders one
+    /// section per tool-reporting agent — Claude / Pi), so no per-row glyph.
     var symbol: String? {
         switch self {
         case .toolCallActivity: return nil
@@ -204,18 +206,19 @@ func paneStatusBarHasData(session: Session) -> Bool {
     return false
 }
 
-/// Session-level half of the activity-pill visibility predicate — `true`
-/// when the tab's agent is Claude (or a custom Claude-base) AND a session
-/// is currently alive (activityState != .idle). Settings → Status Bar
-/// kind-enabled gate is the other half; combined in
-/// `showToolCallActivityPill` for the chrome-render call site, but
-/// `paneStatusBarHasData` only needs this half because its outer loop
-/// already enforces the kind-enabled filter.
+/// Tool-call activity-pill visibility predicate — `true` when the tab's
+/// agent feeds tool-call activity (`reportsToolCalls` — Claude + Pi, plus
+/// any custom built on them, since `fromCustom` inherits the flag), a
+/// session is currently alive (activityState != .idle), AND the user hasn't
+/// hidden that agent's pill in Settings → Status Bar (per-agent toggle,
+/// `hiddenToolCallAgents`, keyed by base id so a custom follows its base).
+/// `showToolCallActivityPill` is the call-site alias; `paneStatusBarHasData`
+/// calls this directly.
 @MainActor
 func sessionWantsToolCallActivity(_ session: Session) -> Bool {
-    let isClaude = session.agent.id == AgentTemplate.claudeCodeID
-        || session.agent.baseAgentId == AgentTemplate.claudeCodeID
-    return isClaude && session.activityState != .idle
+    guard session.agent.reportsToolCalls, session.activityState != .idle else { return false }
+    let agentKey = session.agent.baseAgentId ?? session.agent.id
+    return !KookySettingsModel.shared.hiddenToolCallAgents.contains(agentKey)
 }
 
 /// Chrome status bar pinned to the bottom of the active pane — Warp-style
