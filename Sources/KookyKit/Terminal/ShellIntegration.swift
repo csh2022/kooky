@@ -311,6 +311,7 @@ enum KookyShellIntegration {
         writeWrapper(name: "grok", script: bracketWrapperScript(slug: "grok"))
         writeWrapper(name: "agy", script: antigravityWrapperScript)
         writeWrapper(name: "kimi", script: bracketWrapperScript(slug: "kimi"))
+        writeWrapper(name: "pi", script: bracketWrapperScript(slug: "pi"))
         refreshSshRemoteAgentDetection(enabled: sshRemoteAgentDetection)
 
         let hookCmd = kookyHookBinaryPath
@@ -318,6 +319,7 @@ enum KookyShellIntegration {
         writeJSON(at: geminiDefaultsPath, object: geminiDefaultsObject(hookCmd: hookCmd))
         installCopilotHooksIfPresent(hookCmd: hookCmd)
         writeManagedFile(at: opencodePluginPath, contents: opencodePluginScript)
+        installPiExtensionIfPresent()
         // Grok CLI has no JSON hook file like Claude — its `~/.grok/hooks/`
         // is a script directory driven by env vars (GROK_HOOK_EVENT /
         // GROK_SESSION_ID), so the bracket wrapper handles running/ended
@@ -328,6 +330,12 @@ enum KookyShellIntegration {
         // Gemini we can't point it at a kooky-owned defaults file, and unlike
         // Copilot it has no per-event hooks directory; the bracket wrapper
         // gives running/ended until a config.toml-merge path exists.
+        //
+        // Pi rides a kooky-managed TypeScript extension (installed only when
+        // `~/.pi/` exists — see `installPiExtensionIfPresent`) that subscribes
+        // to pi's session / turn events and pings KookyHook, same model as the
+        // OpenCode plugin — so the dot also reaches `attention` (waiting on
+        // you), not just the bracket wrapper's running/ended.
     }
 
     static func refreshSshRemoteAgentDetection(enabled: Bool) {
@@ -355,6 +363,63 @@ enum KookyShellIntegration {
         try? FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
         writeManagedJSON(at: copilotHooksPath, object: copilotHooksObject(hookCmd: hookCmd))
     }
+
+    /// Writes the Pi extension only when the user already has a `~/.pi/`
+    /// directory — i.e. they've run Pi at least once. Like the Copilot hooks,
+    /// this avoids pre-staging a vendor namespace for users who may never
+    /// install Pi; the bracket wrapper still gives running/ended on the first
+    /// run, and a kooky restart picks up the extension once `~/.pi/` exists.
+    /// Pi auto-loads every `*.ts` in `~/.pi/agent/extensions/`.
+    private static func installPiExtensionIfPresent() {
+        let piHome = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".pi", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: piHome.path) else { return }
+        let dir = piHome.appendingPathComponent("agent/extensions", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        writeManagedFile(at: dir.appendingPathComponent("kooky.ts").path, contents: piExtensionScript)
+    }
+
+    /// Pi extension (TypeScript, auto-loaded from `~/.pi/agent/extensions/`).
+    /// Subscribes to pi's lifecycle events and pings KookyHook so the sidebar
+    /// dot tracks per-session activity — running while a turn executes,
+    /// attention when the turn ends and pi waits on the user. Mirrors the
+    /// OpenCode plugin: gated on `KOOKY_SURFACE_ID`, reads `KOOKY_HOOK_BIN`
+    /// from the env kooky injects, and carries the managed marker so a user
+    /// edit isn't clobbered. Pi runs extensions under Node, so `process.env`
+    /// and `pi.exec` are available.
+    static let piExtensionScript = """
+    // \(managedFileMarker) — pings KookyHook on pi's session / turn events so
+    // the sidebar agent dot tracks per-session activity (running while a turn
+    // runs, attention when it ends and waits on you), and reports the session
+    // id so kooky can resume the conversation (`pi --session <id>`) after a
+    // restart. Safe to delete; it is regenerated next time kooky launches.
+    export default function (pi) {
+      const surface = process.env.KOOKY_SURFACE_ID
+      const hookBin = process.env.KOOKY_HOOK_BIN
+      if (!surface || !hookBin) return
+
+      const ping = async (state) => {
+        try { await pi.exec(hookBin, ["pi", state]) } catch {}
+      }
+      const reportSession = async (ctx) => {
+        try {
+          const file = ctx && ctx.sessionManager && ctx.sessionManager.getSessionFile()
+          if (!file) return
+          const id = file.split("/").pop().replace(/\\.jsonl$/, "")
+          if (id) await pi.exec(hookBin, ["pi", "conversation", id])
+        } catch {}
+      }
+
+      // Report the session id on session_start only — pi fires it on
+      // new / resume / fork (every time the session file changes); turns
+      // don't move the file, so per-turn reporting would just respawn for the
+      // same id.
+      pi.on("session_start", async (event, ctx) => { await reportSession(ctx); await ping("running") })
+      pi.on("turn_start", async () => { await ping("running") })
+      pi.on("turn_end", async () => { await ping("attention") })
+      pi.on("session_shutdown", async () => { await ping("ended") })
+    }
+    """
 
     /// Wired via `claude --settings <path>`. SessionStart promotes manually-typed
     /// `claude` immediately; without it the tab icon waits for the user's first
@@ -585,7 +650,7 @@ enum KookyShellIntegration {
 
     private static let remoteAgentMarkerSlugs = [
         "claude", "codex", "gemini", "opencode", "amp",
-        "cursor-agent", "copilot", "grok", "agy", "kimi",
+        "cursor-agent", "copilot", "grok", "agy", "kimi", "pi",
     ]
 
     /// Common bash header for every wrapper: locate the real binary on
@@ -1136,15 +1201,30 @@ enum KookyShellIntegration {
     /// Inline agent launch — invoked by both wrapper rcs to start KOOKY_AGENT
     /// before the first prompt prints. KOOKY_AGENT_LAUNCHED guards against
     /// re-entry from subshells the agent itself may spawn.
-    private static let agentLaunchBlock = """
+    static let agentLaunchBlock = """
         if [[ -n "$KOOKY_AGENT" && -z "$KOOKY_AGENT_LAUNCHED" ]]; then
             export KOOKY_AGENT_LAUNCHED=1
             _kooky_cmd="$KOOKY_AGENT"
+            _kooky_agent_bin="${_kooky_cmd%% *}"
             unset KOOKY_AGENT
             # `eval` lets KOOKY_AGENT carry multi-word commands (e.g. an
             # editor + file path); single-word agent commands like `claude`
             # behave identically.
             eval "$_kooky_cmd"
+            _kooky_status=$?
+            # The agent ran in the foreground, so reaching here means it exited
+            # — or never really started: a user alias (e.g. `alias pi=...`) can
+            # shadow the PATH wrapper before its `ended` ping fires, stranding
+            # the eagerly-promoted tab icon on the agent. Revert to a plain
+            # shell. Idempotent — a wrapper that already pinged `ended` makes
+            # this a no-op (`applyHookEvent` dedups same-value writes).
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
+                "$KOOKY_HOOK_BIN" "$_kooky_agent_bin" ended 2>/dev/null
+            fi
+            # Restore the agent's exit code — the revert ping clobbered `$?`,
+            # but the first prompt (and theme hooks / `_kooky_title_pwd` that
+            # read `$?`) should see the agent's real status, not our hook call's.
+            ( exit $_kooky_status )
         fi
         """
 

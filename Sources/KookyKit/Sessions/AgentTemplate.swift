@@ -358,9 +358,40 @@ extension AgentTemplate {
         promptLaunchFlag: "-p"
     )
 
-    /// The 11 templates shipped with kooky. User-defined custom agents are
+    /// Pi — Earendil's minimal terminal coding harness; binary `pi` (npm
+    /// `@earendil-works/pi-coding-agent`). No JSON lifecycle hooks, but pi
+    /// auto-loads TypeScript extensions with a rich event API, so kooky ships a
+    /// managed `~/.pi/agent/extensions/kooky.ts` (see `piExtensionScript`) that
+    /// maps pi's session / turn events to running / attention / ended (same
+    /// model as the OpenCode plugin) AND reports the session id back so resume
+    /// works (below). The bracket wrapper stays as the running/ended fallback +
+    /// not-installed message.
+    ///
+    /// `-p` is pi's one-off non-interactive prompt (streams output then exits),
+    /// so "Ask Pi" single-shots rather than seeding a live session. Resume IS
+    /// wired: pi takes a launch-time `--session <id>` (`resumeFlag`), and the
+    /// extension hands kooky the current session id via
+    /// `kooky-hook pi conversation <id>` — that reuses the generic
+    /// `conversationId` path (persist on `Session` → prepend `--session <id>`
+    /// next launch, gated by `agents.resumeConversations`), so the end result
+    /// matches Claude's `--resume` without any Claude-specific JSON parsing.
+    /// Model selection (`/model`) stays mid-session. The blocky π logo is
+    /// monochrome (single fill, white-on-transparent) → registered in
+    /// `AgentIcon.monochromeAssets` so it adapts to light themes.
+    static let pi = AgentTemplate(
+        id: "pi",
+        title: "Pi",
+        symbol: "pi",
+        iconAsset: "pi",
+        tintHex: "C2C5CE",
+        initialCommand: "pi",
+        promptLaunchFlag: "-p",
+        resumeFlag: "--session"
+    )
+
+    /// The 12 templates shipped with kooky. User-defined custom agents are
     /// merged on top via `all` at runtime.
-    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot, .grok, .antigravity, .kimi]
+    static let builtin: [AgentTemplate] = [.terminal, .claudeCode, .codex, .gemini, .opencode, .amp, .cursor, .copilot, .grok, .antigravity, .kimi, .pi]
 
     /// All templates available right now — `builtin` plus the user's custom
     /// agents from Settings → Agents. MainActor-isolated because it

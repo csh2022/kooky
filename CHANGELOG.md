@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.22.0 — 2026-06-01
+
+- **Pi** — Earendil's `pi` coding agent ([pi.dev](https://pi.dev)) joins the launcher. Pick it from the `+` menu or set it as your default agent; the sidebar dot tracks when it's working and when it's waiting on you, and pi conversations resume across kooky restarts.
+
 ## v0.21.0 — 2026-06-01
 
 - Remote agent detection over SSH (opt-in) — `ssh` into a machine from kooky and run an agent there (Claude, Codex, …), and the sidebar now shows that agent's icon and activity instead of treating the tab as a plain terminal. Turn it on in Settings → SSH. (Resolves #19.)

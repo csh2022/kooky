@@ -55,6 +55,17 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "env" {
 } else if CommandLine.arguments.count >= 3 {
     let agent = CommandLine.arguments[1]
     let event = CommandLine.arguments[2]
+    if event == "conversation" {
+        // Extension-reported conversation id (Pi): the agent's extension hands
+        // kooky the session id directly as argv[3] — no stdin JSON to parse
+        // (unlike Claude's hook mirror below). Reuses the same conversationId
+        // payload, so WorkspaceStore persists it + prepends `--session <id>`
+        // on next launch.
+        let id = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : ""
+        guard !id.isEmpty else { exit(0) }
+        let payload = KookyHookKit.buildConversationIdPayload(surface: surface, conversationId: id)
+        exit(KookyHookKit.sendPayload(payload, to: socketPath) ? 0 : 1)
+    }
     if event == "PreToolUse" || event == "PostToolUse" || event == "PostToolUseFailure" {
         // Tool event: stdin JSON is mandatory. Bail silently if it's
         // missing or malformed — pill UI just won't render this call.

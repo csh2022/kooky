@@ -203,6 +203,7 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertFalse(AgentTemplate.grok.supportsResume)
         XCTAssertFalse(AgentTemplate.antigravity.supportsResume)
         XCTAssertFalse(AgentTemplate.kimi.supportsResume)
+        XCTAssertTrue(AgentTemplate.pi.supportsResume)
     }
 
     func testMakeSessionConfigInjectsResumeForClaudeBasedCustom() {
@@ -210,6 +211,13 @@ final class AgentTemplateTests: XCTestCase {
         let template = AgentTemplate.fromCustom(custom)
         let config = template.makeSessionConfig(resumeId: "xyz")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude --resume xyz")
+    }
+
+    func testMakeSessionConfigInjectsResumeForPi() {
+        // Pi takes a launch-time `--session <id>`; the extension captures the
+        // session id and reports it via `kooky-hook pi conversation <id>`.
+        let config = AgentTemplate.pi.makeSessionConfig(resumeId: "abc-123")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "pi --session abc-123")
     }
 
     // MARK: - initialPrompt (Ask <agent> right-click path)
@@ -239,6 +247,11 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "kimi -p 'fix this error'")
     }
 
+    func testMakeSessionConfigFlagPromptForPi() {
+        let config = AgentTemplate.pi.makeSessionConfig(initialPrompt: "fix this error")
+        XCTAssertEqual(config.environment["KOOKY_AGENT"], "pi -p 'fix this error'")
+    }
+
     // MARK: - Monochrome icon theming
 
     func testMonochromeIconSetReferencesRealBuiltinAssets() {
@@ -254,7 +267,7 @@ final class AgentTemplateTests: XCTestCase {
     func testMonochromeBrandsTintedAndColorBrandsRenderedAsIs() {
         // The five white-mark brands get template-tinted so they survive a
         // light theme; the color brands keep their own pixels on every theme.
-        for mono in ["opencode", "cursor", "githubcopilot", "grok", "kimi"] {
+        for mono in ["opencode", "cursor", "githubcopilot", "grok", "kimi", "pi"] {
             XCTAssertTrue(AgentIcon.isMonochrome(mono), "\(mono) should be template-tinted")
         }
         for color in ["claudecode", "codex", "gemini", "amp", "antigravity"] {

@@ -142,6 +142,7 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("for _kooky_slug in 'claude' 'codex'"))
         XCTAssertTrue(script.contains("'cursor-agent'"))
         XCTAssertTrue(script.contains("'kimi'"))
+        XCTAssertTrue(script.contains("'pi'"), "remote marker slugs must include pi so a remote `pi` emits markers")
         XCTAssertTrue(script.contains(#"printf '\033]2;kooky-agent:%s:running\a'"#))
         XCTAssertTrue(script.contains(#"printf '\033]2;kooky-agent:%s:ended\a'"#))
         XCTAssertTrue(script.contains("export KOOKY_AGENT_MARKERS=1"))
@@ -181,6 +182,41 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(body.contains("opencode"), "plugin must pass agent slug to KookyHook")
         XCTAssertTrue(body.contains("KOOKY_SURFACE_ID"))
         XCTAssertTrue(body.contains("kooky-managed-do-not-edit"), "plugin must carry the upgrade-safety marker")
+    }
+
+    func testPiExtensionSubscribesLifecycleEventsAndPingsHook() {
+        let body = KookyShellIntegration.piExtensionScript
+
+        // Subscribes to pi's session / turn lifecycle and maps each to a
+        // KookyHook state — running while a turn runs, attention when it ends.
+        XCTAssertTrue(body.contains("session_start"))
+        XCTAssertTrue(body.contains("turn_start"))
+        XCTAssertTrue(body.contains("turn_end"))
+        XCTAssertTrue(body.contains("session_shutdown"))
+        XCTAssertTrue(body.contains(#"ping("running")"#))
+        XCTAssertTrue(body.contains(#"ping("attention")"#))
+        XCTAssertTrue(body.contains(#"ping("ended")"#))
+        XCTAssertTrue(body.contains(#"pi.exec(hookBin, ["pi""#), "must ping KookyHook with the pi slug")
+        // Reports the session id so kooky can resume (`pi --session <id>`).
+        XCTAssertTrue(body.contains("getSessionFile"), "must read pi's current session file")
+        XCTAssertTrue(body.contains(#"["pi", "conversation", id]"#), "must report the session id for resume")
+        XCTAssertTrue(body.contains("KOOKY_SURFACE_ID"))
+        XCTAssertTrue(body.contains("KOOKY_HOOK_BIN"))
+        XCTAssertTrue(body.contains("kooky-managed-do-not-edit"), "must carry the upgrade-safety marker")
+    }
+
+    func testAgentLaunchBlockRevertsIconAfterAgentReturns() {
+        let block = KookyShellIntegration.agentLaunchBlock
+        // The eagerly-promoted tab/sidebar icon must revert when the foreground
+        // agent exits — or never started, e.g. a user alias shadowing the PATH
+        // wrapper so its own `ended` ping never fires.
+        XCTAssertTrue(block.contains("eval \"$_kooky_cmd\""))
+        XCTAssertTrue(block.contains(#"_kooky_agent_bin="${_kooky_cmd%% *}""#), "must derive the agent binary for the revert ping")
+        XCTAssertTrue(block.contains(#""$KOOKY_HOOK_BIN" "$_kooky_agent_bin" ended"#), "must ping ended after the agent returns")
+        // The revert ping must not clobber the agent's exit code — capture it
+        // before, restore it after, so the first prompt's `$?` is the agent's.
+        XCTAssertTrue(block.contains("_kooky_status=$?"), "must capture the agent exit status before the revert ping")
+        XCTAssertTrue(block.contains("( exit $_kooky_status )"), "must restore the agent exit status after the ping")
     }
 
     func testEnvStatusBlockReportsLiveShellEnvironment() {
