@@ -328,8 +328,6 @@ private enum GhosttySurfaceRegistry {
 /// the Metal layer and draws into it.
 @MainActor
 final class GhosttySurfaceView: NSView {
-    private static let defaultBackingScale: CGFloat = 2.0
-
     private var drawTimer: Timer?
     private let scrollIndicator = ScrollIndicator()
     private var lastScrollbar: (total: UInt64, offset: UInt64, len: UInt64)?
@@ -493,12 +491,21 @@ final class GhosttySurfaceView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
+            // A pre-existing surface means we're re-entering a window (workspace
+            // switch), not creating fresh: createSurfaceIfReady no-ops and
+            // surface.didSet won't re-push the size, so we owe an explicit
+            // re-sync below. On first creation didSet already handles it.
+            let reattaching = surface != nil
             createSurfaceIfReady()
             // Defer until after SwiftUI's hosting finishes its current event
             // loop pass, otherwise the originating button click reclaims focus.
             DispatchQueue.main.async { [weak self] in
                 guard let self, let window = self.window else { return }
                 window.makeFirstResponder(self)
+                // Re-sync size on reattach: propagateSizeToSurface no-ops while
+                // detached, and a same-display / unchanged-frame reattach fires
+                // neither viewDidChangeBackingProperties nor setFrameSize.
+                if reattaching { self.propagateSizeToSurface() }
             }
         }
         updateDrawTimer()
@@ -1091,8 +1098,15 @@ final class GhosttySurfaceView: NSView {
     }
 
     private func propagateSizeToSurface() {
-        guard let surface else { return }
-        let scale = window?.backingScaleFactor ?? Self.defaultBackingScale
+        // Require a live window — never propagate while detached. A workspace
+        // switch briefly removes the session's NSView from the window
+        // (ContentView's `.id(workspace.id)` rebuild); the old `?? 2.0` scale
+        // fallback then sized the grid at 2x on a 1x external display, so text
+        // overflowed and stuck until the next resize (issue #8 follow-up — only
+        // on the 1x monitor, never on the 2x laptop where the fallback matched).
+        // viewDidMoveToWindow re-syncs on reattach.
+        guard let surface, let window else { return }
+        let scale = window.backingScaleFactor
         let widthPx = UInt32(bounds.size.width * scale)
         let heightPx = UInt32(bounds.size.height * scale)
         // SwiftUI's tab-swap rebuild briefly hands us a 0-sized frame before

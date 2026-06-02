@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.22.4 — 2026-06-02
+
+- Fixed terminal text overflowing the pane after switching workspaces and back, when kooky is on a non-Retina external monitor — a follow-up to the display-scale fix in v0.19.2. (Relates to #8.)
+
 ## v0.22.3 — 2026-06-01
 
 - Fixed agent activity not updating when you launch an agent by typing its command (`claude` / `codex` / …) directly in the terminal — macOS had been silently killing the small helper kooky uses to detect it. Claude's hooks and the tool-call pill are restored too.
