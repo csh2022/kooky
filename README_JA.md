@@ -20,7 +20,7 @@ AI コーディングのために作られた、ミニマルでモダンな macO
 
 ## 機能
 
-**垂直 tab、split pane、複数ウィンドウ。** サイドバーで全ての workspace を管理、3 段階の幅切り替え (`⌘⌃S`)。各 pane が独自の tab バーとアクティブ tab を持ち、tab バー右側の 2 つのボタンや ⌘D / ⌘⇧D で右 / 下に分割できます。`⌘⇧N` で新しいウィンドウを開きます。tab はドラッグで並び替え、pane 間の移動、別ウィンドウへの移動が可能 —— セッションが scrollback と実行中のプロセスごとまるごと移動します。アプリ再起動後も状態は復元され、開いていた全ウィンドウが復元されます。任意のフォルダを新しい workspace として開く方法：Finder からサイドバーにドロップするか、⌘O。`⌘⇧E` でアクティブな pane を最大化、もう一度押すと元に戻ります —— 他の pane は画面外にスライドしますが、プロセスは走り続けています。
+**垂直 tab、split pane、複数ウィンドウ。** サイドバーで全ての workspace を管理、3 段階の幅切り替え (`⌘⌃S`)。各 pane が独自の tab バーとアクティブ tab を持ち、tab バー右側の 2 つのボタンや ⌘D / ⌘⇧D で右 / 下に分割できます。tab は ⌘R、workspace は ⌘⇧R で名前を変更できます。`⌘⇧N` で新しいウィンドウを開きます。tab はドラッグで並び替え、pane 間の移動、別ウィンドウへの移動が可能 —— セッションが scrollback と実行中のプロセスごとまるごと移動します。アプリ再起動後も状態は復元され、開いていた全ウィンドウが復元されます。任意のフォルダを新しい workspace として開く方法：Finder からサイドバーにドロップするか、⌘O。`⌘⇧E` でアクティブな pane を最大化、もう一度押すと元に戻ります —— 他の pane は画面外にスライドしますが、プロセスは走り続けています。
 
 **ワンクリックで AI agent セッション。** Claude Code · Codex · Gemini CLI · OpenCode · Amp · Cursor CLI · Copilot CLI · Grok Build · Antigravity CLI · Kimi Code · Pi。`+` メニューから選ぶだけで、最初の prompt を打つ前に agent が起動します。Claude の会話は kooky の再起動を跨いで自動で resume されるので、tab を閉じて再度開いても直前の続きから再開できます。
 
@@ -92,7 +92,7 @@ Xcode 26+ と macOS 14+ (Sonoma —— `@Observable` の最低システム要件
 ./scripts/setup-libghostty.sh        # 初回のみ：プリビルドの libghostty xcframework を Vendor/ にダウンロード
 swift build
 swift run                            # 開発モードで直接起動
-swift test                           # 380 個のユニットテスト
+swift test                           # 383 個のユニットテスト
 
 ./scripts/build-app.sh               # dist/Kooky.app を出力
 ./scripts/build-dmg.sh --build       # dist/Kooky-vX.Y.Z.dmg を出力

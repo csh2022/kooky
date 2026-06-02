@@ -98,6 +98,11 @@ final class Session: Identifiable {
     var searchTotal = 0
     var searchSelected = -1
 
+    /// Set true to open the rename popover on this tab from outside the view
+    /// (the ⌘R menu command). The active tab's `TabBarItem` observes this,
+    /// opens its rename popover, and resets the flag. Runtime-only.
+    var renameRequested = false
+
     /// Latest git status for the session's cwd. `branch == nil` when the cwd
     /// isn't inside a git repo (or git isn't installed). Refreshed by
     /// `WorkspaceStore` on cwd-change + command-finished hooks. Runtime-only;

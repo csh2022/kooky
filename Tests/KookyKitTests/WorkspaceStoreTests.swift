@@ -53,6 +53,28 @@ final class WorkspaceStoreTests: XCTestCase {
         return pane
     }
 
+    func testRequestRenameActiveTabSetsFlag() {
+        let store = makeStore()
+        XCTAssertEqual(store.active?.activeSession?.renameRequested, false)
+        store.requestRenameActiveTab()
+        XCTAssertEqual(store.active?.activeSession?.renameRequested, true)
+    }
+
+    func testRequestRenameActiveWorkspaceParksRequest() {
+        let store = makeStore()
+        XCTAssertNil(store.pendingRenameWorkspace)
+        store.requestRenameActiveWorkspace()
+        XCTAssertEqual(store.pendingRenameWorkspace?.id, store.active?.id)
+    }
+
+    func testRequestRenameActiveWorkspaceRevealsHiddenSidebar() {
+        let store = makeStore()
+        store.setSidebarMode(.hidden)
+        store.requestRenameActiveWorkspace()
+        XCTAssertEqual(store.sidebarMode, .full)
+        XCTAssertEqual(store.pendingRenameWorkspace?.id, store.active?.id)
+    }
+
     func testInitialStateHasOneWorkspaceWithOnePaneAndOneTab() {
         let store = makeStore()
         XCTAssertEqual(store.workspaces.count, 1)

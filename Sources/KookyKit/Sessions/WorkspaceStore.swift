@@ -73,6 +73,24 @@ final class WorkspaceStore {
         scheduleSave()
     }
 
+    /// Open the rename popover on the active tab (⌘R). Sets a runtime flag the
+    /// active `TabBarItem` observes; the active tab is always present in its
+    /// pane's tab bar, so the popover can anchor.
+    func requestRenameActiveTab() {
+        active?.activeSession?.renameRequested = true
+    }
+
+    /// Open the rename popover on the active workspace's sidebar row (⌘⇧R).
+    /// Parks the request for `SidebarView` to handle — the active row may be
+    /// unmounted (collapsed worktree parent, or scrolled out of the
+    /// `LazyVStack`), so the sidebar expands/scrolls it into view before
+    /// handing off to the row via `Workspace.renameRequested`. Reveal a hidden
+    /// sidebar first so `SidebarView` exists to observe the parked request.
+    func requestRenameActiveWorkspace() {
+        if sidebarMode == .hidden { setSidebarMode(.full) }
+        pendingRenameWorkspace = active
+    }
+
     private let engineFactory: @MainActor () -> any TerminalEngine
     /// Resolves per-agent launch options at spawn time. Production wires this
     /// to `KookySettingsModel.shared.agentOptions[id]`; tests pass a closure
@@ -260,6 +278,14 @@ final class WorkspaceStore {
     /// sidebar to host the sheet, especially when the sidebar was hidden and
     /// has to be shown first.
     var pendingCreateWorktreeRequest: Workspace?
+
+    /// ⌘⇧R rename request, parked for `SidebarView` to act on. The active
+    /// workspace's row may be unmounted — nested under a collapsed worktree
+    /// parent, or scrolled out of the sidebar's `LazyVStack` — so the sidebar
+    /// (not the store) has to expand/scroll it into view before the row's
+    /// rename popover can anchor. Identity-keyed; cleared by the sidebar once
+    /// handled.
+    var pendingRenameWorkspace: Workspace?
 
     /// Payload for the "close source workspace, take its worktrees with
     /// it" confirm sheet. A source can't simply close on its own — its

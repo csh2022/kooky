@@ -267,6 +267,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             selfRow("Close Tab", #selector(handleCloseTab), "w"),
             selfRow("Reopen Closed Tab", #selector(handleReopenClosedTab), "t", modifiers: [.command, .shift]),
             selfRow("Close Workspace", #selector(handleCloseWorkspace), "w", modifiers: [.command, .shift]),
+            .separator,
+            selfRow("Rename Tab…", #selector(handleRenameTab), "r"),
+            selfRow("Rename Workspace…", #selector(handleRenameWorkspace), "r", modifiers: [.command, .shift]),
         ])))
 
         // Edit menu — first-responder selectors so libghostty's NSResponder
@@ -650,6 +653,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleFindPrevious() {
         activeStore?.active?.activeSession?.engine.performAction("navigate_search:previous")
+    }
+
+    @objc private func handleRenameTab() {
+        activeStore?.requestRenameActiveTab()
+    }
+
+    @objc private func handleRenameWorkspace() {
+        activeStore?.requestRenameActiveWorkspace()
     }
 
     @objc private func handleAbout() {

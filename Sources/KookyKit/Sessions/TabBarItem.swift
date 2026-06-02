@@ -72,13 +72,9 @@ struct TabBarItem: View {
                     onMoveToNewWindow()
                 }
                 KookyMenuDivider()
-                KookyMenuRow(title: "Rename Tab…") {
+                KookyMenuRow(title: "Rename Tab…", shortcut: "⌘R") {
                     isContextMenuOpen = false
-                    pendingRename = tab.customTitle ?? tab.title
-                    // Defer one runloop tick so the context popover finishes
-                    // dismissing before the rename popover anchors — back-to-back
-                    // popovers off the same view glitch otherwise.
-                    DispatchQueue.main.async { isRenameOpen = true }
+                    beginRename(deferred: true)
                 }
                 KookyMenuRow(title: "Duplicate Tab") {
                     isContextMenuOpen = false
@@ -99,6 +95,28 @@ struct TabBarItem: View {
                 onRename(pendingRename)
                 isRenameOpen = false
             }
+        }
+        .onChange(of: tab.renameRequested) { _, requested in
+            // ⌘R routes here via `Session.renameRequested`. Consume the flag
+            // so the next ⌘R re-fires.
+            guard requested else { return }
+            tab.renameRequested = false
+            beginRename(deferred: false)
+        }
+    }
+
+    /// Seed the edit field from the current title and open the rename popover.
+    /// `deferred` waits one runloop tick — needed from the context menu, where
+    /// that popover is mid-dismiss and back-to-back popovers off the same
+    /// anchor glitch; the ⌘R path opens synchronously. Skips when already open
+    /// so a re-trigger mid-edit can't wipe what the user is typing.
+    private func beginRename(deferred: Bool) {
+        guard !isRenameOpen else { return }
+        pendingRename = tab.customTitle ?? tab.title
+        if deferred {
+            DispatchQueue.main.async { isRenameOpen = true }
+        } else {
+            isRenameOpen = true
         }
     }
 

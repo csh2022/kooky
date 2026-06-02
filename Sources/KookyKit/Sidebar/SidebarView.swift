@@ -45,7 +45,9 @@ struct SidebarView: View {
         let isCompact = store.sidebarMode == .compact
         VStack(spacing: 0) {
             brand(isCompact: isCompact)
-            list(isCompact: isCompact)
+            ScrollViewReader { proxy in
+                list(isCompact: isCompact, proxy: proxy)
+            }
             Spacer(minLength: 0)
         }
         .frame(width: isCompact ? Self.compactWidth : Self.fullWidth)
@@ -257,7 +259,7 @@ struct SidebarView: View {
         }
     }
 
-    private func list(isCompact: Bool) -> some View {
+    private func list(isCompact: Bool, proxy: ScrollViewProxy) -> some View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 2) {
                 if isCompact {
@@ -303,6 +305,14 @@ struct SidebarView: View {
             .padding(.horizontal, Theme.space2)
             .padding(.vertical, Theme.space2)
         }
+        // ⌘⇧R parks the active workspace on the store; reveal its row so the
+        // row's own rename popover can open. onChange catches a request made
+        // while the sidebar is up; onAppear catches one parked while the
+        // sidebar was hidden (SidebarView mounts only after the reveal).
+        .onChange(of: store.pendingRenameWorkspace?.id) { _, _ in
+            revealWorkspaceForRename(using: proxy)
+        }
+        .onAppear { revealWorkspaceForRename(using: proxy) }
     }
 
     @ViewBuilder
@@ -354,6 +364,26 @@ struct SidebarView: View {
             } else {
                 collapsedParents.insert(id)
             }
+        }
+    }
+
+    /// Bring the active workspace's row into the view hierarchy so its rename
+    /// popover can anchor, then hand off to the row via `renameRequested`. The
+    /// row may be unmounted — nested under a collapsed worktree parent, or
+    /// scrolled out of the LazyVStack's realized window. Without this the ⌘⇧R
+    /// flag would sit unconsumed and then fire stale when the user later
+    /// scrolled to / expanded that row.
+    private func revealWorkspaceForRename(using proxy: ScrollViewProxy) {
+        guard let workspace = store.pendingRenameWorkspace else { return }
+        store.pendingRenameWorkspace = nil
+        if let parentId = workspace.worktreeParentId, collapsedParents.contains(parentId) {
+            collapsedParents.remove(parentId)
+        }
+        workspace.renameRequested = true
+        // Defer so a just-expanded subtree is laid out before scrolling to a
+        // row that may have only now been inserted.
+        DispatchQueue.main.async {
+            proxy.scrollTo(workspace.id, anchor: .center)
         }
     }
 

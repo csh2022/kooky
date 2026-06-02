@@ -65,13 +65,9 @@ struct SidebarWorkspaceRow: View {
                     onCloseOthers()
                 }
                 KookyMenuDivider()
-                KookyMenuRow(title: "Rename Workspace…") {
+                KookyMenuRow(title: "Rename Workspace…", shortcut: "⌘⇧R") {
                     isContextMenuOpen = false
-                    pendingRename = workspace.customTitle ?? workspace.title
-                    // Defer one runloop tick so the context popover finishes
-                    // dismissing before the rename popover anchors — back-to-back
-                    // popovers off the same view glitch otherwise.
-                    DispatchQueue.main.async { isRenameOpen = true }
+                    beginRename(deferred: true)
                 }
                 KookyMenuRow(title: "Duplicate Workspace") {
                     isContextMenuOpen = false
@@ -109,6 +105,38 @@ struct SidebarWorkspaceRow: View {
             }
         }
         .help(workspace.workingDirectory.path)
+        .onChange(of: workspace.renameRequested) { _, requested in
+            if requested { consumeRenameRequest() }
+        }
+        .onAppear {
+            // ⌘⇧R may reveal a hidden sidebar; this row then mounts with the
+            // flag already set, after onChange's window has passed — onAppear
+            // catches that case.
+            if workspace.renameRequested { consumeRenameRequest() }
+        }
+    }
+
+    /// Consume the `Workspace.renameRequested` flag (the ⌘⇧R menu command) and
+    /// open the rename popover — shared by onChange (row already mounted) and
+    /// onAppear (row just mounted after a hidden sidebar was revealed).
+    private func consumeRenameRequest() {
+        workspace.renameRequested = false
+        beginRename(deferred: false)
+    }
+
+    /// Seed the edit field from the current title and open the rename popover.
+    /// `deferred` waits one runloop tick — needed from the context menu, where
+    /// that popover is mid-dismiss and back-to-back popovers off the same
+    /// anchor glitch; the ⌘⇧R path opens synchronously. Skips when already
+    /// open so a re-trigger mid-edit can't wipe what the user is typing.
+    private func beginRename(deferred: Bool) {
+        guard !isRenameOpen else { return }
+        pendingRename = workspace.customTitle ?? workspace.title
+        if deferred {
+            DispatchQueue.main.async { isRenameOpen = true }
+        } else {
+            isRenameOpen = true
+        }
     }
 
     private func fullBody(agents: [AgentTemplate], dotColor: Color?) -> some View {

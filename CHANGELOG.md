@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.22.5 — 2026-06-02
+
+- Rename a tab with ⌘R and a workspace with ⌘⇧R — the rename field opens right where you're working, instead of only through the right-click menu (which now shows the shortcuts too).
+
 ## v0.22.4 — 2026-06-02
 
 - Fixed terminal text overflowing the pane after switching workspaces and back, when kooky is on a non-Retina external monitor — a follow-up to the display-scale fix in v0.19.2. (Relates to #8.)
