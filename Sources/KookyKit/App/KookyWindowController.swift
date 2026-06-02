@@ -50,6 +50,11 @@ final class KookyWindowController: NSWindowController, NSWindowDelegate {
         // The controller governs the window's lifetime; without this,
         // `close()` would also `release` it out from under the controller.
         window.isReleasedWhenClosed = false
+        // Every window's NSWindow title is the app name, so the system
+        // Windows-menu / Dock-tile auto window list stacks a useless
+        // "kooky × N" above our own workspace/tab list. Drop them — the Dock
+        // menu's workspace list and ⌘P are the real navigation.
+        window.isExcludedFromWindowsMenu = true
         return window
     }
 

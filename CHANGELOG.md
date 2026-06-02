@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.22.6 — 2026-06-02
+
+- Right-click the Dock icon to open a new window, or jump straight to any workspace or tab across all your open windows.
+- Quick Open (⌘P) now pops a minimized window back open when you jump to a tab inside it, instead of leaving it tucked in the Dock.
+
 ## v0.22.5 — 2026-06-02
 
 - Rename a tab with ⌘R and a workspace with ⌘⇧R — the rename field opens right where you're working, instead of only through the right-click menu (which now shows the shortcuts too).

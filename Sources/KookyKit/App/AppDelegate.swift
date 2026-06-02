@@ -177,6 +177,104 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
     }
 
+    // MARK: - Dock menu
+
+    /// Right-clicking the Dock tile shows New Window + every workspace across
+    /// all windows, each a submenu of its tabs. kooky hides its title bars
+    /// (`titleVisibility = .hidden`), so AppKit never populates the Dock's
+    /// automatic per-window list — picking a tab raises the window that owns
+    /// it, selects the workspace, and focuses the tab.
+    public func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let newWindow = NSMenuItem(
+            title: "New Window",
+            action: #selector(handleNewWindow),
+            keyEquivalent: ""
+        )
+        newWindow.target = self
+        menu.addItem(newWindow)
+
+        let workspaces = windowControllers.flatMap(\.store.workspaces)
+        guard !workspaces.isEmpty else { return menu }
+        menu.addItem(.separator())
+        for workspace in workspaces {
+            let tabs = workspace.root.allPanes.flatMap(\.tabs)
+            if tabs.count == 1, let only = tabs.first {
+                // Single tab: click the workspace to jump straight to it,
+                // no submenu to drill through.
+                menu.addItem(dockTabItem(title: dockMenuTitle(for: workspace), sessionId: only.id))
+            } else {
+                let item = NSMenuItem(title: dockMenuTitle(for: workspace), action: nil, keyEquivalent: "")
+                item.submenu = dockTabSubmenu(for: tabs)
+                menu.addItem(item)
+            }
+        }
+        return menu
+    }
+
+    /// A worktree's branch disambiguates two workspaces sharing a folder name.
+    private func dockMenuTitle(for workspace: Workspace) -> String {
+        if let branch = workspace.worktreeBranch, !branch.isEmpty {
+            return "\(workspace.title) (\(branch))"
+        }
+        return workspace.title
+    }
+
+    /// One item per tab; used when a workspace has more than one.
+    private func dockTabSubmenu(for tabs: [Session]) -> NSMenu {
+        let submenu = NSMenu()
+        for session in tabs {
+            submenu.addItem(dockTabItem(title: session.title, sessionId: session.id))
+        }
+        return submenu
+    }
+
+    /// A Dock menu item that jumps to `sessionId`'s tab when clicked.
+    private func dockTabItem(title: String, sessionId: UUID) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(handleDockJumpToTab(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = sessionId
+        return item
+    }
+
+    @objc private func handleDockJumpToTab(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let hit = dockTabLocation(for: id)
+        else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        revealTab(hit.session, in: hit.workspace, controller: hit.controller)
+    }
+
+    private func dockTabLocation(for sessionId: UUID)
+        -> (controller: KookyWindowController, workspace: Workspace, session: Session)? {
+        for controller in windowControllers {
+            for workspace in controller.store.workspaces {
+                // `pane(containingSessionId:)` short-circuits the tree walk —
+                // the codebase prefers it over `allPanes.first(where:)` (per
+                // PaneNode.swift), matching the Command Palette's tab jump.
+                if let pane = workspace.root.pane(containingSessionId: sessionId),
+                   let session = pane.tabs.first(where: { $0.id == sessionId }) {
+                    return (controller, workspace, session)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Raise a tab's window (restoring it if minimized), select its workspace,
+    /// and focus the tab. Shared by the Command Palette's tab pick
+    /// (`activate(_:)`) and the Dock menu so the cross-window jump lives in one
+    /// place. Callers resolve the (controller, workspace, session) trio their
+    /// own way — the palette by coordinate, the Dock by session id.
+    private func revealTab(_ session: Session, in workspace: Workspace, controller: KookyWindowController) {
+        if let window = controller.window {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
+        controller.store.activateWorkspace(workspace)
+        controller.store.activateTab(session, in: workspace)
+    }
+
     /// The kooky window that should host a menu action — the key window
     /// when it's one of ours, otherwise the most-recently-key kooky window.
     /// Nil only when no kooky window exists.
@@ -419,6 +517,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     // MARK: - Menu actions
 
     @objc private func handleNewWindow() {
+        // ⌘⇧N is already in-app, but the Dock-tile "New Window" can fire while
+        // kooky is in the background — without activating, the new window opens
+        // behind whatever app is frontmost.
+        NSApp.activate(ignoringOtherApps: true)
         addWindow()
     }
 
@@ -471,9 +573,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                   let ws = target.store.workspaces.first(where: { $0.id == wsId }),
                   let pane = ws.root.pane(containingSessionId: sId),
                   let session = pane.tabs.first(where: { $0.id == sId }) else { return }
-            target.window?.makeKeyAndOrderFront(nil)
-            target.store.activateWorkspace(ws)
-            target.store.activateTab(session, in: ws)
+            revealTab(session, in: ws, controller: target)
         case .createWorktree(let wsId, let winId):
             guard let target = windowControllers.first(where: { $0.windowId == winId }),
                   let ws = target.store.workspaces.first(where: { $0.id == wsId }) else { return }
