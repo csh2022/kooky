@@ -11,6 +11,7 @@ final class TestEngine: TerminalEngine {
     var onTitleChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
     var onCommandFinished: ((Int?, TimeInterval) -> Void)?
+    var onUserInput: (() -> Void)?
     var onProcessExitedCleanly: (() -> Void)?
     var onSearchStart: ((String) -> Void)?
     var onSearchEnd: (() -> Void)?

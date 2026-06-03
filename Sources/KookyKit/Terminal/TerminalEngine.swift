@@ -46,6 +46,12 @@ protocol TerminalEngine: AnyObject {
     /// most-recent command's exit code and run duration. `exitCode` is `nil`
     /// when the shell omitted it from the OSC sequence.
     var onCommandFinished: ((Int?, TimeInterval) -> Void)? { get set }
+    /// Fires when the user begins the next command — any keystroke (typing,
+    /// Return, arrows, Ctrl / edit shortcuts), paste, or programmatic injection.
+    /// libghostty exposes command *finish* (OSC 133;D) but not command *start*,
+    /// so user input is the signal a session uses to clear a stale command-
+    /// failure dot the moment the user moves on.
+    var onUserInput: (() -> Void)? { get set }
     /// Search lifecycle from libghostty's `start_search` / `end_search` /
     /// `navigate_search` keybinds. While `onSearchStart` is the most recent
     /// signal, libghostty owns the input loop and reports the current needle

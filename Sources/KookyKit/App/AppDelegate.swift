@@ -29,6 +29,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// here (not an arbitrary array slot) when a Settings / Update panel is
     /// the key window. Weak so a closed window doesn't pin its store.
     private weak var lastKeyController: KookyWindowController?
+    /// Posts macOS notifications when a backgrounded agent needs attention or
+    /// a command fails. Bundle-gated, so it no-ops under `swift run`.
+    private let notificationManager = NotificationManager()
     /// Agent hook events carry a global surface-UUID. Broadcast to every
     /// window's store — `applyHookEvent` & friends no-op when the session
     /// isn't theirs, so exactly the owning window reacts.
@@ -77,6 +80,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         NSApp.activate(ignoringOtherApps: true)
         installMainMenu()
         hookServer.start()
+        notificationManager.onActivate = { [weak self] sessionId in
+            self?.activateFromNotification(sessionId)
+        }
+        notificationManager.start()
 
         // Sweep paste-image cache off the launch hot path. macOS's
         // own Caches eviction is unreliable; without this a heavy
@@ -117,7 +124,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         let store = WorkspaceStore(
             persistence: WindowPersistence(windowId: windowId, app: appPersistence),
             peerStores: { [weak self] in self?.windowControllers.map(\.store) ?? [] },
-            moveToNewWindow: { [weak self] id in self?.moveTabToNewWindow(sessionId: id) }
+            moveToNewWindow: { [weak self] id in self?.moveTabToNewWindow(sessionId: id) },
+            onSessionAlert: { [weak self] id, kind in self?.handleSessionAlert(id, kind) }
         )
         let controller = KookyWindowController(windowId: windowId, store: store)
         controller.onWillClose = { [weak self] in self?.handleWindowWillClose($0) }
@@ -273,6 +281,58 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
         controller.store.activateWorkspace(workspace)
         controller.store.activateTab(session, in: workspace)
+    }
+
+    // MARK: - Notifications
+
+    /// Called by any window's store when a session enters attention or a
+    /// command fails. Posts a system notification only for a tab the user
+    /// can't currently see, and only when notifications are enabled.
+    private func handleSessionAlert(_ sessionId: UUID, _ kind: SessionAlertKind) {
+        let settings = KookySettingsModel.shared
+        guard settings.notificationsEnabled,
+              kind == .attention ? settings.notifyOnAttention : settings.notifyOnFailure,
+              !isSessionVisible(sessionId),
+              let location = dockTabLocation(for: sessionId) else { return }
+        let tab = location.session.title
+        let workspace = location.workspace.title
+        switch kind {
+        case .attention:
+            notificationManager.post(
+                title: "\(location.session.displayAgent.title) needs you",
+                body: tab == workspace ? tab : "\(tab) · \(workspace)",
+                sessionId: sessionId
+            )
+        case .failure:
+            notificationManager.post(
+                title: "\(tab) — command failed",
+                body: workspace,
+                sessionId: sessionId
+            )
+        }
+    }
+
+    /// True only when the session is the active tab of the active workspace in
+    /// the key window AND kooky is frontmost — i.e. the user can already see
+    /// it. A backgrounded app, a non-key window, a different workspace/tab, or
+    /// a zoom hiding this pane all read as not-visible (→ worth a notification).
+    private func isSessionVisible(_ sessionId: UUID) -> Bool {
+        guard NSApp.isActive,
+              let controller = windowControllers.first(where: { $0.window?.isKeyWindow == true }),
+              let workspace = controller.store.workspaces.first(where: { $0.id == controller.store.activeWorkspaceId }),
+              let pane = workspace.root.pane(containingSessionId: sessionId),
+              pane.activeTabId == sessionId
+        else { return false }
+        // Zoom hides every pane but the zoomed one.
+        if let zoomed = workspace.zoomedPaneId, zoomed != pane.id { return false }
+        return true
+    }
+
+    /// Notification click → bring kooky forward and jump to the tab.
+    private func activateFromNotification(_ sessionId: UUID) {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let location = dockTabLocation(for: sessionId) else { return }
+        revealTab(location.session, in: location.workspace, controller: location.controller)
     }
 
     /// The kooky window that should host a menu action — the key window

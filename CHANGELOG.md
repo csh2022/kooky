@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.24.0 — 2026-06-03
+
+- **Notifications** — get a macOS notification when an agent in a hidden tab starts waiting on you, or a command there fails. Turn each kind on or off in Settings → Notifications.
+- Fixed: the red "command failed" dot now clears the moment you start your next command (type, paste, or recall from history), instead of lingering until that command finishes — which never happened for a long-running one like an agent.
+
 ## v0.23.0 — 2026-06-02
 
 - **Kiro CLI** — AWS's `kiro-cli` agent joins the launcher. Pick it from the `+` menu or set it as your default agent; the sidebar activity dot tracks when it's running.

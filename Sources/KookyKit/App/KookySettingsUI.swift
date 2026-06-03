@@ -87,6 +87,15 @@ final class KookySettingsModel {
     /// marker-emitting agent wrappers into plain interactive `ssh host`
     /// sessions. The marker receiver itself is always available.
     var sshRemoteAgentDetection: Bool = false
+    /// Master switch for macOS notifications about a non-visible tab. When
+    /// off, nothing is posted. The first post triggers the OS permission
+    /// prompt. Persisted under `notifications.enabled` (only when non-default).
+    var notificationsEnabled: Bool = true
+    /// Per-kind sub-toggles, gated behind `notificationsEnabled`: notify when
+    /// an agent starts waiting on you, and when a command exits non-zero.
+    /// Persisted under `notifications.attention` / `.failure` (non-default only).
+    var notifyOnAttention: Bool = true
+    var notifyOnFailure: Bool = true
 
     private var saveWork: DispatchWorkItem?
 
@@ -120,6 +129,11 @@ final class KookySettingsModel {
 
         let ssh = parsed["ssh"] as? [String: Any] ?? [:]
         sshRemoteAgentDetection = (ssh["remoteAgentDetection"] as? Bool) ?? false
+
+        let notifications = parsed["notifications"] as? [String: Any] ?? [:]
+        notificationsEnabled = (notifications["enabled"] as? Bool) ?? true
+        notifyOnAttention = (notifications["attention"] as? Bool) ?? true
+        notifyOnFailure = (notifications["failure"] as? Bool) ?? true
 
         let rawCustom = (agents["custom"] as? [[String: Any]]) ?? []
         let builtinIds = Set(AgentTemplate.builtin.map(\.id))
@@ -276,6 +290,16 @@ final class KookySettingsModel {
             parsed.removeValue(forKey: "ssh")
         } else {
             parsed["ssh"] = ssh
+        }
+
+        var notifications = parsed["notifications"] as? [String: Any] ?? [:]
+        notifications["enabled"] = notificationsEnabled ? nil : false
+        notifications["attention"] = notifyOnAttention ? nil : false
+        notifications["failure"] = notifyOnFailure ? nil : false
+        if notifications.isEmpty {
+            parsed.removeValue(forKey: "notifications")
+        } else {
+            parsed["notifications"] = notifications
         }
 
         let serialisedPresets: [[String: Any]] = terminalPresets.compactMap { p in
@@ -438,7 +462,7 @@ final class KookySettingsModel {
 }
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general, terminalPresets, codingAgents, ssh, statusBar, advanced
+    case general, terminalPresets, codingAgents, ssh, notifications, statusBar, advanced
 
     var id: String { rawValue }
 
@@ -448,6 +472,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .terminalPresets: return "Terminals"
         case .codingAgents: return "Agents"
         case .ssh: return "SSH"
+        case .notifications: return "Notifications"
         case .statusBar: return "Status Bar"
         case .advanced: return "Advanced"
         }
@@ -499,6 +524,9 @@ struct KookySettingsView: View {
             .onChange(of: model.statusBarItems) { _, _ in model.scheduleSave() }
             .onChange(of: model.hiddenStatusBarItems) { _, _ in model.scheduleSave() }
             .onChange(of: model.hiddenToolCallAgents) { _, _ in model.scheduleSave() }
+            .onChange(of: model.notificationsEnabled) { _, _ in model.scheduleSave() }
+            .onChange(of: model.notifyOnAttention) { _, _ in model.scheduleSave() }
+            .onChange(of: model.notifyOnFailure) { _, _ in model.scheduleSave() }
     }
 
     private var sidebar: some View {
@@ -540,12 +568,22 @@ struct KookySettingsView: View {
     @ViewBuilder
     private var detail: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(selected.title)
-                .font(Theme.display(22, weight: .medium))
-                .foregroundStyle(Theme.chromeForeground)
-                .padding(.horizontal, 28)
-                .padding(.top, 26)
-                .padding(.bottom, 22)
+            HStack(spacing: 14) {
+                Text(selected.title)
+                    .font(Theme.display(22, weight: .medium))
+                    .foregroundStyle(Theme.chromeForeground)
+                // The Notifications section's master switch lives on the title
+                // row; its per-kind sub-toggles sit in the body below.
+                if selected == .notifications {
+                    Spacer(minLength: 14)
+                    Toggle("", isOn: $model.notificationsEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 26)
+            .padding(.bottom, 22)
             Rectangle()
                 .fill(Theme.chromeHairline)
                 .frame(width: 32, height: 1)
@@ -556,6 +594,7 @@ struct KookySettingsView: View {
             case .terminalPresets: terminalPresetsDetail
             case .codingAgents: codingAgentsDetail
             case .ssh: sshDetail
+            case .notifications: notificationsDetail
             case .statusBar: statusBarDetail
             case .advanced: advancedDetail
             }
@@ -647,6 +686,23 @@ struct KookySettingsView: View {
                 Toggle("", isOn: $model.sshRemoteAgentDetection)
                     .labelsHidden()
                     .toggleStyle(.switch)
+            }
+        }
+    }
+
+    private var notificationsDetail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsRow(label: "agent") {
+                Toggle("", isOn: $model.notifyOnAttention)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!model.notificationsEnabled)
+            }
+            SettingsRow(label: "command") {
+                Toggle("", isOn: $model.notifyOnFailure)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!model.notificationsEnabled)
             }
         }
     }

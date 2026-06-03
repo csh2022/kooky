@@ -231,6 +231,10 @@ final class LibghosttyEngine: TerminalEngine {
         get { surfaceView.onCommandFinished }
         set { surfaceView.onCommandFinished = newValue }
     }
+    var onUserInput: (() -> Void)? {
+        get { surfaceView.onUserInput }
+        set { surfaceView.onUserInput = newValue }
+    }
     var onProcessExitedCleanly: (() -> Void)? {
         get { surfaceView.onProcessExitedCleanly }
         set { surfaceView.onProcessExitedCleanly = newValue }
@@ -358,6 +362,7 @@ final class GhosttySurfaceView: NSView {
     var onTitleChange: ((String) -> Void)?
     var onFocus: (() -> Void)?
     var onCommandFinished: ((Int?, TimeInterval) -> Void)?
+    var onUserInput: (() -> Void)?
     var onProcessExitedCleanly: (() -> Void)?
     var onSearchStart: ((String) -> Void)?
     var onSearchEnd: (() -> Void)?
@@ -737,6 +742,11 @@ final class GhosttySurfaceView: NSView {
         // back to the CSI form; a non-mode-aware arrow still beats a dead one.
         if !hasMarkedText(),
            Self.shouldForwardModeAwareKeyToLibghostty(keyCode: event.keyCode, modifierFlags: mods) {
+            // Arrow keys at a shell prompt recall history (↑/↓) or move the
+            // cursor (←/→) — the start of the next command, so clear a stale
+            // command-failure dot. Scrollback is the wheel, not arrows; inside
+            // a TUI the dot is already cleared, so this is a no-op there.
+            onUserInput?()
             if !sendKey(event: event, action: GHOSTTY_ACTION_PRESS, surface: surface),
                let bytes = Self.handWrittenEscapeSequence(forKeyCode: event.keyCode, modifierFlags: mods) {
                 sendInputBytes(bytes, to: surface)
@@ -809,9 +819,14 @@ final class GhosttySurfaceView: NSView {
     private func sendKeyText(_ text: String, to surface: ghostty_surface_t) {
         guard !text.isEmpty else { return }
         if let first = text.utf8.first, first < 0x20 {
-            sendInputBytes(text, to: surface)
+            sendInputBytes(text, to: surface)  // control byte → fires onUserInput there
             return
         }
+        // Visible typed text is the start of the next command — clear a stale
+        // command-failure dot (libghostty exposes no command-START signal). The
+        // control-byte branch above routes through sendInputBytes, which fires
+        // its own onUserInput, so only this visible-text path needs one here.
+        onUserInput?()
         text.withCString { ptr in
             var key_ev = ghostty_input_key_s()
             key_ev.action = GHOSTTY_ACTION_PRESS
@@ -826,6 +841,14 @@ final class GhosttySurfaceView: NSView {
     }
 
     private func sendInputBytes(_ bytes: String, to surface: ghostty_surface_t) {
+        // Chokepoint for every control-sequence input the user initiates —
+        // Return / Tab / function keys (handWrittenEscapeSequence), Ctrl+letter
+        // (^R history search, ^C, ^L), the Cocoa edit shortcuts (Cmd+←/→/⌫,
+        // Option+⌫), and pill injection (sendInput). All start the next command,
+        // so clear a stale failure dot here once rather than at each caller.
+        // Visible typing (ghostty_surface_key) and paste (ghostty_surface_text)
+        // don't route through here, so they fire at their own sites.
+        onUserInput?()
         bytes.withCString { cstr in
             ghostty_surface_text_input(surface, cstr, UInt(strlen(cstr)))
         }
@@ -833,6 +856,8 @@ final class GhosttySurfaceView: NSView {
 
     func sendInput(_ text: String) {
         guard let surface, !text.isEmpty else { return }
+        // Pill-injected commands (nvm use, git checkout, unset proxy) are the
+        // next command too; sendInputBytes fires onUserInput to clear the dot.
         sendInputBytes(text, to: surface)
     }
 
@@ -1025,6 +1050,11 @@ final class GhosttySurfaceView: NSView {
 
     func paste(_ text: String) {
         guard let surface, !text.isEmpty else { return }
+        // Pasting (⌘V) or dropping a file (performDragOperation routes here)
+        // is the start of the next command too — same stale-failure-dot clear
+        // as a keystroke, covering paste-with-trailing-newline that runs on
+        // arrival, which a Return-key trigger would miss.
+        onUserInput?()
         text.withCString { ghostty_surface_text(surface, $0, UInt(strlen($0))) }
     }
 

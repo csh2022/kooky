@@ -110,6 +110,11 @@ final class WorkspaceStore {
     /// right-click menu — `AppDelegate` opens a fresh window and moves the
     /// session into it. Tests default to a no-op.
     private let moveToNewWindow: @MainActor (UUID) -> Void
+    /// Fired when a session enters an attention (waiting-on-you) state or a
+    /// command there fails. `AppDelegate` decides whether to surface a system
+    /// notification — only when the originating tab isn't currently visible.
+    /// Tests default to a no-op.
+    private let onSessionAlert: @MainActor (UUID, SessionAlertKind) -> Void
     private let persistence: any Persistence
     private let gitStatusFetcher = GitStatusFetcher()
     /// One watcher per session — refreshes git status when `.git/HEAD` or
@@ -159,7 +164,8 @@ final class WorkspaceStore {
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
         peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] },
-        moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in }
+        moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in },
+        onSessionAlert: @escaping @MainActor (UUID, SessionAlertKind) -> Void = { _, _ in }
     ) {
         self.persistence = persistence
         self.engineFactory = engineFactory
@@ -167,6 +173,7 @@ final class WorkspaceStore {
         self.resumeProvider = resumeProvider
         self.peerStores = peerStores
         self.moveToNewWindow = moveToNewWindow
+        self.onSessionAlert = onSessionAlert
         if let saved = persistence.load(), !saved.workspaces.isEmpty {
             restore(from: saved)
         } else {
@@ -1078,6 +1085,7 @@ final class WorkspaceStore {
         // sidebar/tab observer even on same-value assignment, so guard.
         if session.activityState != event.activityState {
             session.activityState = event.activityState
+            if event.activityState == .attention { onSessionAlert(session.id, .attention) }
         }
         if session.agent.id != agentBefore { scheduleSave() }
     }
@@ -1351,11 +1359,22 @@ final class WorkspaceStore {
             }
             session.lastCommandExit = exit
             session.lastCommandDuration = duration
+            // A non-zero exit on a backgrounded tab is worth a nudge;
+            // AppDelegate gates on visibility + the notifications setting.
+            if let exit, exit != 0 { self?.onSessionAlert(session.id, .failure) }
             // A finished command may have changed the working tree (commit /
             // git add / file edits) or installed a venv / dropped an .nvmrc.
             // Refresh so the bar doesn't lie.
             self?.refreshGitStatus(for: session)
             self?.refreshEnvironment(for: session)
+        }
+        engine.onUserInput = { [weak session] in
+            // libghostty exposes no command-START, so a keystroke (the first
+            // character of the next command) is when we clear a stale
+            // command-failure dot — covers any command, agent or manual.
+            guard let session, session.lastCommandExit != nil else { return }
+            session.lastCommandExit = nil
+            session.lastCommandDuration = nil
         }
         engine.onProcessExitedCleanly = { [weak self, weak session, weak workspace] in
             guard let self, let session, let workspace else { return }
@@ -1400,6 +1419,7 @@ final class WorkspaceStore {
 
         if session.activityState != event.activityState {
             session.activityState = event.activityState
+            if event.activityState == .attention { onSessionAlert(session.id, .attention) }
         }
         if session.agent.id != agentBefore { scheduleSave() }
     }
