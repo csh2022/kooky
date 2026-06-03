@@ -52,6 +52,8 @@ struct ContentView: View {
                         EmptyView()
                     }
                 }
+            InboxBell()
+                .padding(.trailing, 8)
         }
         .frame(height: 32)
     }

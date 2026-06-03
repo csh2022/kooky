@@ -8,6 +8,8 @@ enum SessionAlertKind {
     case attention
     /// The most recent command in the tab exited non-zero.
     case failure
+    /// The agent finished / exited. Inbox-only — never posts a banner.
+    case completed
 }
 
 /// Thin wrapper over `UNUserNotificationCenter` for kooky's agent

@@ -2,6 +2,11 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.24.1 — 2026-06-03
+
+- **Notification center** — a bell in the top bar (⇧⌘I) collects agent alerts from every window: who's waiting on you, what failed, what finished. A red dot marks unread; click any entry to jump straight to that tab.
+- Looking at a tab clears its alerts — whether you open it, jump in from the inbox, or just switch back to kooky — so a notification you've already seen doesn't keep the bell lit.
+
 ## v0.24.0 — 2026-06-03
 
 - **Notifications** — get a macOS notification when an agent in a hidden tab starts waiting on you, or a command there fails. Turn each kind on or off in Settings → Notifications.

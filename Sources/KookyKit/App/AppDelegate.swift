@@ -289,21 +289,39 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// command fails. Posts a system notification only for a tab the user
     /// can't currently see, and only when notifications are enabled.
     private func handleSessionAlert(_ sessionId: UUID, _ kind: SessionAlertKind) {
-        let settings = KookySettingsModel.shared
-        guard settings.notificationsEnabled,
-              kind == .attention ? settings.notifyOnAttention : settings.notifyOnFailure,
-              !isSessionVisible(sessionId),
-              let location = dockTabLocation(for: sessionId) else { return }
+        guard let location = dockTabLocation(for: sessionId) else { return }
         let tab = location.session.title
         let workspace = location.workspace.title
+        // A tab that's already on-screen when the event fires lands read — the
+        // user is looking at it, so it shouldn't light the bell. Computed once
+        // and reused below to also suppress the banner.
+        let visible = isSessionVisible(sessionId)
+        // Every kind — including completed — lands in the inbox.
+        NotificationInbox.shared.add(
+            kind: kind,
+            sessionId: sessionId,
+            agent: location.session.displayAgent,
+            tab: tab,
+            workspace: workspace,
+            isRead: visible
+        )
+        // System banner: attention / failure only, gated on the setting + its
+        // sub-toggle + visibility. Completed is inbox-only (never a banner).
+        let settings = KookySettingsModel.shared
         switch kind {
+        case .completed:
+            return
         case .attention:
+            guard settings.notificationsEnabled, settings.notifyOnAttention,
+                  !visible else { return }
             notificationManager.post(
                 title: "\(location.session.displayAgent.title) needs you",
                 body: tab == workspace ? tab : "\(tab) · \(workspace)",
                 sessionId: sessionId
             )
         case .failure:
+            guard settings.notificationsEnabled, settings.notifyOnFailure,
+                  !visible else { return }
             notificationManager.post(
                 title: "\(tab) — command failed",
                 body: workspace,
@@ -328,11 +346,46 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         return true
     }
 
+    /// Mark the currently-visible tab's notifications read — called when kooky
+    /// returns to the foreground. `activateTab` only fires on a tab *change*, so
+    /// a notification that arrived while the (unchanged) active tab was hidden
+    /// would otherwise keep the bell lit after the user is plainly looking at it.
+    private func markVisibleSessionRead() {
+        guard NSApp.isActive,
+              let controller = windowControllers.first(where: { $0.window?.isKeyWindow == true }),
+              let workspace = controller.store.workspaces.first(where: { $0.id == controller.store.activeWorkspaceId }),
+              let session = workspace.activeSession
+        else { return }
+        NotificationInbox.shared.markRead(forSession: session.id)
+    }
+
     /// Notification click → bring kooky forward and jump to the tab.
     private func activateFromNotification(_ sessionId: UUID) {
         NSApp.activate(ignoringOtherApps: true)
         guard let location = dockTabLocation(for: sessionId) else { return }
         revealTab(location.session, in: location.workspace, controller: location.controller)
+    }
+
+    /// Toggle the agent inbox panel — from the top-chrome bell or ⇧⌘I.
+    @objc func handleShowInbox() {
+        InboxWindowController.shared.toggle(
+            anchor: activeController?.window,
+            onActivate: { [weak self] event in self?.activateFromInbox(event) }
+        )
+    }
+
+    /// Inbox row click → mark that event read, bring kooky forward, jump to the
+    /// tab. The jump no-ops if the session has since closed (event outlives it).
+    private func activateFromInbox(_ event: NotificationInbox.Event) {
+        NotificationInbox.shared.markRead(event.id)
+        NSApp.activate(ignoringOtherApps: true)
+        guard let location = dockTabLocation(for: event.sessionId) else { return }
+        revealTab(location.session, in: location.workspace, controller: location.controller)
+        // Jumping in from a notification means the user has now looked at the
+        // tab, so clear any lingering command-failure dot on it (the same
+        // fields the next-keystroke clear resets) — not just the inbox entry.
+        location.session.lastCommandExit = nil
+        location.session.lastCommandDuration = nil
     }
 
     /// The kooky window that should host a menu action — the key window
@@ -364,6 +417,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         KookySettingsWindowController.shared.window?.appearance = appearance
         UpdatePromptWindowController.shared.window?.appearance = appearance
         CommandPaletteWindowController.shared.window?.appearance = appearance
+        InboxWindowController.shared.window?.appearance = appearance
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -387,6 +441,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
         hookServer.stop()
         KookyShellIntegration.cleanup()
+    }
+
+    /// Returning to the foreground counts as seeing the active tab — clear its
+    /// unread so a notification that landed while kooky was backgrounded doesn't
+    /// strand the bell's red dot (the tab didn't change, so `activateTab`
+    /// wouldn't fire).
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        markVisibleSessionRead()
     }
 
     // MARK: - Menu
@@ -420,6 +482,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             selfRow("New Window", #selector(handleNewWindow), "n", modifiers: [.command, .shift]),
             .separator,
             selfRow("Quick Open…", #selector(handleQuickOpen), "p"),
+            selfRow("Notifications", #selector(handleShowInbox), "i", modifiers: [.command, .shift]),
             selfRow("Open Folder…", #selector(handleOpenFolder), "o"),
             .separator,
             selfRow("Close Tab", #selector(handleCloseTab), "w"),

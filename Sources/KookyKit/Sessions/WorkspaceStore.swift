@@ -896,6 +896,9 @@ final class WorkspaceStore {
     }
 
     func activateTab(_ session: Session, in workspace: Workspace) {
+        // Switching to a tab counts as reading any notification that pointed at
+        // it — clears the inbox entry + the bell dot without an explicit click.
+        NotificationInbox.shared.markRead(forSession: session.id)
         guard let pane = pane(containing: session, in: workspace) else { return }
         var changed = false
         if pane.activeTabId != session.id {
@@ -1072,6 +1075,10 @@ final class WorkspaceStore {
             // `AgentTemplate.baseAgentId`) so a mid-run Settings edit
             // can't leave the tab pill stuck.
             if session.agent.id == agent.id || session.agent.baseAgentId == agent.id {
+                // Report completion to the inbox *before* reverting to
+                // Terminal, so the event still knows which agent finished
+                // (handleSessionAlert reads displayAgent synchronously).
+                onSessionAlert(session.id, .completed)
                 session.agent = .terminal
             }
         } else if session.agent.isShell {
@@ -1408,6 +1415,9 @@ final class WorkspaceStore {
         let agentBefore = session.agent.id
         if event == .ended {
             if session.transientAgent?.id == agent.id || session.transientAgent?.baseAgentId == agent.id {
+                // Remote agent done — inbox completion before clearing, so
+                // displayAgent still resolves to the remote agent.
+                onSessionAlert(session.id, .completed)
                 session.transientAgent = nil
             }
             if session.agent.id == agent.id || session.agent.baseAgentId == agent.id {
