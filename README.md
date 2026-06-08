@@ -36,6 +36,8 @@ A minimal modern terminal built for AI coding. Sidebar workspaces; horizontal / 
 
 **Friction-free input.** Click anywhere on the zsh prompt to move the shell cursor there (no modifier needed, same UX as ghostty.app). Drag a file or folder from Finder onto any pane to drop its escaped absolute path at the cursor.
 
+**Prompt composer (⌘L).** A chat-style box rises from the bottom of the pane for writing a long, multi-line prompt without a stray Return firing it off mid-thought. Return sends it to the current agent (or shell), Shift+Return adds a newline, Esc cancels and keeps your draft. Open it with ⌘L or the compose button in the pane status bar.
+
 **Agent activity readout.** Sidebar dot tracks each agent in real time — running (blue), waiting on you (amber), idle (none). Tab + workspace dots also turn red when the last command exited non-zero; hover for `exit N · 12.4s`. For Claude Code and Pi sessions, the pane status bar also shows the tool the agent is running right now (Bash / Edit / Read / etc.) and how long — click the pill for the full session history; failed calls turn red immediately. Toggle the pill per agent in Settings → Status Bar.
 
 **Notifications.** When an agent in a tab you're not looking at starts waiting on you, or a command there fails, kooky posts a macOS notification — turn each kind on or off in Settings → Notifications. A bell in the top bar (⇧⌘I) keeps a running inbox of those alerts across every window — who's waiting, what failed, what finished — with a red dot when something's unread. Click an entry to jump straight to that tab; switching to a tab clears its alerts on its own.
