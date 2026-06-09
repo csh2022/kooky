@@ -46,7 +46,7 @@ AI コーディングのために作られた、ミニマルでモダンな macO
 
 **Agent パネル。** 上部のトグル (左サイドバーと同じ 3 段階の折りたたみ) で右サイドバーを開くと、全ウィンドウの agent を一覧でき、あなたを必要とする順に並びます —— ユーザー待ち、失敗、実行中、アイドル。任意の行をクリックすればその tab に直接ジャンプ、コンパクトモードではステータス色のドット付きアイコンの細い列に縮みます。
 
-**作業環境の状態が一目で見える。** pane 下部のステータスバーに Git branch + diff (`N files +X −Y`)、Python venv、Node バージョン、有効中の proxy (`https_proxy` / `http_proxy` / `all_proxy`) を表示。agent の Bash ツールや別ターミナルで branch を切り替えても自動で更新されます。Node バージョンや Git branch の pill をクリックすればコマンドを打たずに切り替え可能、proxy pill をクリックすると完全な `name=value` を表示してコピーできます。
+**作業環境の状態が一目で見える。** pane 下部のステータスバーに Git branch + diff (`N files +X −Y`)、Python venv、Node バージョン、有効中の proxy (`https_proxy` / `http_proxy` / `all_proxy`)、そしてリモートに SSH したときのログイン先 `user@host` (Settings → SSH で有効化) を表示。agent の Bash ツールや別ターミナルで branch を切り替えても自動で更新されます。Node バージョンや Git branch の pill をクリックすればコマンドを打たずに切り替え可能、proxy pill をクリックすると完全な `name=value` を表示してコピーできます。
 
 **SwiftUI ネイティブ、ミニマルな chrome。** Onest + JetBrains Mono。カスタム About パネル、ショートカットヒント付きのネイティブメニュー、日本語 IME を完全サポート。
 
