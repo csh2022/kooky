@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.26.2 — 2026-06-09
+
+- Polish: tidied up a handful of mismatched button-icon and input-field sizes across the sidebar, tab bar, and Settings so same-kind controls line up.
+
 ## v0.26.1 — 2026-06-09
 
 - Pasting a file or image into the prompt composer now inserts its full path (same as ⌘V in the terminal), not just the filename.

@@ -247,7 +247,7 @@ struct SidebarView: View {
                 HoverableIconButton(
                     systemName: "plus",
                     fontSize: 12,
-                    size: 26,
+                    size: 28,
                     help: "New workspace"
                 ) {
                     store.addWorkspace()

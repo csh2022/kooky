@@ -52,7 +52,7 @@ struct TabBarView: View {
         HStack(spacing: 2) {
             HoverableIconButton(
                 systemName: "square.split.2x1",
-                fontSize: 11,
+                fontSize: 12,
                 size: 28,
                 help: "Split Right (⌘D)"
             ) {
@@ -60,7 +60,7 @@ struct TabBarView: View {
             }
             HoverableIconButton(
                 systemName: "square.split.1x2",
-                fontSize: 11,
+                fontSize: 12,
                 size: 28,
                 help: "Split Down (⌘⇧D)"
             ) {
@@ -95,7 +95,7 @@ private struct AddTabButton: View {
     var body: some View {
         HoverableIconButton(
             systemName: "plus",
-            fontSize: 11,
+            fontSize: 12,
             size: 28,
             help: "New tab"
         ) {

@@ -157,7 +157,7 @@ struct SidebarWorkspaceRow: View {
                 if let disclosure {
                     HoverableIconButton(
                         systemName: "chevron.right",
-                        fontSize: 9,
+                        fontSize: 10,
                         size: 20,
                         help: nil,
                         action: disclosure.toggle,
@@ -169,7 +169,7 @@ struct SidebarWorkspaceRow: View {
                 if let onCreateWorktree {
                     HoverableIconButton(
                         systemName: "arrow.triangle.branch",
-                        fontSize: 11,
+                        fontSize: 10,
                         size: 20,
                         help: "Create worktree",
                         action: onCreateWorktree
@@ -184,7 +184,7 @@ struct SidebarWorkspaceRow: View {
                     }
                     HoverableIconButton(
                         systemName: "xmark",
-                        fontSize: 9,
+                        fontSize: 10,
                         size: 20,
                         help: workspace.worktreeParentId == nil ? "Close workspace" : "Close worktree",
                         action: onClose
