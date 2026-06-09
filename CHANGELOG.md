@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.26.1 — 2026-06-09
+
+- Pasting a file or image into the prompt composer now inserts its full path (same as ⌘V in the terminal), not just the filename.
+
 ## v0.26.0 — 2026-06-08
 
 - **Prompt composer (⌘L)** — a chat-style box that rises from the bottom of the pane for writing long, multi-line prompts without a stray Return firing them off mid-thought. Return sends to the current agent (or shell), Shift+Return adds a newline, Esc cancels and keeps your draft. Open it with ⌘L or the compose button in the pane status bar.

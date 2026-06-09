@@ -1042,6 +1042,27 @@ private struct PaneComposerBar: View {
     }
 }
 
+/// NSTextView that resolves a pasted file or image into the terminal's full
+/// backslash-escaped path — matching ⌘V in the surface — instead of the system
+/// default, where a fileURL's `.string` is just the basename (why pasting a
+/// file showed only the filename in the composer). Routes through the shared
+/// `readTerminalPasteText` seam (file → escaped path, image → cached-PNG path)
+/// that both terminal paste entry points use, so the composer can't drift from
+/// them. Plain text falls through to NSTextView's native paste, keeping undo
+/// coalescing + smart behaviors.
+private final class ComposerNSTextView: NSTextView {
+    override func paste(_ sender: Any?) {
+        let pb = NSPasteboard.general
+        if pb.availableType(from: [.fileURL, .png, .tiff]) != nil,
+           let text = KookyShellIntegration.readTerminalPasteText(from: pb),
+           !text.isEmpty {
+            insertText(text, replacementRange: selectedRange())
+            return
+        }
+        super.paste(sender)
+    }
+}
+
 /// AppKit-backed multiline editor for the composer. A SwiftUI `TextEditor`
 /// inserts a newline on Return before `onKeyPress` can see it, so it can't do
 /// "Return sends, Shift+Return newlines." An `NSTextView` via `doCommandBy`
@@ -1052,10 +1073,14 @@ private struct ComposerTextView: NSViewRepresentable {
     var onCancel: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        guard let tv = scroll.documentView as? NSTextView else { return scroll }
+        let tv = ComposerNSTextView(frame: .zero)
+        tv.minSize = .zero
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+        tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         tv.delegate = context.coordinator
         tv.string = text
         tv.font = .monospacedSystemFont(ofSize: 12.5, weight: .regular)
@@ -1074,6 +1099,12 @@ private struct ComposerTextView: NSViewRepresentable {
         tv.isAutomaticSpellingCorrectionEnabled = false
         tv.isContinuousSpellCheckingEnabled = false
         tv.isGrammarCheckingEnabled = false
+
+        let scroll = NSScrollView()
+        scroll.documentView = tv
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
         // Grab focus once the view lands in a window so Return / Esc route here.
         DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
         return scroll
