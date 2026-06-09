@@ -85,8 +85,8 @@ enum Theme {
             self.chromeMuted = Color(nsColor: mutedNS)
             self.chromeFaint = Color(nsColor: faintNS)
             self.chromeHairline = fgColor.opacity(isLight ? 0.16 : 0.07)
-            self.chromeHover = fgColor.opacity(isLight ? 0.08 : 0.05)
-            self.chromeActive = fgColor.opacity(isLight ? 0.14 : 0.10)
+            self.chromeHover = fgColor.opacity(isLight ? 0.11 : 0.07)
+            self.chromeActive = fgColor.opacity(isLight ? 0.20 : 0.15)
         }
     }
 

@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.26.3 — 2026-06-09
+
+- Polish: selected and hover states read more clearly now — stronger contrast on the active tab, workspace, buttons, and Settings rows, in both light and dark themes.
+
 ## v0.26.2 — 2026-06-09
 
 - Polish: tidied up a handful of mismatched button-icon and input-field sizes across the sidebar, tab bar, and Settings so same-kind controls line up.
