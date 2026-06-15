@@ -39,14 +39,18 @@ guard !surface.isEmpty else { exit(0) }
 
 let socketPath = KookyHookKit.socketPath
 
-// Drain stdin once up-front. Both the tool-event parser (PreToolUse /
-// PostToolUse argv) and the conversationId mirror (Claude lifecycle
-// events) read the same Claude-supplied JSON; reading twice would block
-// the second read (stdin is single-pass). `isatty == 0` says stdin is a
-// pipe / regular file — safe to drain to EOF without stranding the tab
-// when the wrapper's "binary not installed" branch leaves stdin attached
-// to the user's tty.
-let stdinData: Data = (isatty(fileno(stdin)) == 0)
+// Drain stdin once up-front so the tool-event parser (PreToolUse /
+// PostToolUse) and the conversationId mirror — both reading the same
+// Claude-supplied JSON — don't double-read a single-pass stream. Gated on
+// `agent == "claude"`: only Claude pipes JSON here, and it always writes one
+// object then closes. Every other caller (codex/bracket lifecycle pings, Pi's
+// argv modes, env snapshots) sends nothing on stdin, so draining is pointless
+// — and a detached caller can hand us a stdin pipe that never EOFs (a broker's
+// JSON-RPC stream that a spawned `app-server` inherits, pinged via the
+// wrapper), where readToEnd() would block forever. `isatty == 0` still guards
+// the tty case so the "binary not installed" branch never strands the tab.
+let agentArg = CommandLine.arguments.count >= 2 ? CommandLine.arguments[1] : ""
+let stdinData: Data = (agentArg == "claude" && isatty(fileno(stdin)) == 0)
     ? ((try? FileHandle.standardInput.readToEnd()) ?? Data())
     : Data()
 

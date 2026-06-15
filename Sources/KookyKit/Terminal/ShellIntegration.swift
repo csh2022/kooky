@@ -712,9 +712,11 @@ enum KookyShellIntegration {
     /// wrappers stay silent and never double-report. Writes to `/dev/tty`, not
     /// stdout: a redirected agent (`claude -p … > out`) must not get OSC bytes
     /// in its output, and the marker must still reach the terminal when the
-    /// agent's stdout is a pipe.
+    /// agent's stdout is a pipe. `2>/dev/null` comes *before* `> /dev/tty` so a
+    /// missing controlling tty (`/dev/tty` won't open) has its redirection error
+    /// already silenced instead of leaking onto the caller's stderr.
     private static func agentMarkerCommand(slug: String, event: HookEvent) -> String {
-        "[[ -n \"$KOOKY_AGENT_MARKERS\" ]] && printf '\\033]2;\(AgentStatusMarker.title(slug: slug, event: event))\\a' > /dev/tty 2>/dev/null"
+        "[[ -n \"$KOOKY_AGENT_MARKERS\" ]] && printf '\\033]2;\(AgentStatusMarker.title(slug: slug, event: event))\\a' 2>/dev/null > /dev/tty"
     }
 
     /// Binary slugs the SSH remote bootstrap installs marker-emitting shims for.
@@ -757,6 +759,20 @@ enum KookyShellIntegration {
         """
     }
 
+    /// Pass a pipe-driven programmatic invocation (a broker spawning the agent
+    /// for JSON-RPC over stdio — `codex app-server`, the `codex:review` hang)
+    /// straight through, skipping instrumentation: a KookyHook ping, OSC
+    /// markers, and `-c notify` / `--settings` injection would all perturb the
+    /// agent it spawned. Gate on BOTH fds (not `||`) so `claude -p … | tee`
+    /// (stdin still a tty) keeps its sidebar dot. Each wrapper places this after
+    /// the preamble AND after any exec-safety check — antigravity must reject
+    /// the IDE-launcher shim first, else a background `agy` reopens the GUI.
+    private static let ttyPassthroughGuard = """
+    if [[ ! -t 0 && ! -t 1 ]]; then
+        exec "$real" "$@"
+    fi
+    """
+
     /// Inside a kooky session ($KOOKY_SURFACE_ID set), injects --settings so
     /// Claude Code's hooks report state back to the app via the bundled
     /// KookyHook helper. `KOOKY_AGENT_MARKERS` enables the OSC-title fallback
@@ -764,6 +780,8 @@ enum KookyShellIntegration {
     /// local unix socket. Outside both, transparent passthrough.
     private static let claudeWrapperScript = """
     \(wrapperPreamble(binary: "claude"))
+
+    \(ttyPassthroughGuard)
 
     if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
         \(agentMarkerCommand(slug: "claude", event: .running))
@@ -785,8 +803,10 @@ enum KookyShellIntegration {
     /// as the final argv. We override `notify` inline via `-c` so user's
     /// ~/.codex/config.toml is left untouched. The single signal we get is
     /// "turn complete" which we map to `attention`.
-    private static let codexWrapperScript = """
+    static let codexWrapperScript = """
     \(wrapperPreamble(binary: "codex"))
+
+    \(ttyPassthroughGuard)
 
     if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
         # Codex doesn't expose SessionStart / SessionEnd lifecycle hooks
@@ -1051,6 +1071,8 @@ enum KookyShellIntegration {
     /// the binary from a plain Terminal.app shell.
     private static func bracketBody(slug: String) -> String {
         """
+        \(ttyPassthroughGuard)
+
         if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
             \(agentMarkerCommand(slug: slug, event: .running))
             if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then

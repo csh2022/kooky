@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.26.6 — 2026-06-15
+
+- Fixed: an agent another tool launches in the background — e.g. `codex:review` running inside Claude Code in a kooky tab — no longer hangs. kooky's agent wrapper now steps aside for background, tool-driven calls instead of trying to report their status.
+
 ## v0.26.5 — 2026-06-09
 
 - New: a "Remote Login" status-bar slot shows the `user@host` you're SSHed into. Toggle it in Settings → Status Bar (needs "remote agent detection" on under Settings → SSH).

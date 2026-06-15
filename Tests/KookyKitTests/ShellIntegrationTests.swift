@@ -83,9 +83,46 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("kooky-agent:amp:running"))
         XCTAssertTrue(script.contains("kooky-agent:amp:ended"))
         XCTAssertTrue(script.contains("KOOKY_AGENT_MARKERS"))
-        XCTAssertTrue(script.contains("> /dev/tty"), "OSC marker must target the tty, not stdout (no pollution of a redirected agent)")
+        XCTAssertTrue(script.contains("2>/dev/null > /dev/tty"), "OSC marker targets the tty (not a redirected agent's stdout), stderr silenced before the open so a missing tty can't leak")
         XCTAssertTrue(script.contains("[[ -n \"$KOOKY_AGENT_MARKERS\" ]] && printf"), "marker gated on KOOKY_AGENT_MARKERS so local sessions stay socket-only")
         XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
+    }
+
+    func testWrapperPassesThroughForBackgroundPipedCaller() {
+        // A background / programmatic caller (a broker spawning the agent to
+        // speak JSON-RPC over piped stdin+stdout) is not a session a human is
+        // watching. The shared preamble must exec the real binary before any
+        // instrumentation runs, so the wrapper never pings KookyHook.
+        let script = KookyShellIntegration.bracketWrapperScript(slug: "amp")
+        XCTAssertTrue(script.contains("if [[ ! -t 0 && ! -t 1 ]]; then"),
+                      "preamble must pass through when both stdin and stdout are non-terminals")
+    }
+
+    func testCodexWrapperGuardsBackgroundCallBeforeInstrumenting() {
+        // The reported hang: a broker spawns `codex app-server` (JSON-RPC over
+        // piped stdin+stdout) and `codex:review` freezes. The guard must run
+        // before the KookyHook ping and before the `-c notify` injection (which
+        // would alter the codex the broker spawned).
+        let script = KookyShellIntegration.codexWrapperScript
+        let guardLine = "if [[ ! -t 0 && ! -t 1 ]]; then"
+        XCTAssertTrue(script.contains(guardLine), "codex wrapper must pass through a pipe-driven background call")
+
+        let guardIdx = script.range(of: guardLine)!.lowerBound
+        let pingIdx = script.range(of: "\"$KOOKY_HOOK_BIN\" codex running")!.lowerBound
+        let notifyIdx = script.range(of: "notify=")!.lowerBound
+        XCTAssertLessThan(guardIdx, pingIdx, "tty guard must precede the KookyHook running ping")
+        XCTAssertLessThan(guardIdx, notifyIdx, "tty guard must precede the -c notify injection")
+    }
+
+    func testAntigravityIDEShimCheckPrecedesTtyPassthrough() {
+        // The generic pipe-driven passthrough must NOT run before agy's
+        // IDE-launcher rejection — otherwise a background `agy` call (both fds
+        // piped) would exec the resolved binary, reopening the GUI the wrapper
+        // exists to block. The IDE-shim `case` must come first.
+        let script = KookyShellIntegration.antigravityWrapperScript
+        let ideIdx = script.range(of: "*/Antigravity.app/*")!.lowerBound
+        let guardIdx = script.range(of: "if [[ ! -t 0 && ! -t 1 ]]; then")!.lowerBound
+        XCTAssertLessThan(ideIdx, guardIdx, "IDE-shim rejection must precede the tty passthrough")
     }
 
     @MainActor
