@@ -80,6 +80,13 @@ protocol TerminalEngine: AnyObject {
     /// Pair every `true` assignment with `flushSize()` once the layout
     /// settles so libghostty's grid catches up to the final dimensions.
     var suspendsSizePropagation: Bool { get set }
+    /// Gates whether the engine's view grabs keyboard first-responder when it
+    /// mounts into a window. The SwiftUI layer sets it from the pane's active
+    /// state so a workspace switch — which re-mounts every pane's surface —
+    /// lands focus on the active pane, not whichever surface mounted last
+    /// (issue #24). Default true: a single pane or a fresh split/tab still
+    /// grabs focus on mount.
+    var grabsFocusOnMount: Bool { get set }
     /// Force a one-shot size sync of the surface to the current view
     /// frame. Used when un-suspending after an animation.
     func flushSize()

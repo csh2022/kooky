@@ -282,6 +282,11 @@ final class LibghosttyEngine: TerminalEngine {
         set { surfaceView.suspendsSizePropagation = newValue }
     }
 
+    var grabsFocusOnMount: Bool {
+        get { surfaceView.grabsFocusOnMount }
+        set { surfaceView.grabsFocusOnMount = newValue }
+    }
+
     func flushSize() {
         surfaceView.flushPropagateSize()
     }
@@ -368,6 +373,10 @@ final class GhosttySurfaceView: NSView {
     var onSearchEnd: (() -> Void)?
     var onSearchTotal: ((Int) -> Void)?
     var onSearchSelected: ((Int) -> Void)?
+    /// Read in `viewDidMoveToWindow` to gate the mount-time first-responder
+    /// grab; set by `TerminalView` from the pane's active state. See
+    /// `TerminalEngine.grabsFocusOnMount` for the why (issue #24).
+    var grabsFocusOnMount = true
     private(set) var surface: ghostty_surface_t? {
         didSet {
             if surface != nil { propagateSizeToSurface() }
@@ -506,7 +515,12 @@ final class GhosttySurfaceView: NSView {
             // loop pass, otherwise the originating button click reclaims focus.
             DispatchQueue.main.async { [weak self] in
                 guard let self, let window = self.window else { return }
-                window.makeFirstResponder(self)
+                // Only the active pane grabs focus on (re)mount — otherwise every
+                // pane's surface races on a workspace switch and the last one wins
+                // (issue #24). Size re-sync below runs regardless of focus.
+                if self.grabsFocusOnMount {
+                    window.makeFirstResponder(self)
+                }
                 // Re-sync size on reattach: propagateSizeToSurface no-ops while
                 // detached, and a same-display / unchanged-frame reattach fires
                 // neither viewDidChangeBackingProperties nor setFrameSize.

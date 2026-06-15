@@ -2,6 +2,10 @@
 
 Notable changes per release. Tagged commits use `vX.Y.Z` shortform.
 
+## v0.26.8 — 2026-06-15
+
+- Fixed: switching workspaces now keeps keyboard focus on the pane you left it on, instead of jumping to the last split pane (#24).
+
 ## v0.26.7 — 2026-06-15
 
 - Fixed: the elapsed time on the Claude Code / Pi tool-call pill (and its popover) now shows hours and days for long spans — e.g. `2d 2:00:00` instead of a giant raw minute count like `3000:00`.

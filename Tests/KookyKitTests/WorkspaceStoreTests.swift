@@ -792,6 +792,28 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertTrue(ws.hasCommandFailure)
     }
 
+    func testSwitchingWorkspacesPreservesActivePane() {
+        // Issue #24: switching away from a split workspace and back must keep
+        // the pane you left focused, not jump to the last one. The store is the
+        // foundation — `activateWorkspace` must never reset `activePaneId`; the
+        // view layer's per-pane `grabsFocusOnMount` gate then makes the on-screen
+        // keyboard focus follow it instead of racing to the last-mounted surface.
+        let store = makeStore()
+        let a = store.addWorkspace(workingDirectory: projectA)
+        let pane1 = firstPane(a)
+        store.splitPane(pane1, orientation: .horizontal, in: a)
+        // splitPane activates the new (second) pane; focus the first one instead.
+        store.focusPane(pane1, in: a)
+        XCTAssertEqual(a.activePaneId, pane1.id)
+
+        let b = store.addWorkspace(workingDirectory: projectB)  // activates B
+        XCTAssertEqual(store.activeWorkspaceId, b.id)
+        store.activateWorkspace(a)                              // switch back to A
+
+        XCTAssertEqual(store.activeWorkspaceId, a.id)
+        XCTAssertEqual(a.activePaneId, pane1.id, "active pane must survive a workspace round-trip")
+    }
+
     func testFailureSurfacesEvenWhenAttentionFiresFirstInDFS() {
         // Regression: `sidebarReadout`'s walk used to short-circuit on attention,
         // leaving `hasCommandFailure` false when a sibling pane held a non-zero

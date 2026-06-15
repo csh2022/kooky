@@ -48,7 +48,7 @@ private struct PaneView: View {
             TabBarView(pane: pane, workspace: workspace, store: store)
             Rectangle().fill(Theme.chromeHairline).frame(height: 1)
             if let active = pane.activeTab {
-                TerminalView(engine: active.engine)
+                TerminalView(engine: active.engine, grabsFocusOnMount: isFocused)
                     .id(active.id)
                     .padding(8)
                     .overlay(RightClickCatcher { unit in
