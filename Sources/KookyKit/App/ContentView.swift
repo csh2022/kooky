@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    private enum TopStripLayout {
+        static let normalLeadingClearance: CGFloat = 82
+        static let fullScreenLeadingClearance: CGFloat = 16
+        static let searchSideReserve: CGFloat = normalLeadingClearance + 28
+    }
+
     @Bindable var store: WorkspaceStore
     @State private var isWindowFullScreen = false
 
@@ -29,16 +35,28 @@ struct ContentView: View {
     }
 
     /// Top 32pt strip. `window.isMovable = false` is set globally, so the
-    /// `WindowDragHandle` background is the only place AppKit allows
-    /// window dragging. The `SearchTriggerPill` lives in an *inner* ZStack
-    /// scoped to the drag-handle area (not the whole strip) so it centers
-    /// in the available space and can't overlap the sidebar toggle when
-    /// the window is dragged narrow. `ViewThatFits` drops the pill
-    /// entirely once even the inner area can't hold its 280pt frame —
-    /// `⌘P` + the File menu still reach the palette.
+    /// full-strip `WindowDragHandle` background is the only place AppKit
+    /// allows window dragging. The search pill is centered against the whole
+    /// strip, not the space between controls; otherwise the full-screen
+    /// sidebar-toggle clearance would also tug the search pill left.
     private var topStrip: some View {
+        ZStack {
+            WindowDragHandle()
+            centeredSearchPill
+            HStack(spacing: 0) {
+                leadingControls
+                Spacer(minLength: 0)
+                trailingControls
+            }
+        }
+        .frame(height: 32)
+    }
+
+    private var leadingControls: some View {
         HStack(spacing: 0) {
-            Color.clear.frame(width: isWindowFullScreen ? Theme.space4 : 82).allowsHitTesting(false)
+            Color.clear
+                .frame(width: isWindowFullScreen ? TopStripLayout.fullScreenLeadingClearance : TopStripLayout.normalLeadingClearance)
+                .allowsHitTesting(false)
             HoverableIconButton(
                 systemName: "sidebar.left",
                 fontSize: 12,
@@ -49,17 +67,11 @@ struct ContentView: View {
                     store.setSidebarMode(store.sidebarMode.next)
                 }
             }
-            WindowDragHandle()
-                .overlay {
-                    if KookySettingsModel.shared.showSearchPill {
-                        ViewThatFits(in: .horizontal) {
-                            SearchTriggerPill {
-                                NSApp.sendAction(#selector(AppDelegate.handleQuickOpen), to: nil, from: nil)
-                            }
-                            EmptyView()
-                        }
-                    }
-                }
+        }
+    }
+
+    private var trailingControls: some View {
+        HStack(spacing: 0) {
             HoverableIconButton(
                 systemName: "square.grid.2x2",
                 fontSize: 12,
@@ -73,7 +85,19 @@ struct ContentView: View {
             InboxBell()
                 .padding(.trailing, 8)
         }
-        .frame(height: 32)
+    }
+
+    @ViewBuilder
+    private var centeredSearchPill: some View {
+        if KookySettingsModel.shared.showSearchPill {
+            ViewThatFits(in: .horizontal) {
+                SearchTriggerPill {
+                    NSApp.sendAction(#selector(AppDelegate.handleQuickOpen), to: nil, from: nil)
+                }
+                .padding(.horizontal, TopStripLayout.searchSideReserve)
+                EmptyView()
+            }
+        }
     }
 
     @ViewBuilder
