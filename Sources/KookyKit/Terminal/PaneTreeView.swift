@@ -49,6 +49,12 @@ private struct PaneView: View {
             Rectangle().fill(Theme.chromeHairline).frame(height: 1)
             if let active = pane.activeTab {
                 TerminalView(engine: active.engine, grabsFocusOnMount: isFocused)
+                    // Pin identity to the session so a `.split` → `.pane`
+                    // collapse (closing the sibling pane) doesn't shift this
+                    // view's structural position and force a remount. Without
+                    // it, SwiftUI tears down + rebuilds the NSViewRepresentable,
+                    // and the moved libghostty surface comes back blank.
+                    .id(active.id)
                     .padding(8)
                     .overlay(RightClickCatcher { unit in
                         // Promote this pane to the workspace's active one —
