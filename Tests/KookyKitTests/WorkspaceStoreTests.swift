@@ -1091,6 +1091,157 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(ws.workingDirectory.path, "/tmp/projectA/sub")
     }
 
+    func testSplitPaneByMovingExistingTabCreatesNewPaneWithoutSpawningEngine() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        _ = store.addTab(in: ws, pane: pane)
+        let moved = pane.tabs[1]
+        let movedEngine = engine(moved)
+
+        let newPane = store.splitPane(
+            pane,
+            byMovingSessionId: moved.id,
+            orientation: .horizontal,
+            placement: .second,
+            in: ws
+        )
+
+        XCTAssertNotNil(newPane)
+        XCTAssertEqual(ws.root.allPanes.count, 2)
+        XCTAssertTrue(newPane?.tabs.first === moved)
+        XCTAssertFalse(pane.tabs.contains { $0 === moved })
+        XCTAssertEqual(movedEngine.terminateCount, 0)
+        XCTAssertEqual(movedEngine.startedConfigs.count, 1)
+        XCTAssertEqual(ws.activePaneId, newPane?.id)
+    }
+
+    func testSplitPaneByMovingTabLeftPlacesNewPaneFirst() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        _ = store.addTab(in: ws, pane: pane)
+        let moved = pane.tabs[1]
+
+        let newPane = store.splitPane(
+            pane,
+            byMovingSessionId: moved.id,
+            orientation: .horizontal,
+            placement: .first,
+            in: ws
+        )
+
+        guard case .split(.horizontal, let first, let second, _) = ws.root.content else {
+            return XCTFail("expected horizontal split")
+        }
+        XCTAssertEqual(first.firstPane?.id, newPane?.id)
+        XCTAssertEqual(first.firstPane?.tabs.first?.id, moved.id)
+        XCTAssertEqual(second.firstPane?.id, pane.id)
+    }
+
+    func testSplitPaneByMovingSoleTabWithinSamePaneIsNoOp() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let session = pane.tabs[0]
+
+        let newPane = store.splitPane(
+            pane,
+            byMovingSessionId: session.id,
+            orientation: .vertical,
+            placement: .second,
+            in: ws
+        )
+
+        XCTAssertNil(newPane)
+        XCTAssertEqual(ws.root.allPanes.count, 1)
+        XCTAssertTrue(pane.tabs.first === session)
+        XCTAssertEqual(engine(session).terminateCount, 0)
+    }
+
+    func testSplitPaneByMovingSoleTabFromOtherPaneCollapsesSourceAndPreservesEngine() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let source = firstPane(ws)
+        let moved = source.tabs[0]
+        let movedEngine = engine(moved)
+        let target = store.splitPane(source, orientation: .horizontal, in: ws)!
+        let targetSession = target.tabs[0]
+
+        let newPane = store.splitPane(
+            target,
+            byMovingSessionId: moved.id,
+            orientation: .vertical,
+            placement: .second,
+            in: ws
+        )
+
+        XCTAssertNotNil(newPane)
+        XCTAssertEqual(ws.root.allPanes.count, 2)
+        XCTAssertTrue(target.tabs.contains { $0 === targetSession })
+        XCTAssertTrue(newPane?.tabs.first === moved)
+        XCTAssertEqual(movedEngine.terminateCount, 0)
+        XCTAssertEqual(ws.activePaneId, newPane?.id)
+    }
+
+    func testSplitPaneByMovingTabClearsZoom() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        _ = store.addTab(in: ws, pane: pane)
+        let moved = pane.tabs[1]
+        XCTAssertNotNil(store.splitPane(pane, orientation: .horizontal, in: ws))
+        store.toggleZoom(in: ws, paneId: pane.id)
+        XCTAssertEqual(ws.zoomedPaneId, pane.id)
+
+        let newPane = store.splitPane(
+            pane,
+            byMovingSessionId: moved.id,
+            orientation: .vertical,
+            placement: .second,
+            in: ws
+        )
+
+        XCTAssertNotNil(newPane)
+        XCTAssertNil(ws.zoomedPaneId)
+        XCTAssertEqual(ws.activePaneId, newPane?.id)
+    }
+
+    func testSplitPaneStopsAtMaximumDepth() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        var pane = firstPane(ws)
+
+        for _ in 0..<maxPaneSplitDepth {
+            pane = store.splitPane(pane, orientation: .horizontal, in: ws)!
+        }
+
+        XCTAssertEqual(ws.root.depth(ofPane: pane.id), maxPaneSplitDepth)
+        XCTAssertFalse(store.canSplitPane(pane, in: ws))
+        XCTAssertNil(store.splitPane(pane, orientation: .vertical, in: ws))
+    }
+
+    func testSplitPaneByMovingTabStopsAtMaximumDepth() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        var pane = firstPane(ws)
+
+        for _ in 0..<maxPaneSplitDepth {
+            pane = store.splitPane(pane, orientation: .horizontal, in: ws)!
+        }
+        _ = store.addTab(in: ws, pane: pane)
+        let moved = pane.tabs[1]
+
+        XCTAssertNil(store.splitPane(
+            pane,
+            byMovingSessionId: moved.id,
+            orientation: .vertical,
+            placement: .second,
+            in: ws
+        ))
+        XCTAssertTrue(pane.tabs.contains { $0 === moved })
+    }
+
     // MARK: Persistence
 
     func testRestoreSinglePaneWorkspace() {

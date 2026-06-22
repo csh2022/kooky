@@ -91,6 +91,16 @@ extension PaneNode {
         }
     }
 
+    func depth(ofPane paneId: UUID, currentDepth: Int = 0) -> Int? {
+        switch content {
+        case .pane(let p):
+            return p.id == paneId ? currentDepth : nil
+        case .split(_, let a, let b, _):
+            return a.depth(ofPane: paneId, currentDepth: currentDepth + 1)
+                ?? b.depth(ofPane: paneId, currentDepth: currentDepth + 1)
+        }
+    }
+
     /// Pane that contains the given session, or nil.
     func pane(containingSessionId sessionId: UUID) -> Pane? {
         switch content {
