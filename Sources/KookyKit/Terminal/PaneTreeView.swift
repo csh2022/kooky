@@ -109,6 +109,7 @@ private struct PaneView: View {
                 Color.clear
             }
         }
+        .background(PaneActivationObserver(pane: pane, workspace: workspace, store: store))
         .opacity(paneOpacity)
         .animation(Theme.chromeTransition, value: isFocused)
         .onChange(of: pane.activeTab.map { paneStatusBarHasData(session: $0) } ?? false) { _, _ in
@@ -137,6 +138,69 @@ private struct PaneView: View {
                     engine.suspendsSizePropagation = false
                     engine.flushSize()
                 }
+            }
+        }
+    }
+}
+
+private struct PaneActivationObserver: NSViewRepresentable {
+    let pane: Pane
+    let workspace: Workspace
+    let store: WorkspaceStore
+
+    func makeNSView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.onActivate = activatePane
+        return view
+    }
+
+    func updateNSView(_ nsView: ObserverView, context: Context) {
+        nsView.onActivate = activatePane
+    }
+
+    static func dismantleNSView(_ nsView: ObserverView, coordinator: ()) {
+        nsView.removeMonitor()
+    }
+
+    private func activatePane() {
+        guard let active = pane.activeTab else { return }
+        store.activateTab(active, in: workspace)
+        let view = active.engine.view
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+    }
+
+    final class ObserverView: NSView {
+        var onActivate: (() -> Void)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil {
+                removeMonitor()
+            } else if monitor == nil {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+                    guard let self else { return event }
+                    self.activateIfEventIsInside(event)
+                    return event
+                }
+            }
+        }
+
+        func removeMonitor() {
+            guard let monitor else { return }
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+
+        private func activateIfEventIsInside(_ event: NSEvent) {
+            guard event.window === window else { return }
+            let target = window?.contentView.flatMap { contentView -> NSView? in
+                contentView.hitTest(contentView.convert(event.locationInWindow, from: nil))
+            }
+            guard !(target is NSTextField), !(target is NSTextView) else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            if bounds.contains(point) {
+                onActivate?()
             }
         }
     }
