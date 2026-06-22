@@ -153,10 +153,20 @@ final class ScrollIndicator: NSView {
     /// on the knob's pill (with a small horizontal grab margin). Everything
     /// else passes through so the terminal can handle selection / text input.
     override func hitTest(_ point: NSPoint) -> NSView? {
+        guard Self.shouldCaptureHit(for: NSApp.currentEvent?.type) else { return nil }
         guard alphaValue > 0.1 else { return nil }
         let local = convert(point, from: superview)
         let knobGrabRect = knobLayer.frame.insetBy(dx: -6, dy: 0)
         return knobGrabRect.contains(local) ? self : nil
+    }
+
+    nonisolated static func shouldCaptureHit(for eventType: NSEvent.EventType?) -> Bool {
+        switch eventType {
+        case .leftMouseDown, .leftMouseDragged, .leftMouseUp:
+            return true
+        default:
+            return false
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
