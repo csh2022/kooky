@@ -203,10 +203,14 @@ struct PersistedTab: Codable, Equatable {
     var agentId: String
     var currentDirectoryPath: String
     var customTitle: String?
-    /// Optional — only Claude reports it today. Decoded with
-    /// `decodeIfPresent` so state.json files written by pre-resume kooky
-    /// versions still load.
+    /// Optional conversation/session id reported by resumable agents such as
+    /// Claude and Pi. Decoded with `decodeIfPresent` so state.json files
+    /// written by pre-resume kooky versions still load.
     var conversationId: String?
+    /// Optional id of the agent template that should receive
+    /// `conversationId` on restore. Kept separate from `agentId` because the
+    /// live tab may legitimately persist as Terminal after the agent exits.
+    var resumeAgentId: String?
 
     @MainActor
     init(_ session: Session) {
@@ -215,14 +219,28 @@ struct PersistedTab: Codable, Equatable {
         self.currentDirectoryPath = session.currentDirectory.path
         self.customTitle = session.customTitle
         self.conversationId = session.conversationId
+        if session.conversationId != nil {
+            self.resumeAgentId = session.resumeAgent?.id
+                ?? (session.agent.supportsResume ? session.agent.id : nil)
+        } else {
+            self.resumeAgentId = nil
+        }
     }
 
-    init(id: UUID, agentId: String, currentDirectoryPath: String, customTitle: String? = nil, conversationId: String? = nil) {
+    init(
+        id: UUID,
+        agentId: String,
+        currentDirectoryPath: String,
+        customTitle: String? = nil,
+        conversationId: String? = nil,
+        resumeAgentId: String? = nil
+    ) {
         self.id = id
         self.agentId = agentId
         self.currentDirectoryPath = currentDirectoryPath
         self.customTitle = customTitle
         self.conversationId = conversationId
+        self.resumeAgentId = resumeAgentId
     }
 }
 

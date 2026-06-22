@@ -74,15 +74,18 @@ final class Session: Identifiable {
     /// filter in `onTitleChange` maps back to `nil` — so a leftover `ssh` /
     /// TUI title can't outlive the program once control returns to the prompt.
     var terminalTitle: String?
-    /// Last conversation id this tab's agent reported (currently only Claude
-    /// — its SessionStart / Stop / SessionEnd hook JSON input carries
-    /// `session_id`). Persisted via `PersistedTab.conversationId` so that the
-    /// next kooky launch can spawn the agent with `--resume <id>` and
-    /// continue the conversation where the user left off. Per-Session field
-    /// (not per-Pane / per-Workspace) because each tab is its own
-    /// conversation — `KOOKY_SURFACE_ID` already routes hook payloads to
-    /// the correct Session, so multi-tab Claude users don't cross-attribute.
+    /// Last conversation/session id this tab's agent reported. Persisted via
+    /// `PersistedTab.conversationId` so that the next kooky launch can spawn
+    /// the agent with its resume flag and continue where the user left off.
+    /// Per-Session field (not per-Pane / per-Workspace) because each tab is
+    /// its own conversation — `KOOKY_SURFACE_ID` already routes hook payloads
+    /// to the correct Session, so multi-tab agent users don't cross-attribute.
     var conversationId: String?
+    /// Agent template that owns `conversationId`. Runtime `agent` can revert
+    /// to Terminal after an agent exits so the tab reflects the live shell,
+    /// but restart recovery still needs to know which resumable agent should
+    /// receive `conversationId`.
+    var resumeAgent: AgentTemplate?
     /// Exit status of the most recent command — populated from libghostty's
     /// `OSC 133;D` event. `nil` until the shell reports its first finish (or
     /// when it omits the exit field). Not persisted: each launch starts fresh.
@@ -293,7 +296,8 @@ final class Session: Identifiable {
         currentDirectory: URL,
         agent: AgentTemplate,
         customTitle: String? = nil,
-        conversationId: String? = nil
+        conversationId: String? = nil,
+        resumeAgent: AgentTemplate? = nil
     ) {
         self.id = id
         self.engine = engine
@@ -301,5 +305,6 @@ final class Session: Identifiable {
         self.agent = agent
         self.customTitle = customTitle
         self.conversationId = conversationId
+        self.resumeAgent = resumeAgent
     }
 }

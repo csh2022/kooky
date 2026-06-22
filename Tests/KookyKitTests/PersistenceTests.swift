@@ -51,6 +51,33 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(AppPersistence(fileURL: url).windowIds.isEmpty)
     }
 
+    func testPersistedTabDecodesNilWhenResumeAgentIdMissing() throws {
+        let json = """
+        {
+          "id": "\(UUID().uuidString)",
+          "agentId": "terminal",
+          "currentDirectoryPath": "/tmp",
+          "conversationId": "convo-legacy"
+        }
+        """
+        let decoded = try JSONDecoder().decode(PersistedTab.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.conversationId, "convo-legacy")
+        XCTAssertNil(decoded.resumeAgentId)
+    }
+
+    func testPersistedTabRoundtripsResumeAgentId() throws {
+        let tab = PersistedTab(
+            id: UUID(),
+            agentId: "terminal",
+            currentDirectoryPath: "/tmp",
+            conversationId: "convo",
+            resumeAgentId: AgentTemplate.claudeCodeID
+        )
+        let data = try JSONEncoder().encode(tab)
+        let decoded = try JSONDecoder().decode(PersistedTab.self, from: data)
+        XCTAssertEqual(decoded.resumeAgentId, AgentTemplate.claudeCodeID)
+    }
+
     // MARK: - Window slots
 
     func testSetWindowUpsertsAndAppendsNewIdsLast() {

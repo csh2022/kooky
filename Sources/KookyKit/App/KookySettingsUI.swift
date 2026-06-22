@@ -76,11 +76,10 @@ final class KookySettingsModel {
     /// base id, so a Claude-based custom honours the `claude-code` entry.
     /// Persisted under `statusbar.toolCallHidden`.
     var hiddenToolCallAgents: Set<String> = []
-    /// When true, kooky launches Claude tabs with `--resume <id>` using the
-    /// conversation id persisted on each tab (captured via Claude's hook
-    /// payload). When false, every Claude tab starts fresh — but the
-    /// persisted conversation id stays on disk so turning the toggle back
-    /// on resumes from where the user left off.
+    /// When true, kooky launches resumable agent tabs (Claude, Pi, and
+    /// compatible custom agents) with their persisted conversation/session
+    /// id. When false, those tabs start fresh — but the persisted id stays on
+    /// disk so turning the toggle back on resumes from where the user left off.
     var resumeConversations: Bool = true
     /// Opt-in SSH integration for remote agent status. Disabled by default:
     /// when enabled, kooky installs an `ssh` wrapper that injects temporary

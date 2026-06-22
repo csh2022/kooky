@@ -166,8 +166,8 @@ final class WorkspaceStore {
         let customTitle: String?
         let workspaceId: UUID
         let paneId: UUID
-        /// Captured conversation id so `⌘⇧T` resumes the Claude session
-        /// the user just closed (subject to `resumeConversations` setting).
+        /// Captured conversation/session id so `⌘⇧T` resumes the agent
+        /// session the user just closed (subject to `resumeConversations`).
         let conversationId: String?
     }
 
@@ -1260,6 +1260,7 @@ final class WorkspaceStore {
     func applyHookEvent(agent: AgentTemplate, event: HookEvent, sessionId: UUID) {
         guard let session = findSession(id: sessionId) else { return }
         let agentBefore = session.agent.id
+        let resumeAgentBefore = session.resumeAgent?.id
         if event == .ended {
             // A custom agent based on this builtin shares its binary's
             // wrapper shim — the `ended` ping arrives with the builtin's
@@ -1268,6 +1269,9 @@ final class WorkspaceStore {
             // `AgentTemplate.baseAgentId`) so a mid-run Settings edit
             // can't leave the tab pill stuck.
             if session.agent.id == agent.id || session.agent.baseAgentId == agent.id {
+                if session.agent.supportsResume {
+                    session.resumeAgent = session.agent
+                }
                 // Report completion to the inbox *before* reverting to
                 // Terminal, so the event still knows which agent finished
                 // (handleSessionAlert reads displayAgent synchronously).
@@ -1279,6 +1283,9 @@ final class WorkspaceStore {
             // user starting Claude inside a preset terminal should get
             // the same icon-upgrade the default Terminal does.
             session.agent = agent
+            if session.agent.supportsResume {
+                session.resumeAgent = session.agent
+            }
         }
         // SessionStart → UserPromptSubmit on Claude (and BeforeAgent on Gemini)
         // re-fires `.running` per turn; the @Observable setter notifies every
@@ -1287,7 +1294,9 @@ final class WorkspaceStore {
             session.activityState = event.activityState
             if event.activityState == .attention { onSessionAlert(session.id, .attention) }
         }
-        if session.agent.id != agentBefore { scheduleSave() }
+        if session.agent.id != agentBefore || session.resumeAgent?.id != resumeAgentBefore {
+            scheduleSave()
+        }
     }
 
     func applyShellEnvironment(_ env: [String: String], sessionId: UUID) {
@@ -1304,9 +1313,16 @@ final class WorkspaceStore {
     /// dedup keeps the debounce loop quiet.
     func applyConversationId(conversationId: String, sessionId: UUID) {
         guard let session = findSession(id: sessionId) else { return }
-        guard session.conversationId != conversationId else { return }
+        let previousConversationId = session.conversationId
+        let previousResumeAgentId = session.resumeAgent?.id
         session.conversationId = conversationId
-        scheduleSave()
+        if session.agent.supportsResume {
+            session.resumeAgent = session.agent
+        }
+        if session.conversationId != previousConversationId
+            || session.resumeAgent?.id != previousResumeAgentId {
+            scheduleSave()
+        }
     }
 
     /// Routes a Claude tool-call event (PreToolUse / PostToolUse) to the
@@ -1430,9 +1446,23 @@ final class WorkspaceStore {
         case .pane(let p):
             let pane = Pane(id: p.id)
             for tab in p.tabs {
-                let agent = AgentTemplate.all.first { $0.id == tab.agentId } ?? .terminal
+                let persistedAgent = AgentTemplate.all.first { $0.id == tab.agentId } ?? .terminal
+                let resumeAgent = tab.resumeAgentId.flatMap { resumeAgentId in
+                    AgentTemplate.all.first { $0.id == resumeAgentId }
+                }
+                // Backward-compat for state.json files written before
+                // `resumeAgentId`: older Claude-only resume state can be
+                // `terminal + conversationId` after the agent ended.
+                let legacyResumeAgent = tab.conversationId != nil
+                    && tab.resumeAgentId == nil
+                    && persistedAgent.isShell
+                    ? AgentTemplate.claudeCode
+                    : nil
+                let launchAgent = tab.conversationId != nil
+                    ? (resumeAgent ?? legacyResumeAgent ?? persistedAgent)
+                    : persistedAgent
                 let session = spawnSession(
-                    template: agent,
+                    template: launchAgent,
                     initialCwd: resolvedSpawnCwd(tab.currentDirectoryPath),
                     sessionId: tab.id,
                     conversationId: tab.conversationId
@@ -1465,7 +1495,7 @@ final class WorkspaceStore {
     private func spawnSession(template: AgentTemplate, initialCwd: URL, sessionId: UUID = UUID(), conversationId: String? = nil, initialPrompt: String? = nil) -> Session {
         let engine = engineFactory()
         // Resume gated by user setting — `resumeConversations` flips this off
-        // when the user wants every Claude tab to start fresh without
+        // when the user wants resumable agent tabs to start fresh without
         // losing the persisted conversation id (it stays on disk so the
         // setting can be flipped back on later). Non-resumable templates
         // ignore the value via `makeSessionConfig`'s own `supportsResume`
@@ -1492,7 +1522,8 @@ final class WorkspaceStore {
             engine: engine,
             currentDirectory: initialCwd,
             agent: template,
-            conversationId: conversationId
+            conversationId: conversationId,
+            resumeAgent: template.supportsResume ? template : nil
         )
     }
 
