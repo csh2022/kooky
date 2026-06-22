@@ -173,19 +173,32 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude --resume abc-123 --model opus")
     }
 
+    func testMakeSessionConfigInjectsResumeSubcommandForCodex() {
+        let config = AgentTemplate.codex.makeSessionConfig(resumeId: "019eef55-2456-78f2-9368-7f321e6126bd")
+        XCTAssertEqual(
+            config.environment["KOOKY_AGENT"],
+            "codex resume 019eef55-2456-78f2-9368-7f321e6126bd"
+        )
+    }
+
+    func testMakeSessionConfigCombinesCodexResumeAndExtras() {
+        let config = AgentTemplate.codex.makeSessionConfig(extraOptions: "--model gpt-5", resumeId: "019eef55-2456-78f2-9368-7f321e6126bd")
+        XCTAssertEqual(
+            config.environment["KOOKY_AGENT"],
+            "codex resume 019eef55-2456-78f2-9368-7f321e6126bd --model gpt-5"
+        )
+    }
+
     func testMakeSessionConfigSkipsResumeWhenIdEmpty() {
         let config = AgentTemplate.claudeCode.makeSessionConfig(resumeId: "")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude")
     }
 
     func testMakeSessionConfigIgnoresResumeOnUnsupportedBuiltins() {
-        // Codex / Cursor / Gemini / OpenCode / Copilot / Amp / Grok /
-        // Antigravity all support a resume flag syntactically but kooky
-        // doesn't have a reliable id-capture path for them yet, so we
-        // don't inject the flag — see AgentTemplate.supportsResume /
-        // resumeFlag.
-        let codexConfig = AgentTemplate.codex.makeSessionConfig(resumeId: "abc-123")
-        XCTAssertEqual(codexConfig.environment["KOOKY_AGENT"], "codex")
+        // Cursor / Gemini / OpenCode / Copilot / Amp / Grok / Antigravity /
+        // Kimi / Kiro either have no stable resume syntax or no reliable
+        // id-capture path in kooky yet, so we don't inject a resume argument
+        // for them — see AgentTemplate.supportsResume.
         let copilotConfig = AgentTemplate.copilot.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(copilotConfig.environment["KOOKY_AGENT"], "copilot")
         let grokConfig = AgentTemplate.grok.makeSessionConfig(resumeId: "abc-123")
@@ -198,9 +211,9 @@ final class AgentTemplateTests: XCTestCase {
         XCTAssertEqual(kiroConfig.environment["KOOKY_AGENT"], "kiro-cli")
     }
 
-    func testSupportsResumeMatchesResumeFlag() {
+    func testSupportsResumeMatchesResumeConfiguration() {
         XCTAssertTrue(AgentTemplate.claudeCode.supportsResume)
-        XCTAssertFalse(AgentTemplate.codex.supportsResume)
+        XCTAssertTrue(AgentTemplate.codex.supportsResume)
         XCTAssertFalse(AgentTemplate.copilot.supportsResume)
         XCTAssertFalse(AgentTemplate.grok.supportsResume)
         XCTAssertFalse(AgentTemplate.antigravity.supportsResume)
@@ -214,6 +227,30 @@ final class AgentTemplateTests: XCTestCase {
         let template = AgentTemplate.fromCustom(custom)
         let config = template.makeSessionConfig(resumeId: "xyz")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "claude --resume xyz")
+    }
+
+    func testMakeSessionConfigInjectsResumeForCodexBasedCustom() {
+        let custom = CustomAgentData(id: "codex-pro", baseAgentId: "codex")
+        let template = AgentTemplate.fromCustom(custom)
+        let config = template.makeSessionConfig(resumeId: "019eef55-2456-78f2-9368-7f321e6126bd")
+        XCTAssertEqual(
+            config.environment["KOOKY_AGENT"],
+            "codex resume 019eef55-2456-78f2-9368-7f321e6126bd"
+        )
+    }
+
+    func testMakeSessionConfigInjectsResumeForCodexBasedCustomCommand() {
+        let custom = CustomAgentData(
+            id: "codex-work",
+            command: "codex --profile work",
+            baseAgentId: "codex"
+        )
+        let template = AgentTemplate.fromCustom(custom)
+        let config = template.makeSessionConfig(resumeId: "019eef55-2456-78f2-9368-7f321e6126bd")
+        XCTAssertEqual(
+            config.environment["KOOKY_AGENT"],
+            "codex --profile work resume 019eef55-2456-78f2-9368-7f321e6126bd"
+        )
     }
 
     func testMakeSessionConfigInjectsResumeForPi() {

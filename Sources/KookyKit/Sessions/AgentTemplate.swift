@@ -37,10 +37,14 @@ struct AgentTemplate: Identifiable, Hashable {
     /// `initialCommand == nil` (Terminal) ignore this entirely.
     let promptLaunchFlag: String?
     /// CLI flag the agent's binary expects to resume a prior conversation.
-    /// Nil = no resume support (kooky doesn't have an id-capture path for
-    /// this agent yet). Claude Code = `--resume`; Grok = `--session`. Drives
-    /// `makeSessionConfig(resumeId:)` and `supportsResume`.
+    /// Nil = no resume support through a top-level flag. Claude Code =
+    /// `--resume`; Pi = `--session`. Drives `makeSessionConfig(resumeId:)`
+    /// and `supportsResume`.
     let resumeFlag: String?
+    /// Full command prefix for CLIs that resume through a subcommand instead
+    /// of a top-level flag. Codex = `codex resume`, yielding
+    /// `codex resume <id>`. Mutually exclusive with `resumeFlag` on builtins.
+    let resumeCommandPrefix: String?
     /// True when the agent feeds kooky per-tool-call activity — Claude via
     /// its `--settings` hooks (`PreToolUse` / `PostToolUse`), Pi via its
     /// extension's `tool_execution_start` / `_end` events. Drives the
@@ -81,6 +85,7 @@ struct AgentTemplate: Identifiable, Hashable {
         baseAgentId: String? = nil,
         promptLaunchFlag: String? = nil,
         resumeFlag: String? = nil,
+        resumeCommandPrefix: String? = nil,
         reportsToolCalls: Bool = false,
         extraEnv: [String: String] = [:],
         extraCwd: String? = nil
@@ -94,6 +99,7 @@ struct AgentTemplate: Identifiable, Hashable {
         self.baseAgentId = baseAgentId
         self.promptLaunchFlag = promptLaunchFlag
         self.resumeFlag = resumeFlag
+        self.resumeCommandPrefix = resumeCommandPrefix
         self.reportsToolCalls = reportsToolCalls
         self.extraEnv = extraEnv
         self.extraCwd = extraCwd
@@ -108,12 +114,11 @@ struct AgentTemplate: Identifiable, Hashable {
     /// whitespace, so the caller handles its own quoting for tokens that
     /// contain spaces.
     ///
-    /// `resumeId`, when present and the template declares a `resumeFlag`,
-    /// prepends `<resumeFlag> <id>` to the launch command so the new tab
-    /// continues an existing conversation. Other agents leave `resumeFlag`
-    /// nil — their CLIs accept resume flags syntactically, but the
-    /// id-capture path (a hook payload carrying the session id) is not
-    /// implemented for them yet.
+    /// `resumeId`, when present and the template declares a resume shape,
+    /// prepends the right continuation syntax to the launch command so the
+    /// new tab continues an existing conversation. Most agents use
+    /// `<initialCommand> <resumeFlag> <id>` (Claude / Pi); Codex uses the
+    /// subcommand-shaped `<resumeCommandPrefix> <id>`.
     ///
     /// `initialPrompt`, when non-empty, drives the right-click "Ask <agent>"
     /// path: the prompt is POSIX-quoted and inserted into `KOOKY_AGENT` as
@@ -146,15 +151,20 @@ struct AgentTemplate: Identifiable, Hashable {
         if let initialCommand {
             let trimmedExtras = extraOptions?.trimmingCharacters(in: .whitespaces) ?? ""
             let trimmedPrompt = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            // Resume flag goes between binary name and options
-            // (`claude --resume <id> --model opus`) — each CLI takes it as
-            // a positional argument to its top-level command; appending
-            // after extras would still work but reads worse in `ps`.
+            // Resume goes between binary name and options
+            // (`claude --resume <id> --model opus`, or
+            // `codex resume <id> --model gpt-5`) — appending after extras
+            // would still work for some CLIs but reads worse in `ps`.
             // Suppressed when `initialPrompt` is present — "Ask <agent>"
             // is a fresh question, not a continuation.
+            var launchCommand = initialCommand
             var resumeFragment = ""
-            if trimmedPrompt.isEmpty, let flag = resumeFlag, let id = resumeId, !id.isEmpty {
-                resumeFragment = " \(flag) \(id)"
+            if trimmedPrompt.isEmpty, let id = resumeId, !id.isEmpty {
+                if let commandPrefix = resumeCommandPrefix {
+                    launchCommand = "\(commandPrefix) \(id)"
+                } else if let flag = resumeFlag {
+                    resumeFragment = " \(flag) \(id)"
+                }
             }
             var promptFragment = ""
             if !trimmedPrompt.isEmpty {
@@ -171,13 +181,13 @@ struct AgentTemplate: Identifiable, Hashable {
                 }
             }
             let extrasFragment = trimmedExtras.isEmpty ? "" : " \(trimmedExtras)"
-            config.environment["KOOKY_AGENT"] = "\(initialCommand)\(resumeFragment)\(promptFragment)\(extrasFragment)"
+            config.environment["KOOKY_AGENT"] = "\(launchCommand)\(resumeFragment)\(promptFragment)\(extrasFragment)"
         }
         return config
     }
 
     var supportsResume: Bool {
-        resumeFlag != nil
+        resumeFlag != nil || resumeCommandPrefix != nil
     }
 
     /// Parses a `.env`-style block — one `KEY=VALUE` per line — into a
@@ -252,7 +262,8 @@ extension AgentTemplate {
         symbol: "chevron.left.forwardslash.chevron.right",
         iconAsset: "codex",
         tintHex: "7A9DFF",
-        initialCommand: "codex"
+        initialCommand: "codex",
+        resumeCommandPrefix: "codex resume"
     )
 
     static let gemini = AgentTemplate(
@@ -516,11 +527,13 @@ extension AgentTemplate {
     /// skips half-configured customs.
     static func fromCustom(_ data: CustomAgentData) -> AgentTemplate {
         let base = builtin.first { $0.id == data.baseAgentId }
-        // `promptLaunchFlag` + `resumeFlag` + `reportsToolCalls` follow the
+        let initialCommand = data.command.isEmpty ? base?.initialCommand : data.command
+        // `promptLaunchFlag` + resume shape + `reportsToolCalls` follow the
         // base unconditionally — they're properties of the binary (Copilot
-        // needs `-p`, Amp needs `-x`; Claude needs `--resume`, Grok needs
-        // `--session`; Claude / Pi feed tool-call activity), not something the
-        // user could meaningfully override per custom. Without inheritance, a
+        // needs `-p`, Amp needs `-x`; Claude needs `--resume`, Codex needs
+        // `codex resume`, Pi needs `--session`; Claude / Pi feed tool-call
+        // activity), not something the user could meaningfully override per
+        // custom. Without inheritance, a
         // "Copilot Beta" custom built on Copilot would lose the flag and
         // right-click Ask would feed the prompt as a positional argv that
         // Copilot ignores; a "Claude Opus" custom would lose conversation
@@ -531,13 +544,24 @@ extension AgentTemplate {
             symbol: data.symbol.isEmpty ? (base?.symbol ?? "wand.and.stars") : data.symbol,
             iconAsset: data.iconAsset.isEmpty ? base?.iconAsset : data.iconAsset,
             tintHex: data.tintHex.isEmpty ? base?.tintHex : data.tintHex,
-            initialCommand: data.command.isEmpty ? base?.initialCommand : data.command,
+            initialCommand: initialCommand,
             baseAgentId: data.baseAgentId.isEmpty ? nil : data.baseAgentId,
             promptLaunchFlag: base?.promptLaunchFlag,
             resumeFlag: base?.resumeFlag,
+            resumeCommandPrefix: inheritedResumeCommandPrefix(base: base, customCommand: data.command),
             reportsToolCalls: base?.reportsToolCalls ?? false,
             extraEnv: parseEnv(data.env)
         )
+    }
+
+    private static func inheritedResumeCommandPrefix(base: AgentTemplate?, customCommand: String) -> String? {
+        guard let prefix = base?.resumeCommandPrefix else { return nil }
+        guard !customCommand.isEmpty, let baseCommand = base?.initialCommand else { return prefix }
+        guard prefix.hasPrefix(baseCommand) else { return prefix }
+        let remainder = prefix.dropFirst(baseCommand.count)
+        guard remainder.isEmpty || remainder.first?.isWhitespace == true else { return prefix }
+        let suffix = remainder.trimmingCharacters(in: .whitespaces)
+        return suffix.isEmpty ? customCommand : "\(customCommand) \(suffix)"
     }
 
     /// Materialises a `TerminalPreset` into a synthetic Terminal-flavored

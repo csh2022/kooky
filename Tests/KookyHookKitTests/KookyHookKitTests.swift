@@ -2,6 +2,8 @@ import XCTest
 @testable import KookyHookKit
 
 final class KookyHookKitTests: XCTestCase {
+    private let codexSessionId = "019eef55-2456-78f2-9368-7f321e6126bd"
+
     // MARK: env payload
 
     func testBuildEnvPayloadFullArgs() {
@@ -101,6 +103,56 @@ final class KookyHookKitTests: XCTestCase {
         // Top-level array is valid JSON but not the expected object shape.
         let data = Data(#"["session_id","sess_abc"]"#.utf8)
         XCTAssertNil(KookyHookKit.parseClaudeConversationId(from: data))
+    }
+
+    // MARK: Codex conversationId parsing
+
+    func testParseCodexConversationIdFromSessionId() {
+        let json = #"{"session_id":"\#(codexSessionId)","hook_event_name":"Notification"}"#
+        XCTAssertEqual(KookyHookKit.parseCodexConversationId(from: Data(json.utf8)), codexSessionId)
+    }
+
+    func testParseCodexConversationIdFromCamelCaseSessionId() {
+        let json = #"{"sessionId":"\#(codexSessionId)"}"#
+        XCTAssertEqual(KookyHookKit.parseCodexConversationId(from: Data(json.utf8)), codexSessionId)
+    }
+
+    func testParseCodexConversationIdFromConversationId() {
+        let json = #"{"conversationId":"\#(codexSessionId)"}"#
+        XCTAssertEqual(KookyHookKit.parseCodexConversationId(from: Data(json.utf8)), codexSessionId)
+    }
+
+    func testParseCodexConversationIdFromNestedPayloadId() {
+        // Codex session transcript metadata uses payload.id; accept that
+        // shape if notify mirrors it, but still require UUID syntax.
+        let json = #"{"type":"session_meta","payload":{"id":"\#(codexSessionId)"}}"#
+        XCTAssertEqual(KookyHookKit.parseCodexConversationId(from: Data(json.utf8)), codexSessionId)
+    }
+
+    func testParseCodexConversationIdRejectsNonUUIDStrings() {
+        let json = #"{"session_id":"not-a-codex-session"}"#
+        XCTAssertNil(KookyHookKit.parseCodexConversationId(from: Data(json.utf8)))
+    }
+
+    func testParseCodexConversationIdRejectsBareTopLevelId() {
+        // A top-level id in a notification payload could name the event, not
+        // the resumable session. Only explicit session/conversation keys or
+        // payload.id are accepted.
+        let json = #"{"id":"\#(codexSessionId)"}"#
+        XCTAssertNil(KookyHookKit.parseCodexConversationId(from: Data(json.utf8)))
+    }
+
+    func testParseCodexConversationIdRejectsMalformedJSON() {
+        XCTAssertNil(KookyHookKit.parseCodexConversationId(from: Data("not valid json {{{".utf8)))
+    }
+
+    func testParseCodexConversationIdRejectsEmptyData() {
+        XCTAssertNil(KookyHookKit.parseCodexConversationId(from: Data()))
+    }
+
+    func testParseCodexConversationIdRejectsTopLevelArray() {
+        let data = Data(#"[{"session_id":"\#(codexSessionId)"}]"#.utf8)
+        XCTAssertNil(KookyHookKit.parseCodexConversationId(from: data))
     }
 
     // MARK: conversationId payload
