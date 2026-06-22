@@ -213,8 +213,6 @@ private struct PaneSplitDropOverlay: View {
 
     @State private var targetedEdge: PaneSplitDropEdge?
 
-    @State private var centerTargeted = false
-
     var body: some View {
         GeometryReader { proxy in
             let horizontalIntentWidth = proxy.size.width * 0.34
@@ -235,11 +233,6 @@ private struct PaneSplitDropOverlay: View {
                             height: targetedEdge.dividerSize(in: proxy.size).height
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else if centerTargeted {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.chromeForeground.opacity(0.35), lineWidth: 2)
-                        .background(Theme.chromeForeground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                        .padding(Theme.space3)
                 }
 
                 if store.draggingTabId != nil {
@@ -249,7 +242,7 @@ private struct PaneSplitDropOverlay: View {
                         HStack(spacing: 0) {
                             edgeDropZone(.left)
                                 .frame(width: horizontalIntentWidth)
-                            centerDropZone
+                            Color.clear.allowsHitTesting(false)
                             edgeDropZone(.right)
                                 .frame(width: horizontalIntentWidth)
                         }
@@ -259,7 +252,6 @@ private struct PaneSplitDropOverlay: View {
                 }
             }
             .animation(Theme.chromeTransition, value: targetedEdge)
-            .animation(Theme.chromeTransition, value: centerTargeted)
         }
         .allowsHitTesting(store.draggingTabId != nil)
     }
@@ -287,20 +279,6 @@ private struct PaneSplitDropOverlay: View {
             }
     }
 
-    private var centerDropZone: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .dropDestination(for: String.self) { dropped, _ in
-                defer {
-                    store.draggingTabId = nil
-                    centerTargeted = false
-                }
-                guard let id = dropped.first.flatMap(UUID.init) else { return false }
-                return withAnimation(Theme.chromeTransition) {
-                    store.handleTabDrop(droppedId: id, to: pane, at: pane.tabs.count, in: workspace)
-                }
-            } isTargeted: { centerTargeted = $0 }
-    }
 
     private var canSplit: Bool {
         guard let id = store.draggingTabId else { return false }

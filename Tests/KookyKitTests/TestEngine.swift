@@ -21,6 +21,7 @@ final class TestEngine: TerminalEngine {
 
     private(set) var startedConfigs: [TerminalSessionConfig] = []
     private(set) var terminateCount = 0
+    private(set) var renderingStates: [Bool] = []
 
     func start(config: TerminalSessionConfig) {
         startedConfigs.append(config)
@@ -32,7 +33,9 @@ final class TestEngine: TerminalEngine {
 
     var suspendsSizePropagation: Bool = false
     var grabsFocusOnMount: Bool = true
-    var isRenderingActive: Bool = true
+    var isRenderingActive: Bool = true {
+        didSet { renderingStates.append(isRenderingActive) }
+    }
     private(set) var flushSizeCount: Int = 0
     func flushSize() { flushSizeCount += 1 }
 

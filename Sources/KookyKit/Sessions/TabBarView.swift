@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Per-pane tab strip — each split region renders its own. The "+" button
 /// targets the pane it sits in.
@@ -9,12 +10,20 @@ struct TabBarView: View {
     let store: WorkspaceStore
 
     @State private var isAddMenuOpen = false
+    @State private var previewIndex: Int?
+
+    private let tabSpacing: CGFloat = 2
+    private let horizontalPadding: CGFloat = Theme.space2
+    private let addButtonWidth: CGFloat = 28
+    private let splitControlsWidth: CGFloat = 64
+    private let titleRowDropPadding: CGFloat = 18
 
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
+                HStack(spacing: tabSpacing) {
                     ForEach(Array(pane.tabs.enumerated()), id: \.element.id) { index, tab in
+                        if previewIndex == index { TabDropPlaceholder() }
                         DraggableTabRow(
                             tab: tab,
                             pane: pane,
@@ -24,9 +33,10 @@ struct TabBarView: View {
                             canCloseToRight: index < pane.tabs.count - 1
                         )
                     }
+                    if previewIndex == pane.tabs.count { TabDropPlaceholder() }
                     addButton
                 }
-                .padding(.horizontal, Theme.space2)
+                .padding(.horizontal, horizontalPadding)
             }
 
             // Split controls pinned to the trailing edge — outside the
@@ -34,6 +44,7 @@ struct TabBarView: View {
             splitButtons
         }
         .frame(height: 40)
+        .background(tabBarDropSurface)
     }
 
     /// Split-right / split-down buttons. Mirror ⌘D / ⌘⇧D exactly: Split
@@ -70,6 +81,25 @@ struct TabBarView: View {
             isMenuOpen: $isAddMenuOpen
         )
     }
+
+    private var tabBarDropSurface: some View {
+        TabBarDropSurface(
+            pane: pane,
+            store: store,
+            tabWidth: TabBarItem.layoutWidth,
+            tabSpacing: tabSpacing,
+            horizontalPadding: horizontalPadding,
+            addButtonWidth: addButtonWidth,
+            trailingDropWidth: splitControlsWidth,
+            verticalPadding: titleRowDropPadding,
+            previewIndex: $previewIndex,
+            onDrop: { id, index in
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    store.handleTabDrop(droppedId: id, to: pane, at: index, in: workspace)
+                }
+            }
+        )
+    }
 }
 
 /// `+` button doubling as the "drop at end" target — dragging a tab here
@@ -104,9 +134,6 @@ private struct AddTabButton: View {
                 isMenuOpen.toggle()
             }
         }
-        // Indicator sits in the gap just left of the `+` (offset by half its
-        // hit-area), not on the button itself, so it reads as "tab will land
-        // here, after the last one" rather than "drop on +".
         .dropIndicator(active: isTargeted, on: .leading, offset: -3)
         .popover(isPresented: $isMenuOpen, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
@@ -184,3 +211,126 @@ private struct DraggableTabRow: View {
         } isTargeted: { isTargeted = $0 }
     }
 }
+
+private struct TabDropPlaceholder: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(Theme.chromeForeground.opacity(0.28))
+                .frame(width: 5, height: 5)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Theme.chromeForeground.opacity(0.32))
+                .frame(width: 15, height: 15)
+            Text("Drop tab here")
+                .font(Theme.display(12, weight: .regular))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .foregroundStyle(Theme.chromeForeground.opacity(0.7))
+        .padding(.horizontal, Theme.space3)
+        .padding(.vertical, 7)
+        .frame(width: TabBarItem.layoutWidth, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Theme.chromeForeground.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Theme.chromeForeground.opacity(0.65), lineWidth: 1.5)
+                )
+        )
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .allowsHitTesting(false)
+    }
+}
+
+private struct TabBarDropSurface: NSViewRepresentable {
+    @Bindable var pane: Pane
+    @Bindable var store: WorkspaceStore
+    let tabWidth: CGFloat
+    let tabSpacing: CGFloat
+    let horizontalPadding: CGFloat
+    let addButtonWidth: CGFloat
+    let trailingDropWidth: CGFloat
+    let verticalPadding: CGFloat
+    @Binding var previewIndex: Int?
+    let onDrop: (UUID, Int) -> Bool
+
+    func makeNSView(context: Context) -> TabBarDropNSView {
+        let view = TabBarDropNSView()
+        view.onEnteredOrUpdated = { point in
+            guard store.draggingTabId != nil, isInsideTitleDropBand(point) else {
+                previewIndex = nil
+                return
+            }
+            previewIndex = insertionIndex(forX: point.x)
+        }
+        view.onExited = { previewIndex = nil }
+        view.onDrop = { point, raw in
+            defer {
+                store.draggingTabId = nil
+                previewIndex = nil
+            }
+            guard let id = UUID(uuidString: raw), isInsideTitleDropBand(point) else { return false }
+            return onDrop(id, insertionIndex(forX: point.x))
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: TabBarDropNSView, context: Context) {}
+
+    private func insertionIndex(forX rawX: CGFloat) -> Int {
+        let x = max(0, rawX - horizontalPadding)
+        let tabStride = tabWidth + tabSpacing
+        let tabCount = pane.tabs.count
+        for index in 0..<tabCount {
+            let mid = CGFloat(index) * tabStride + tabWidth / 2
+            if x < mid { return index }
+        }
+        return tabCount
+    }
+
+    private func isInsideTitleDropBand(_ point: CGPoint) -> Bool {
+        point.y >= -verticalPadding && point.y <= 40 + verticalPadding
+    }
+}
+
+private final class TabBarDropNSView: NSView {
+    var onEnteredOrUpdated: ((CGPoint) -> Void)?
+    var onExited: (() -> Void)?
+    var onDrop: ((CGPoint, String) -> Bool)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.string])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard draggingString(sender) != nil else { return [] }
+        onEnteredOrUpdated?(convert(sender.draggingLocation, from: nil))
+        return .move
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard draggingString(sender) != nil else { return [] }
+        onEnteredOrUpdated?(convert(sender.draggingLocation, from: nil))
+        return .move
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        onExited?()
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let raw = draggingString(sender) else { return false }
+        return onDrop?(convert(sender.draggingLocation, from: nil), raw) ?? false
+    }
+
+    private func draggingString(_ sender: any NSDraggingInfo) -> String? {
+        sender.draggingPasteboard.string(forType: .string)
+    }
+}
+

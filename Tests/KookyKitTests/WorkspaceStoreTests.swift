@@ -1162,6 +1162,21 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(ws.activePaneId, newPane?.id)
     }
 
+    func testTerminalHostDoesNotDeactivateMovedEngineFromStaleHost() {
+        let hostA = TerminalHostView()
+        let hostB = TerminalHostView()
+        let moved = TestEngine()
+        let replacement = TestEngine()
+
+        hostA.attach(engine: moved, grabsFocusOnMount: true)
+        hostB.attach(engine: moved, grabsFocusOnMount: true)
+        hostA.attach(engine: replacement, grabsFocusOnMount: false)
+
+        XCTAssertTrue(moved.isRenderingActive)
+        XCTAssertFalse(moved.view.isHidden)
+        XCTAssertTrue(moved.renderingStates.allSatisfy { $0 }, "stale source host must not disable a moved terminal view")
+    }
+
     func testSplitPaneByMovingTabLeftPlacesNewPaneFirst() {
         let store = makeStore()
         let ws = store.workspaces[0]

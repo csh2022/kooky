@@ -1036,6 +1036,7 @@ final class GhosttySurfaceView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         forwardMouseEvent(event, button: (.PRESS, .LEFT))
     }
 

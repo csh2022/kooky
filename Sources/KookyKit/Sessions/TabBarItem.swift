@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct TabBarItem: View {
-    private enum Layout {
+    enum Layout {
         static let width: CGFloat = 164
         static let statusDotSize: CGFloat = 5
     }
+
+    static var layoutWidth: CGFloat { Layout.width }
 
     @Bindable var tab: Session
     let isActive: Bool

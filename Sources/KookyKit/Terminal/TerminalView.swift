@@ -33,7 +33,13 @@ final class TerminalHostView: NSView {
         let nextView = engine.view
         let nextId = ObjectIdentifier(nextView)
 
-        if installedEngineViews[nextId] == nil {
+        if installedEngineViews[nextId] == nil || nextView.superview !== self {
+            if let oldHost = nextView.superview as? TerminalHostView, oldHost !== self {
+                oldHost.detachMovedEngineView(nextView)
+            }
+            if let constraints = constraintsByEngineView[nextId] {
+                NSLayoutConstraint.deactivate(constraints)
+            }
             nextView.translatesAutoresizingMaskIntoConstraints = false
             nextView.isHidden = true
             addSubview(nextView)
@@ -54,13 +60,33 @@ final class TerminalHostView: NSView {
             return
         }
 
-        currentEngine?.isRenderingActive = false
-        currentEngineView?.isHidden = true
+        if let oldView = currentEngineView {
+            let oldId = ObjectIdentifier(oldView)
+            if oldView.superview === self {
+                currentEngine?.isRenderingActive = false
+                oldView.isHidden = true
+            } else {
+                installedEngineViews.removeValue(forKey: oldId)
+                constraintsByEngineView.removeValue(forKey: oldId)
+            }
+        }
 
         currentEngine = engine
         currentEngineView = nextView
         nextView.isHidden = false
         engine.isRenderingActive = true
         engine.flushSize()
+    }
+
+    private func detachMovedEngineView(_ view: NSView) {
+        let id = ObjectIdentifier(view)
+        if let constraints = constraintsByEngineView.removeValue(forKey: id) {
+            NSLayoutConstraint.deactivate(constraints)
+        }
+        installedEngineViews.removeValue(forKey: id)
+        if currentEngineView === view {
+            currentEngine = nil
+            currentEngineView = nil
+        }
     }
 }
