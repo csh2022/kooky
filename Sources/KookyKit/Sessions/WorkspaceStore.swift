@@ -125,6 +125,10 @@ final class WorkspaceStore {
     /// tests inject a static value (typically `true`) for the same reason
     /// as `optionsProvider`.
     private let resumeProvider: @MainActor () -> Bool
+    /// Fallback for Codex tabs restored from a state file that predates
+    /// Codex conversation id capture, or where Codex notify did not report
+    /// a usable id. Looks up the latest Codex session file for the tab cwd.
+    private let codexSessionLookup: @MainActor (URL) -> String?
     /// Every live window's store (including this one) — injected by
     /// `AppDelegate` so a tab dropped here from another window can be located
     /// in the store it came from. Tests default to `{ [] }`, keeping each
@@ -195,6 +199,7 @@ final class WorkspaceStore {
         engineFactory: @escaping @MainActor () -> any TerminalEngine = { LibghosttyEngine() },
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
+        codexSessionLookup: @escaping @MainActor (URL) -> String? = { CodexSessionLocator.latestSessionId(cwd: $0) },
         peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] },
         moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in },
         onSessionAlert: @escaping @MainActor (UUID, SessionAlertKind) -> Void = { _, _ in },
@@ -204,6 +209,7 @@ final class WorkspaceStore {
         self.engineFactory = engineFactory
         self.optionsProvider = optionsProvider
         self.resumeProvider = resumeProvider
+        self.codexSessionLookup = codexSessionLookup
         self.peerStores = peerStores
         self.moveToNewWindow = moveToNewWindow
         self.onSessionAlert = onSessionAlert
@@ -1450,22 +1456,28 @@ final class WorkspaceStore {
                 let resumeAgent = tab.resumeAgentId.flatMap { resumeAgentId in
                     AgentTemplate.all.first { $0.id == resumeAgentId }
                 }
+                let restoredConversationId = tab.conversationId
+                    ?? inferredCodexConversationId(
+                        for: tab,
+                        persistedAgent: persistedAgent,
+                        resumeAgent: resumeAgent
+                    )
                 // Backward-compat for state.json files written before
                 // `resumeAgentId`: older Claude-only resume state can be
                 // `terminal + conversationId` after the agent ended.
-                let legacyResumeAgent = tab.conversationId != nil
+                let legacyResumeAgent = restoredConversationId != nil
                     && tab.resumeAgentId == nil
                     && persistedAgent.isShell
                     ? AgentTemplate.claudeCode
                     : nil
-                let launchAgent = tab.conversationId != nil
+                let launchAgent = restoredConversationId != nil
                     ? (resumeAgent ?? legacyResumeAgent ?? persistedAgent)
                     : persistedAgent
                 let session = spawnSession(
                     template: launchAgent,
                     initialCwd: resolvedSpawnCwd(tab.currentDirectoryPath),
                     sessionId: tab.id,
-                    conversationId: tab.conversationId
+                    conversationId: restoredConversationId
                 )
                 session.customTitle = tab.customTitle
                 pane.tabs.append(session)
@@ -1487,6 +1499,15 @@ final class WorkspaceStore {
                 )
             )
         }
+    }
+
+    private func inferredCodexConversationId(
+        for tab: PersistedTab,
+        persistedAgent: AgentTemplate,
+        resumeAgent: AgentTemplate?
+    ) -> String? {
+        guard persistedAgent.isCodexFamily || resumeAgent?.isCodexFamily == true else { return nil }
+        return codexSessionLookup(URL(fileURLWithPath: tab.currentDirectoryPath))
     }
 
     /// Spawns the engine + Session. Caller wires `onPwdChange` / `onFocus`

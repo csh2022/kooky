@@ -21,6 +21,7 @@ import KookyHookKit
 //   <agent> ∈ claude | codex | pi (or any AgentTemplate.id)
 //   <event> ∈ running | attention | idle    (lifecycle events)
 //           | PreToolUse | PostToolUse      (Claude tool events — stdin JSON)
+//           | attention <json>              (Codex notify payload — argv JSON)
 //           | conversation <id>             (extension-reported resume id — Pi)
 //           | tool <pre|post> <id> <name> <identifier> [ok|fail]
 //                                            (extension-reported tool call — Pi)
@@ -33,6 +34,9 @@ import KookyHookKit
 //                                 back as a separate `kind: conversationId`
 //                                 payload so kooky can prepend
 //                                 `--resume <id>` on next launch.
+// Reads:  argv[3]                 Codex appends notify JSON as the final
+//                                 argv; we mirror its UUID session id as a
+//                                 separate `kind: conversationId` payload.
 
 let surface = ProcessInfo.processInfo.environment["KOOKY_SURFACE_ID"] ?? ""
 guard !surface.isEmpty else { exit(0) }
@@ -52,6 +56,9 @@ let socketPath = KookyHookKit.socketPath
 let agentArg = CommandLine.arguments.count >= 2 ? CommandLine.arguments[1] : ""
 let stdinData: Data = (agentArg == "claude" && isatty(fileno(stdin)) == 0)
     ? ((try? FileHandle.standardInput.readToEnd()) ?? Data())
+    : Data()
+let codexNotifyData: Data = (agentArg == "codex" && CommandLine.arguments.count >= 4)
+    ? Data(CommandLine.arguments[3].utf8)
     : Data()
 
 let payloadObject: [String: String]
@@ -136,6 +143,19 @@ let eventSent = KookyHookKit.sendPayload(payloadObject, to: socketPath)
 if payloadObject["agent"] == "claude",
    payloadObject["kind"] != "tool",
    let conversationId = KookyHookKit.parseClaudeConversationId(from: stdinData) {
+    let payload = KookyHookKit.buildConversationIdPayload(
+        surface: surface,
+        conversationId: conversationId
+    )
+    _ = KookyHookKit.sendPayload(payload, to: socketPath)
+}
+
+// Bonus payload: Codex's `notify` command receives a JSON payload as the
+// final argv. Mirror its UUID session id through the same generic
+// `conversationId` channel so restore can launch `codex resume <id>`.
+if payloadObject["agent"] == "codex",
+   payloadObject["kind"] != "tool",
+   let conversationId = KookyHookKit.parseCodexConversationId(from: codexNotifyData) {
     let payload = KookyHookKit.buildConversationIdPayload(
         surface: surface,
         conversationId: conversationId

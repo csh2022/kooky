@@ -88,6 +88,17 @@ public enum KookyHookKit {
         return sessionId
     }
 
+    /// Pulls Codex's resumable session id out of the JSON payload appended to
+    /// the configured `notify` command. Codex session ids are UUID-shaped; we
+    /// reject non-UUID strings so unrelated notification fields don't become
+    /// bogus `codex resume <id>` launches.
+    public static func parseCodexConversationId(from data: Data) -> String? {
+        guard !data.isEmpty,
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return findCodexConversationId(in: parsed, allowBareId: false)
+    }
+
     /// ConversationId payload routed to `HookServer` so `WorkspaceStore`
     /// can persist it on `Session` and prepend `--resume <id>` to
     /// `KOOKY_AGENT` on next launch.
@@ -282,5 +293,50 @@ public enum KookyHookKit {
             "no such file",
         ]
         return !errorMarkers.contains { lowered.contains($0) }
+    }
+
+    private static let codexConversationIdKeys = ["session_id", "sessionId", "conversationId"]
+    private static let codexConversationIdContainerKeys = ["payload", "event", "data", "notification"]
+
+    private static func findCodexConversationId(in value: Any, allowBareId: Bool) -> String? {
+        if let dict = value as? [String: Any] {
+            let directKeys = allowBareId
+                ? codexConversationIdKeys + ["id"]
+                : codexConversationIdKeys
+            for key in directKeys {
+                if let id = dict[key] as? String, isCodexConversationId(id) {
+                    return id
+                }
+            }
+
+            for key in codexConversationIdContainerKeys {
+                guard let nested = dict[key] else { continue }
+                if let id = findCodexConversationId(
+                    in: nested,
+                    allowBareId: allowBareId || key == "payload"
+                ) {
+                    return id
+                }
+            }
+
+            for key in dict.keys.sorted() where !codexConversationIdContainerKeys.contains(key) {
+                guard let nested = dict[key] else { continue }
+                if nested is [String: Any] || nested is [Any],
+                   let id = findCodexConversationId(in: nested, allowBareId: false) {
+                    return id
+                }
+            }
+        } else if let array = value as? [Any] {
+            for item in array {
+                if let id = findCodexConversationId(in: item, allowBareId: false) {
+                    return id
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func isCodexConversationId(_ value: String) -> Bool {
+        UUID(uuidString: value) != nil
     }
 }

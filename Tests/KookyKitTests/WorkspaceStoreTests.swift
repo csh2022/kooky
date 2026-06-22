@@ -1513,6 +1513,87 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(engine(restoredTab).startedConfigs.last?.environment["KOOKY_AGENT"], "pi --session pi-ended")
     }
 
+    func testEndedCodexAgentRestoresWithCodexResumeCommand() throws {
+        let conversationId = "019eef55-2456-78f2-9368-7f321e6126bd"
+        let persistence = InMemoryPersistence()
+        let store = WorkspaceStore(
+            persistence: persistence,
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true }
+        )
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let tab = store.addTab(in: ws, template: .codex)
+
+        store.applyConversationId(conversationId: conversationId, sessionId: tab.id)
+        store.applyHookEvent(agent: .codex, event: .ended, sessionId: tab.id)
+        store.flushPersistence()
+
+        let saved = try XCTUnwrap(persistence.saved)
+        let persistedTab = saved.workspaces
+            .flatMap(\.root.allTabs)
+            .first { $0.id == tab.id }
+        XCTAssertEqual(persistedTab?.agentId, AgentTemplate.terminal.id)
+        XCTAssertEqual(persistedTab?.resumeAgentId, AgentTemplate.codex.id)
+
+        let restored = makeStore(initial: saved)
+        let restoredTab = try XCTUnwrap(restored.workspaces
+            .flatMap { $0.root.allPanes.flatMap(\.tabs) }
+            .first { $0.id == tab.id })
+
+        XCTAssertEqual(
+            engine(restoredTab).startedConfigs.last?.environment["KOOKY_AGENT"],
+            "codex resume \(conversationId)"
+        )
+    }
+
+    func testRestoredCodexTabWithoutConversationIdFallsBackToCodexSessionFiles() throws {
+        let tabId = UUID()
+        let conversationId = "019eef55-2456-78f2-9368-7f321e6126bd"
+        let initial = PersistedState(
+            workspaces: [
+                PersistedWorkspace(
+                    id: UUID(),
+                    workingDirectoryPath: projectA.path,
+                    root: PersistedPaneNode(
+                        id: UUID(),
+                        kind: .pane(PersistedPane(
+                            id: UUID(),
+                            tabs: [
+                                PersistedTab(
+                                    id: tabId,
+                                    agentId: AgentTemplate.codex.id,
+                                    currentDirectoryPath: projectA.path
+                                )
+                            ],
+                            activeTabId: tabId
+                        ))
+                    )
+                )
+            ]
+        )
+
+        let restored = WorkspaceStore(
+            persistence: InMemoryPersistence(initial: initial),
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true },
+            codexSessionLookup: { cwd in
+                cwd.path == self.projectA.path ? conversationId : nil
+            }
+        )
+        let restoredTab = try XCTUnwrap(restored.workspaces
+            .flatMap { $0.root.allPanes.flatMap(\.tabs) }
+            .first { $0.id == tabId })
+
+        XCTAssertEqual(restoredTab.conversationId, conversationId)
+        XCTAssertEqual(restoredTab.resumeAgent?.id, AgentTemplate.codex.id)
+        XCTAssertEqual(
+            engine(restoredTab).startedConfigs.last?.environment["KOOKY_AGENT"],
+            "codex resume \(conversationId)"
+        )
+    }
+
     func testPiConversationIdAfterEndedStillRestoresPiResumeCommand() throws {
         let persistence = InMemoryPersistence()
         let store = WorkspaceStore(
@@ -1541,6 +1622,40 @@ final class WorkspaceStoreTests: XCTestCase {
             .first { $0.id == tab.id })
 
         XCTAssertEqual(engine(restoredTab).startedConfigs.last?.environment["KOOKY_AGENT"], "pi --session pi-late")
+    }
+
+    func testCodexConversationIdAfterEndedStillRestoresCodexResumeCommand() throws {
+        let conversationId = "019eef55-2456-78f2-9368-7f321e6126bd"
+        let persistence = InMemoryPersistence()
+        let store = WorkspaceStore(
+            persistence: persistence,
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true }
+        )
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        let tab = store.addTab(in: ws, template: .codex)
+
+        store.applyHookEvent(agent: .codex, event: .ended, sessionId: tab.id)
+        XCTAssertEqual(tab.agent.id, AgentTemplate.terminal.id)
+        store.applyConversationId(conversationId: conversationId, sessionId: tab.id)
+        store.flushPersistence()
+
+        let saved = try XCTUnwrap(persistence.saved)
+        let persistedTab = saved.workspaces
+            .flatMap(\.root.allTabs)
+            .first { $0.id == tab.id }
+        XCTAssertEqual(persistedTab?.resumeAgentId, AgentTemplate.codex.id)
+
+        let restored = makeStore(initial: saved)
+        let restoredTab = try XCTUnwrap(restored.workspaces
+            .flatMap { $0.root.allPanes.flatMap(\.tabs) }
+            .first { $0.id == tab.id })
+
+        XCTAssertEqual(
+            engine(restoredTab).startedConfigs.last?.environment["KOOKY_AGENT"],
+            "codex resume \(conversationId)"
+        )
     }
 
     func testLegacyTerminalConversationRestoresClaudeResumeCommand() throws {
