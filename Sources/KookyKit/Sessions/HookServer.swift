@@ -33,12 +33,11 @@ enum HookToolEvent: String {
 enum HookMessage {
     case agent(agent: AgentTemplate, event: HookEvent, sessionId: UUID)
     case shellEnvironment(env: [String: String], sessionId: UUID)
-    /// Claude's hook input JSON carries `session_id` (its conversation id).
-    /// `KookyHook` extracts it and emits this message so kooky can persist
-    /// it on the originating Session and reuse it as `--resume <id>` on
-    /// next launch. The agent slug is implicit in the routing (only Claude
-    /// pipes session_id today) and the consumer doesn't dispatch per-agent
-    /// — so the payload only carries surface + id.
+    /// Agent hook/extension payload carrying a conversation or session id.
+    /// `KookyHook` emits this message so kooky can persist the id on the
+    /// originating Session and reuse it on next launch. The matching agent
+    /// template is tracked on `Session.resumeAgent`, so the payload only
+    /// carries surface + id.
     case conversationId(conversationId: String, sessionId: UUID)
     /// PreToolUse / PostToolUse event for the activity strip. `agent` is
     /// the base AgentTemplate the slug resolves to (Claude builtin today —
