@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct TabBarItem: View {
+    private enum Layout {
+        static let width: CGFloat = 164
+        static let statusDotSize: CGFloat = 5
+    }
+
     @Bindable var tab: Session
     let isActive: Bool
     let canCloseToRight: Bool
@@ -25,6 +30,8 @@ struct TabBarItem: View {
             Text(tab.title)
                 .font(Theme.display(12, weight: .regular))
                 .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HoverableIconButton(
                 systemName: "xmark",
                 fontSize: 9,
@@ -38,6 +45,7 @@ struct TabBarItem: View {
         .foregroundStyle(isActive ? Theme.chromeForeground : Theme.chromeForeground.opacity(0.6))
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, 7)
+        .frame(width: Layout.width, alignment: .leading)
         .background(rowBackground)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
@@ -130,12 +138,15 @@ struct TabBarItem: View {
     /// row clean — a green dot on every command would dominate the chrome.
     @ViewBuilder
     private var commandStatusDot: some View {
-        if let exit = tab.lastCommandExit, exit != 0 {
-            Circle()
-                .fill(Theme.activityFailure)
-                .frame(width: 5, height: 5)
-                .help(Self.statusTooltip(exit: exit, duration: tab.lastCommandDuration))
+        ZStack {
+            if let exit = tab.lastCommandExit, exit != 0 {
+                Circle()
+                    .fill(Theme.activityFailure)
+                    .frame(width: Layout.statusDotSize, height: Layout.statusDotSize)
+                    .help(Self.statusTooltip(exit: exit, duration: tab.lastCommandDuration))
+            }
         }
+        .frame(width: Layout.statusDotSize, height: Layout.statusDotSize)
     }
 
     private static func statusTooltip(exit: Int, duration: TimeInterval?) -> String {
