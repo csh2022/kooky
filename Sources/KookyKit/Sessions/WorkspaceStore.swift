@@ -1201,6 +1201,17 @@ final class WorkspaceStore {
         }
         guard let info = workspace.root.parentInfo(forPane: pane.id) else { return }
         info.parent.content = info.sibling.content
+        // The collapse moves the surviving pane's libghostty surface across
+        // host views; its draw timer can stall mid-move (it's gated on
+        // window + isRenderingActive). Re-arm rendering + re-sync size after
+        // SwiftUI settles the new layout so the survivor doesn't stay blank.
+        let survivingEngines = info.sibling.allPanes.flatMap { $0.tabs.map(\.engine) }
+        DispatchQueue.main.async {
+            for engine in survivingEngines {
+                engine.isRenderingActive = true
+                engine.flushSize()
+            }
+        }
         // After collapse, focus whichever pane is now nearest.
         if workspace.activePaneId == pane.id {
             workspace.activePaneId = info.sibling.firstPane?.id
