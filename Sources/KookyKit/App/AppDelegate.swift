@@ -738,6 +738,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = true
         panel.title = "Open Folder"
         panel.message = "Choose a folder to open as a workspace."
