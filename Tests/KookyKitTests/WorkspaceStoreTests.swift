@@ -1547,6 +1547,53 @@ final class WorkspaceStoreTests: XCTestCase {
         )
     }
 
+    func testRestoredCodexTabWithoutConversationIdFallsBackToCodexSessionFiles() throws {
+        let tabId = UUID()
+        let conversationId = "019eef55-2456-78f2-9368-7f321e6126bd"
+        let initial = PersistedState(
+            workspaces: [
+                PersistedWorkspace(
+                    id: UUID(),
+                    workingDirectoryPath: projectA.path,
+                    root: PersistedPaneNode(
+                        id: UUID(),
+                        kind: .pane(PersistedPane(
+                            id: UUID(),
+                            tabs: [
+                                PersistedTab(
+                                    id: tabId,
+                                    agentId: AgentTemplate.codex.id,
+                                    currentDirectoryPath: projectA.path
+                                )
+                            ],
+                            activeTabId: tabId
+                        ))
+                    )
+                )
+            ]
+        )
+
+        let restored = WorkspaceStore(
+            persistence: InMemoryPersistence(initial: initial),
+            engineFactory: { TestEngine() },
+            optionsProvider: { _ in nil },
+            resumeProvider: { true },
+            codexSessionLookup: { cwd in
+                cwd.path == self.projectA.path ? conversationId : nil
+            }
+        )
+        let restoredTab = try XCTUnwrap(restored.workspaces
+            .flatMap { $0.root.allPanes.flatMap(\.tabs) }
+            .first { $0.id == tabId })
+
+        XCTAssertEqual(restoredTab.conversationId, conversationId)
+        XCTAssertEqual(restoredTab.resumeAgent?.id, AgentTemplate.codex.id)
+        XCTAssertEqual(
+            engine(restoredTab).startedConfigs.last?.environment["KOOKY_AGENT"],
+            "codex resume \(conversationId)"
+        )
+    }
+
     func testPiConversationIdAfterEndedStillRestoresPiResumeCommand() throws {
         let persistence = InMemoryPersistence()
         let store = WorkspaceStore(

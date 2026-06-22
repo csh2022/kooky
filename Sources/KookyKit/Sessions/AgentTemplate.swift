@@ -190,6 +190,10 @@ struct AgentTemplate: Identifiable, Hashable {
         resumeFlag != nil || resumeCommandPrefix != nil
     }
 
+    var isCodexFamily: Bool {
+        id == Self.codex.id || baseAgentId == Self.codex.id
+    }
+
     /// Parses a `.env`-style block — one `KEY=VALUE` per line — into a
     /// dictionary. Blank lines and `#` comment lines are skipped, a leading
     /// `export` keyword is dropped (so a block pasted from `.zshrc` works),
