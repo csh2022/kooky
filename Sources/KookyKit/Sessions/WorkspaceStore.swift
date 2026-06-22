@@ -52,6 +52,12 @@ enum SidebarMode: String, Codable, Equatable, Sendable {
     }
 }
 
+enum WorktreeCapability: Equatable {
+    case unknown
+    case available
+    case unavailable
+}
+
 @MainActor
 @Observable
 final class WorkspaceStore {
@@ -128,6 +134,14 @@ final class WorkspaceStore {
     private let onSessionAlert: @MainActor (UUID, SessionAlertKind) -> Void
     private let persistence: any Persistence
     private let gitStatusFetcher = GitStatusFetcher()
+    private let worktreeCapabilityProbe: @Sendable (URL) -> Bool
+    private struct WorktreeCapabilityEntry: Equatable {
+        let path: String
+        let generation: Int
+        let capability: WorktreeCapability
+    }
+    private var worktreeCapabilityCache: [UUID: WorktreeCapabilityEntry] = [:]
+    private var worktreeCapabilityGeneration = 0
     /// One watcher per session — refreshes git status when `.git/HEAD` or
     /// `.git/index` changes from any source (agent subprocess, external
     /// terminal, file-level git ops). The OSC 7 / OSC 133 paths only see
@@ -176,7 +190,8 @@ final class WorkspaceStore {
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
         peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] },
         moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in },
-        onSessionAlert: @escaping @MainActor (UUID, SessionAlertKind) -> Void = { _, _ in }
+        onSessionAlert: @escaping @MainActor (UUID, SessionAlertKind) -> Void = { _, _ in },
+        worktreeCapabilityProbe: @escaping @Sendable (URL) -> Bool = { GitWatcher.findGitDir(near: $0) != nil }
     ) {
         self.persistence = persistence
         self.engineFactory = engineFactory
@@ -185,14 +200,67 @@ final class WorkspaceStore {
         self.peerStores = peerStores
         self.moveToNewWindow = moveToNewWindow
         self.onSessionAlert = onSessionAlert
+        self.worktreeCapabilityProbe = worktreeCapabilityProbe
         if let saved = persistence.load(), !saved.workspaces.isEmpty {
             restore(from: saved)
+            refreshWorktreeCapabilities()
         } else {
             addWorkspace()
         }
     }
 
     // MARK: - Workspaces
+
+    func worktreeCapability(for workspace: Workspace) -> WorktreeCapability {
+        guard workspace.worktreeParentId == nil else { return .unavailable }
+        let path = workspace.workingDirectory.standardizedFileURL.path
+        guard let entry = worktreeCapabilityCache[workspace.id], entry.path == path else {
+            return .unknown
+        }
+        return entry.capability
+    }
+
+    func refreshWorktreeCapabilities() {
+        for workspace in workspaces {
+            refreshWorktreeCapability(for: workspace)
+        }
+    }
+
+    func refreshWorktreeCapability(for workspace: Workspace) {
+        let path = workspace.workingDirectory.standardizedFileURL.path
+        worktreeCapabilityGeneration &+= 1
+        let generation = worktreeCapabilityGeneration
+        if workspace.worktreeParentId != nil {
+            worktreeCapabilityCache[workspace.id] = WorktreeCapabilityEntry(
+                path: path,
+                generation: generation,
+                capability: .unavailable
+            )
+            return
+        }
+        worktreeCapabilityCache[workspace.id] = WorktreeCapabilityEntry(
+            path: path,
+            generation: generation,
+            capability: .unknown
+        )
+        let workspaceId = workspace.id
+        let url = workspace.workingDirectory
+        let probe = worktreeCapabilityProbe
+        Task.detached(priority: .utility) {
+            let capability: WorktreeCapability = probe(url) ? .available : .unavailable
+            await MainActor.run { [weak self] in
+                guard let self,
+                      let current = self.worktreeCapabilityCache[workspaceId],
+                      current.path == path,
+                      current.generation == generation else { return }
+                self.worktreeCapabilityCache[workspaceId] = WorktreeCapabilityEntry(
+                    path: path,
+                    generation: generation,
+                    capability: capability
+                )
+            }
+        }
+    }
 
     @discardableResult
     func addWorkspace(
@@ -236,6 +304,7 @@ final class WorkspaceStore {
             workspaces.append(workspace)
         }
         activeWorkspaceId = workspace.id
+        refreshWorktreeCapability(for: workspace)
         scheduleSave()
         return workspace
     }
@@ -520,6 +589,7 @@ final class WorkspaceStore {
             }
         }
         guard let idx = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
+        worktreeCapabilityCache.removeValue(forKey: workspace.id)
         workspaces.remove(at: idx)
         if workspaces.isEmpty {
             activeWorkspaceId = nil
@@ -1329,6 +1399,7 @@ final class WorkspaceStore {
             }
             if let workspace, workspace.activeSession?.id == session.id, workspace.workingDirectory.path != pwd {
                 workspace.workingDirectory = url
+                self?.refreshWorktreeCapability(for: workspace)
             }
             self?.refreshGitStatus(for: session)
             self?.refreshEnvironment(for: session)

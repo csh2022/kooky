@@ -15,12 +15,16 @@ final class WorkspaceStoreTests: XCTestCase {
         }
     }
 
-    private func makeStore(initial: PersistedState? = nil) -> WorkspaceStore {
+    private func makeStore(
+        initial: PersistedState? = nil,
+        worktreeCapabilityProbe: @escaping @Sendable (URL) -> Bool = { _ in false }
+    ) -> WorkspaceStore {
         WorkspaceStore(
             persistence: InMemoryPersistence(initial: initial),
             engineFactory: { TestEngine() },
             optionsProvider: { _ in nil },
-            resumeProvider: { true }
+            resumeProvider: { true },
+            worktreeCapabilityProbe: worktreeCapabilityProbe
         )
     }
 
@@ -46,6 +50,20 @@ final class WorkspaceStoreTests: XCTestCase {
     private func engine(_ session: Session) -> TestEngine {
         guard let e = session.engine as? TestEngine else { preconditionFailure("expected TestEngine") }
         return e
+    }
+
+    private func waitForWorktreeCapability(
+        _ expected: WorktreeCapability,
+        workspace: Workspace,
+        store: WorkspaceStore,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<20 {
+            if store.worktreeCapability(for: workspace) == expected { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(store.worktreeCapability(for: workspace), expected, file: file, line: line)
     }
 
     private func firstPane(_ ws: Workspace) -> Pane {
@@ -117,6 +135,34 @@ final class WorkspaceStoreTests: XCTestCase {
         )
         XCTAssertEqual(wt.worktreeParentId, source.id)
         XCTAssertEqual(wt.worktreeBranch, "feat-x")
+    }
+
+    func testWorktreeCapabilityResolvesForTopLevelWorkspace() async {
+        let projectAPath = projectA.path
+        let store = makeStore { url in url.path == projectAPath }
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        XCTAssertEqual(store.worktreeCapability(for: ws), .unknown)
+        await waitForWorktreeCapability(.available, workspace: ws, store: store)
+    }
+
+    func testWorktreeCapabilityMarksWorktreeWorkspaceUnavailable() async {
+        let store = makeStore { _ in true }
+        let source = store.workspaces[0]
+        let wt = store.addWorkspace(
+            workingDirectory: URL(fileURLWithPath: "/tmp/projectA-feat-x"),
+            worktreeParent: source,
+            worktreeBranch: "feat-x"
+        )
+        await waitForWorktreeCapability(.unavailable, workspace: wt, store: store)
+    }
+
+    func testWorktreeCapabilityStaleResultDoesNotOverwriteNewerPath() async {
+        let projectAPath = projectA.path
+        let store = makeStore { url in url.path == projectAPath }
+        let ws = store.addWorkspace(workingDirectory: projectA)
+        ws.workingDirectory = projectB
+        store.refreshWorktreeCapability(for: ws)
+        await waitForWorktreeCapability(.unavailable, workspace: ws, store: store)
     }
 
     func testWorktreeWorkspaceTitleUsesCwdBasename() {

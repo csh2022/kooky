@@ -184,6 +184,7 @@ struct SidebarView: View {
             }
         }
         .onAppear {
+            store.refreshWorktreeCapabilities()
             if let workspace = store.pendingCreateWorktreeRequest {
                 sheet = .createWorktree(workspace)
             }
@@ -213,16 +214,6 @@ struct SidebarView: View {
         let workspaceWord = closingCount == 1 ? "workspace" : "workspaces"
         let worktreeWord = worktreeCount == 1 ? "worktree" : "worktrees"
         return "\(closingCount) \(workspaceWord) will close · \(worktreeCount) \(worktreeWord)"
-    }
-
-    /// True when `workspace` is a top-level source workspace *and* its
-    /// cwd is inside a git repo. Worktree rows are excluded (worktree
-    /// nesting isn't supported); non-git workspaces (e.g. `~/Downloads`
-    /// opened as a workspace) hide the menu item so users never see an
-    /// option that can only error.
-    private func canCreateWorktree(from workspace: Workspace) -> Bool {
-        guard workspace.worktreeParentId == nil else { return false }
-        return GitWatcher.findGitDir(near: workspace.workingDirectory) != nil
     }
 
     @ViewBuilder
@@ -260,7 +251,12 @@ struct SidebarView: View {
     }
 
     private func list(isCompact: Bool, proxy: ScrollViewProxy) -> some View {
-        ScrollView(showsIndicators: false) {
+        let workspaces = store.workspaces
+        let parentIds = Set(workspaces.map(\.id))
+        let workspaceById = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0) })
+        let worktreesByParent = Dictionary(grouping: workspaces.filter { $0.worktreeParentId != nil }) { $0.worktreeParentId! }
+        let canCloseOthers = workspaces.count > 1
+        return ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 2) {
                 if isCompact {
                     // 52pt-wide sidebar can't fit a disclosure triangle next
@@ -268,19 +264,17 @@ struct SidebarView: View {
                     // is stable: store.workspaces already places worktrees
                     // after their source by virtue of being appended at
                     // creation time.
-                    ForEach(Array(store.workspaces.enumerated()), id: \.element.id) { index, workspace in
-                        // canCreateWorktree walks the fs (`findGitDir`) —
-                        // hoist once per workspace so the two row callbacks
-                        // don't each stat the same ancestor chain.
-                        let canCreate = canCreateWorktree(from: workspace)
+                    ForEach(Array(workspaces.enumerated()), id: \.element.id) { index, workspace in
+                        let canCreate = store.worktreeCapability(for: workspace) == .available
                         let goToSource: (() -> Void)? = workspace.worktreeParentId
-                            .flatMap { id in store.workspaces.first { $0.id == id } }
+                            .flatMap { workspaceById[$0] }
                             .map { parent in { store.activateWorkspace(parent) } }
                         DraggableWorkspaceRow(
                             workspace: workspace,
                             store: store,
                             myIndex: index,
                             isCompact: isCompact,
+                            canCloseOthers: canCloseOthers,
                             draggingId: $draggingWorkspaceId,
                             onCreateWorktree: canCreate ? { presentCreateWorktree(workspace) } : nil,
                             onGoToSource: goToSource
@@ -292,13 +286,18 @@ struct SidebarView: View {
                     // fallback so a bug that strands a worktree (parent
                     // closed while child kept) still surfaces the row in
                     // the sidebar instead of vanishing it entirely.
-                    let parentIds = Set(store.workspaces.map(\.id))
-                    let topLevel = store.workspaces.enumerated().filter { _, ws in
+                    let topLevel = workspaces.enumerated().filter { _, ws in
                         guard let parentId = ws.worktreeParentId else { return true }
                         return !parentIds.contains(parentId)
                     }
                     ForEach(Array(topLevel), id: \.element.id) { index, workspace in
-                        workspaceTree(parent: workspace, parentIndex: index)
+                        workspaceTree(
+                            parent: workspace,
+                            parentIndex: index,
+                            worktrees: worktreesByParent[workspace.id] ?? [],
+                            canCreate: store.worktreeCapability(for: workspace) == .available,
+                            canCloseOthers: canCloseOthers
+                        )
                     }
                 }
             }
@@ -316,19 +315,22 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private func workspaceTree(parent: Workspace, parentIndex: Int) -> some View {
-        let worktrees = store.workspaces.filter { $0.worktreeParentId == parent.id }
+    private func workspaceTree(
+        parent: Workspace,
+        parentIndex: Int,
+        worktrees: [Workspace],
+        canCreate: Bool,
+        canCloseOthers: Bool
+    ) -> some View {
         let hasWorktrees = !worktrees.isEmpty
         let isCollapsed = collapsedParents.contains(parent.id)
 
-        // canCreateWorktree walks the fs (`findGitDir`) — hoist once so
-        // the two callbacks don't each stat the same ancestor chain.
-        let canCreate = canCreateWorktree(from: parent)
         DraggableWorkspaceRow(
             workspace: parent,
             store: store,
             myIndex: parentIndex,
             isCompact: false,
+            canCloseOthers: canCloseOthers,
             draggingId: $draggingWorkspaceId,
             disclosure: hasWorktrees
                 ? SidebarWorkspaceRow.WorktreeDisclosure(
@@ -345,7 +347,7 @@ struct SidebarView: View {
                     workspace: worktree,
                     isActive: worktree.id == store.activeWorkspaceId,
                     isCompact: false,
-                    canCloseOthers: store.workspaces.count > 1,
+                    canCloseOthers: canCloseOthers,
                     onActivate: { store.activateWorkspace(worktree) },
                     onClose: { store.requestCloseWorkspace(worktree) },
                     onCloseOthers: { store.closeOtherWorkspaces(keeping: worktree) },
@@ -404,6 +406,7 @@ private struct DraggableWorkspaceRow: View {
     @Bindable var store: WorkspaceStore
     let myIndex: Int
     let isCompact: Bool
+    let canCloseOthers: Bool
     @Binding var draggingId: UUID?
     /// Non-nil only for source workspaces that own at least one worktree.
     /// Worktree rows themselves render via `SidebarWorkspaceRow` directly,
@@ -427,7 +430,7 @@ private struct DraggableWorkspaceRow: View {
             workspace: workspace,
             isActive: workspace.id == store.activeWorkspaceId,
             isCompact: isCompact,
-            canCloseOthers: store.workspaces.count > 1,
+            canCloseOthers: canCloseOthers,
             onActivate: { store.activateWorkspace(workspace) },
             onClose: { store.requestCloseWorkspace(workspace) },
             onCloseOthers: { store.closeOtherWorkspaces(keeping: workspace) },

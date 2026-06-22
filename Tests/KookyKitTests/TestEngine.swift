@@ -32,6 +32,7 @@ final class TestEngine: TerminalEngine {
 
     var suspendsSizePropagation: Bool = false
     var grabsFocusOnMount: Bool = true
+    var isRenderingActive: Bool = true
     private(set) var flushSizeCount: Int = 0
     func flushSize() { flushSizeCount += 1 }
 

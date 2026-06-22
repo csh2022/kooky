@@ -28,14 +28,6 @@ struct TabBarView: View {
                 }
                 .padding(.horizontal, Theme.space2)
             }
-            // Double-click on tab bar empty area triggers macOS Zoom (filled
-            // screen, dock/menu kept) — same gesture as the system title-bar
-            // double-click. SwiftUI arbitrates count: 2 alongside children's
-            // count: 1 taps so tab activation still fires on single click.
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                NSApplication.shared.keyWindow?.performZoom(nil)
-            }
 
             // Split controls pinned to the trailing edge — outside the
             // ScrollView so they stay put while the tabs scroll.

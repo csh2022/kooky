@@ -49,7 +49,6 @@ private struct PaneView: View {
             Rectangle().fill(Theme.chromeHairline).frame(height: 1)
             if let active = pane.activeTab {
                 TerminalView(engine: active.engine, grabsFocusOnMount: isFocused)
-                    .id(active.id)
                     .padding(8)
                     .overlay(RightClickCatcher { unit in
                         // Promote this pane to the workspace's active one —

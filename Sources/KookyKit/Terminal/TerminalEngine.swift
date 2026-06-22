@@ -87,6 +87,7 @@ protocol TerminalEngine: AnyObject {
     /// (issue #24). Default true: a single pane or a fresh split/tab still
     /// grabs focus on mount.
     var grabsFocusOnMount: Bool { get set }
+    var isRenderingActive: Bool { get set }
     /// Force a one-shot size sync of the surface to the current view
     /// frame. Used when un-suspending after an animation.
     func flushSize()

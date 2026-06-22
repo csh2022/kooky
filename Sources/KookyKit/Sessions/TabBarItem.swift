@@ -49,7 +49,11 @@ struct TabBarItem: View {
         .background(rowBackground)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
-        .onTapGesture(perform: onActivate)
+        .transaction { $0.animation = nil }
+        .onTapGesture {
+            isHovered = false
+            onActivate()
+        }
         .onHover { isHovered = $0 }
         .overlay(RightClickCatcher { _ in isContextMenuOpen = true })
         .popover(isPresented: $isContextMenuOpen, arrowEdge: .bottom) {

@@ -287,6 +287,11 @@ final class LibghosttyEngine: TerminalEngine {
         set { surfaceView.grabsFocusOnMount = newValue }
     }
 
+    var isRenderingActive: Bool {
+        get { surfaceView.isRenderingActive }
+        set { surfaceView.isRenderingActive = newValue }
+    }
+
     func flushSize() {
         surfaceView.flushPropagateSize()
     }
@@ -377,6 +382,9 @@ final class GhosttySurfaceView: NSView {
     /// grab; set by `TerminalView` from the pane's active state. See
     /// `TerminalEngine.grabsFocusOnMount` for the why (issue #24).
     var grabsFocusOnMount = true
+    var isRenderingActive = true {
+        didSet { updateDrawTimer() }
+    }
     private(set) var surface: ghostty_surface_t? {
         didSet {
             if surface != nil { propagateSizeToSurface() }
@@ -530,11 +538,9 @@ final class GhosttySurfaceView: NSView {
         updateDrawTimer()
     }
 
-    /// Draw timer runs only when the surface exists AND the view is in a window.
-    /// Without the window guard, hidden sessions keep driving 60Hz
-    /// `ghostty_surface_draw` into a detached IOSurfaceLayer.
+    /// Draw timer runs only when the surface exists, visible, and in a window.
     private func updateDrawTimer() {
-        if surface != nil, window != nil {
+        if surface != nil, window != nil, isRenderingActive {
             startDrawTimer()
         } else {
             stopDrawTimer()
