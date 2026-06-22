@@ -54,6 +54,16 @@ final class TerminalKeyRoutingTests: XCTestCase {
         XCTAssertTrue(GhosttySurfaceView.isViewportAtBottom(total: 10, offset: 0, len: 24))
     }
 
+    func testScrollIndicatorDoesNotCaptureWheelEvents() {
+        XCTAssertTrue(ScrollIndicator.shouldCaptureHit(for: .leftMouseDown))
+        XCTAssertTrue(ScrollIndicator.shouldCaptureHit(for: .leftMouseDragged))
+        XCTAssertTrue(ScrollIndicator.shouldCaptureHit(for: .leftMouseUp))
+
+        XCTAssertFalse(ScrollIndicator.shouldCaptureHit(for: .scrollWheel))
+        XCTAssertFalse(ScrollIndicator.shouldCaptureHit(for: .otherMouseDown))
+        XCTAssertFalse(ScrollIndicator.shouldCaptureHit(for: nil))
+    }
+
     func testGhosttyCursorKeyTracksApplicationCursorMode() throws {
         guard let app = LibghosttyApp.shared.app else {
             throw XCTSkip("libghostty app did not initialize")
