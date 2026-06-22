@@ -98,6 +98,9 @@ private struct PaneView: View {
                             .padding(.bottom, Theme.space3)
                         }
                     }
+                    .overlay {
+                        PaneSplitDropOverlay(pane: pane, workspace: workspace, store: store)
+                    }
                 // Always present now that it hosts the compose button — a
                 // stable bottom affordance, not gated on git / env / zoom data.
                 Rectangle().fill(Theme.chromeHairline).frame(height: 1)
@@ -136,6 +139,179 @@ private struct PaneView: View {
                 }
             }
         }
+    }
+}
+
+private enum PaneSplitDropEdge: CaseIterable, Identifiable {
+    case left
+    case right
+    case top
+    case bottom
+
+    var id: Self { self }
+
+    var alignment: Alignment {
+        switch self {
+        case .left: .leading
+        case .right: .trailing
+        case .top: .top
+        case .bottom: .bottom
+        }
+    }
+
+    var orientation: SplitOrientation {
+        switch self {
+        case .left, .right: .horizontal
+        case .top, .bottom: .vertical
+        }
+    }
+
+    var placement: SplitPlacement {
+        switch self {
+        case .left, .top: .first
+        case .right, .bottom: .second
+        }
+    }
+
+    func zoneSize(in size: CGSize) -> CGSize {
+        switch self {
+        case .left, .right:
+            CGSize(width: min(72, max(44, size.width * 0.18)), height: size.height)
+        case .top, .bottom:
+            CGSize(width: size.width, height: min(72, max(44, size.height * 0.18)))
+        }
+    }
+
+    func previewSize(in size: CGSize) -> CGSize {
+        switch self {
+        case .left, .right: CGSize(width: size.width / 2, height: size.height)
+        case .top, .bottom: CGSize(width: size.width, height: size.height / 2)
+        }
+    }
+
+    func dividerSize(in size: CGSize) -> CGSize {
+        switch self {
+        case .left, .right: CGSize(width: 3, height: size.height)
+        case .top, .bottom: CGSize(width: size.width, height: 3)
+        }
+    }
+
+    var dividerAlignment: Alignment {
+        switch self {
+        case .left: .center
+        case .right: .center
+        case .top: .center
+        case .bottom: .center
+        }
+    }
+}
+
+private struct PaneSplitDropOverlay: View {
+    @Bindable var pane: Pane
+    @Bindable var workspace: Workspace
+    @Bindable var store: WorkspaceStore
+
+    @State private var targetedEdge: PaneSplitDropEdge?
+
+    @State private var centerTargeted = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let horizontalIntentWidth = proxy.size.width * 0.34
+            let verticalIntentHeight = proxy.size.height * 0.34
+            ZStack {
+                if let targetedEdge, canSplit {
+                    Rectangle()
+                        .fill(Theme.chromeForeground.opacity(0.08))
+                        .frame(
+                            width: targetedEdge.previewSize(in: proxy.size).width,
+                            height: targetedEdge.previewSize(in: proxy.size).height
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: targetedEdge.alignment)
+                    Rectangle()
+                        .fill(Theme.chromeForeground.opacity(0.55))
+                        .frame(
+                            width: targetedEdge.dividerSize(in: proxy.size).width,
+                            height: targetedEdge.dividerSize(in: proxy.size).height
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else if centerTargeted {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.chromeForeground.opacity(0.35), lineWidth: 2)
+                        .background(Theme.chromeForeground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(Theme.space3)
+                }
+
+                if store.draggingTabId != nil {
+                    VStack(spacing: 0) {
+                        edgeDropZone(.top)
+                            .frame(height: verticalIntentHeight)
+                        HStack(spacing: 0) {
+                            edgeDropZone(.left)
+                                .frame(width: horizontalIntentWidth)
+                            centerDropZone
+                            edgeDropZone(.right)
+                                .frame(width: horizontalIntentWidth)
+                        }
+                        edgeDropZone(.bottom)
+                            .frame(height: verticalIntentHeight)
+                    }
+                }
+            }
+            .animation(Theme.chromeTransition, value: targetedEdge)
+            .animation(Theme.chromeTransition, value: centerTargeted)
+        }
+        .allowsHitTesting(store.draggingTabId != nil)
+    }
+
+    private func edgeDropZone(_ edge: PaneSplitDropEdge) -> some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .dropDestination(for: String.self) { dropped, _ in
+                defer {
+                    store.draggingTabId = nil
+                    targetedEdge = nil
+                }
+                guard let id = dropped.first.flatMap(UUID.init), canSplit(sessionId: id) else { return false }
+                return withAnimation(Theme.chromeTransition) {
+                    store.splitPane(
+                        pane,
+                        byMovingSessionId: id,
+                        orientation: edge.orientation,
+                        placement: edge.placement,
+                        in: workspace
+                    ) != nil
+                }
+            } isTargeted: { isTargeted in
+                targetedEdge = isTargeted ? edge : (targetedEdge == edge ? nil : targetedEdge)
+            }
+    }
+
+    private var centerDropZone: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .dropDestination(for: String.self) { dropped, _ in
+                defer {
+                    store.draggingTabId = nil
+                    centerTargeted = false
+                }
+                guard let id = dropped.first.flatMap(UUID.init) else { return false }
+                return withAnimation(Theme.chromeTransition) {
+                    store.handleTabDrop(droppedId: id, to: pane, at: pane.tabs.count, in: workspace)
+                }
+            } isTargeted: { centerTargeted = $0 }
+    }
+
+    private var canSplit: Bool {
+        guard let id = store.draggingTabId else { return false }
+        return canSplit(sessionId: id)
+    }
+
+    private func canSplit(sessionId: UUID) -> Bool {
+        guard store.canSplitPane(pane, in: workspace),
+              let sourcePane = workspace.root.pane(containingSessionId: sessionId)
+        else { return false }
+        return sourcePane.id != pane.id || sourcePane.tabs.count > 1
     }
 }
 

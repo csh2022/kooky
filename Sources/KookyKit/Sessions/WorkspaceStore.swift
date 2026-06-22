@@ -1,5 +1,12 @@
 import Foundation
 
+enum SplitPlacement {
+    case first
+    case second
+}
+
+let maxPaneSplitDepth = 8
+
 extension Array {
     /// Step `direction` from `current`, wrapping at both ends. Used by tab
     /// and pane cycling. Direction can be any non-zero `Int`; positive walks
@@ -1054,18 +1061,21 @@ final class WorkspaceStore {
     /// new split; the second child is a fresh `Pane` with a single new tab
     /// inheriting the source pane's active-tab agent + cwd. Returns the new
     /// pane (now focused) or nil if `pane` isn't found.
+    func canSplitPane(_ pane: Pane, in workspace: Workspace) -> Bool {
+        guard let depth = workspace.root.depth(ofPane: pane.id) else { return false }
+        return depth < maxPaneSplitDepth
+    }
+
     @discardableResult
     func splitPane(_ pane: Pane, orientation: SplitOrientation, in workspace: Workspace) -> Pane? {
+        guard canSplitPane(pane, in: workspace) else { return nil }
         guard let leafNode = workspace.root.paneNode(paneId: pane.id) else { return nil }
         guard case .pane(let existing) = leafNode.content else { return nil }
         let template = existing.activeTab?.agent ?? .terminal
         let cwd = existing.activeTab?.currentDirectory ?? workspace.workingDirectory
         let newSession = spawnSession(template: template, initialCwd: cwd)
         wireSessionCallbacks(engine: newSession.engine, session: newSession, workspace: workspace)
-        let newPane = Pane(tabs: [newSession], activeTabId: newSession.id)
-        let firstChild = PaneNode(pane: existing)
-        let secondChild = PaneNode(pane: newPane)
-        leafNode.content = .split(orientation: orientation, first: firstChild, second: secondChild, fraction: 0.5)
+        let newPane = splitLeaf(leafNode, existingPane: existing, movedSession: newSession, orientation: orientation, placement: .second)
         workspace.activePaneId = newPane.id
         // Splitting while zoomed = "I want to see what I'm creating". Drop
         // zoom so the new pane is visible. Guarded so a no-op write
@@ -1073,6 +1083,97 @@ final class WorkspaceStore {
         if workspace.zoomedPaneId != nil { workspace.zoomedPaneId = nil }
         scheduleSave()
         return newPane
+    }
+
+    @discardableResult
+    func splitPane(
+        _ targetPane: Pane,
+        byMovingSessionId sessionId: UUID,
+        orientation: SplitOrientation,
+        placement: SplitPlacement,
+        in workspace: Workspace
+    ) -> Pane? {
+        guard canSplitPane(targetPane, in: workspace),
+              let sourcePane = workspace.root.pane(containingSessionId: sessionId),
+              let sourceIndex = sourcePane.tabs.firstIndex(where: { $0.id == sessionId }),
+              workspace.root.pane(id: targetPane.id) != nil
+        else { return nil }
+        if sourcePane.id == targetPane.id, sourcePane.tabs.count == 1 { return nil }
+
+        let session = sourcePane.tabs[sourceIndex]
+        if sourcePane.id == targetPane.id || sourcePane.tabs.count > 1 {
+            detachSession(session, from: sourcePane, at: sourceIndex, in: workspace)
+            guard let leafNode = workspace.root.paneNode(paneId: targetPane.id),
+                  case .pane(let existing) = leafNode.content
+            else { return nil }
+            return finishSplitByMoving(
+                leafNode,
+                existingPane: existing,
+                movedSession: session,
+                orientation: orientation,
+                placement: placement,
+                in: workspace
+            )
+        }
+
+        guard let leafNode = workspace.root.paneNode(paneId: targetPane.id),
+              case .pane(let existing) = leafNode.content
+        else { return nil }
+        let newPane = finishSplitByMoving(
+            leafNode,
+            existingPane: existing,
+            movedSession: session,
+            orientation: orientation,
+            placement: placement,
+            in: workspace
+        )
+        detachSession(session, from: sourcePane, at: sourceIndex, in: workspace)
+        workspace.activePaneId = newPane.id
+        if workspace.workingDirectory != session.currentDirectory {
+            workspace.workingDirectory = session.currentDirectory
+        }
+        scheduleSave()
+        return newPane
+    }
+
+    private func finishSplitByMoving(
+        _ leafNode: PaneNode,
+        existingPane: Pane,
+        movedSession: Session,
+        orientation: SplitOrientation,
+        placement: SplitPlacement,
+        in workspace: Workspace
+    ) -> Pane {
+        let newPane = splitLeaf(
+            leafNode,
+            existingPane: existingPane,
+            movedSession: movedSession,
+            orientation: orientation,
+            placement: placement
+        )
+        workspace.activePaneId = newPane.id
+        if workspace.workingDirectory != movedSession.currentDirectory {
+            workspace.workingDirectory = movedSession.currentDirectory
+        }
+        if workspace.zoomedPaneId != nil { workspace.zoomedPaneId = nil }
+        scheduleSave()
+        return newPane
+    }
+
+    private func splitLeaf(
+        _ leafNode: PaneNode,
+        existingPane: Pane,
+        movedSession: Session,
+        orientation: SplitOrientation,
+        placement: SplitPlacement
+    ) -> Pane {
+        let movedPane = Pane(tabs: [movedSession], activeTabId: movedSession.id)
+        let existingChild = PaneNode(pane: existingPane)
+        let movedChild = PaneNode(pane: movedPane)
+        let firstChild = placement == .first ? movedChild : existingChild
+        let secondChild = placement == .first ? existingChild : movedChild
+        leafNode.content = .split(orientation: orientation, first: firstChild, second: secondChild, fraction: 0.5)
+        return movedPane
     }
 
     /// Removes `pane` and its tabs. If it's the workspace's only pane, the
