@@ -734,7 +734,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }
     }
 
-    @objc private func handleOpenFolder() {
+    @objc func handleOpenFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true

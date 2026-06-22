@@ -232,9 +232,9 @@ struct SidebarView: View {
                 systemName: "plus",
                 fontSize: 12,
                 size: 28,
-                help: "New workspace"
+                help: "Open folder as workspace"
             ) {
-                store.addWorkspace()
+                (NSApp.delegate as? AppDelegate)?.handleOpenFolder()
             }
             .padding(.top, Theme.space3)
             .padding(.bottom, Theme.space2)
@@ -248,9 +248,9 @@ struct SidebarView: View {
                     systemName: "plus",
                     fontSize: 12,
                     size: 28,
-                    help: "New workspace"
+                    help: "Open folder as workspace"
                 ) {
-                    store.addWorkspace()
+                    (NSApp.delegate as? AppDelegate)?.handleOpenFolder()
                 }
             }
             .padding(.horizontal, Theme.space4)
