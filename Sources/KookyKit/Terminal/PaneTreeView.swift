@@ -95,7 +95,7 @@ private struct PaneView: View {
                     .overlay(alignment: .bottom) {
                         // ⌘L composer rises from the bottom like a chat box.
                         // Per-pane / per-session, same as search.
-                        if active.composerActive {
+                        if active.composerActive, showPromptComposerControl() {
                             PaneComposerBar(
                                 session: active,
                                 onFocusGained: { store.activateTab(active, in: workspace) }
@@ -107,10 +107,10 @@ private struct PaneView: View {
                     .overlay {
                         PaneSplitDropOverlay(pane: pane, workspace: workspace, store: store)
                     }
-                // Always present now that it hosts the compose button — a
-                // stable bottom affordance, not gated on git / env / zoom data.
-                Rectangle().fill(Theme.chromeHairline).frame(height: 1)
-                PaneStatusBar(session: active, paneId: pane.id, workspace: workspace, store: store)
+                if paneStatusBarShouldRender(session: active, workspace: workspace) {
+                    Rectangle().fill(Theme.chromeHairline).frame(height: 1)
+                    PaneStatusBar(session: active, paneId: pane.id, workspace: workspace, store: store)
+                }
             } else {
                 Color.clear
             }
@@ -118,14 +118,12 @@ private struct PaneView: View {
         .background(PaneActivationObserver(pane: pane, workspace: workspace, store: store))
         .opacity(paneOpacity)
         .animation(Theme.chromeTransition, value: isFocused)
-        .onChange(of: pane.activeTab.map { paneStatusBarHasData(session: $0) } ?? false) { _, _ in
-            // Status-bar height transition. The bar is always present now (it
-            // hosts the compose button), so this fires when its CONTENT height
-            // changes — a pill/segment appears or clears, or FlowLayout wraps
-            // to another row — not when the whole bar shows/hides. That still
-            // moves chrome height → libghostty re-frames the surface →
-            // SIGWINCH burst → conda init's precmd hook would wipe scrollback
-            // (CLAUDE.md Known issues). Reuse v0.17.0 (M5.ddd) pane-zoom
+        .onChange(of: pane.activeTab.map { paneStatusBarShouldRender(session: $0, workspace: workspace) } ?? false) { _, _ in
+            // Status-bar height transition. A pill/segment/control appearing
+            // or clearing moves chrome height → libghostty re-frames the
+            // surface → SIGWINCH burst → conda init's precmd hook would wipe
+            // scrollback (CLAUDE.md Known issues). Reuse v0.17.0 (M5.ddd)
+            // pane-zoom
             // pattern: suspend SIGWINCH on EVERY tab's engine in the pane
             // (background tabs share the parent NSView geometry, not just
             // the active one), then flush once stable, gated on a
@@ -144,6 +142,11 @@ private struct PaneView: View {
                     engine.suspendsSizePropagation = false
                     engine.flushSize()
                 }
+            }
+        }
+        .onChange(of: showPromptComposerControl()) { _, enabled in
+            if !enabled {
+                for tab in pane.tabs { tab.composerActive = false }
             }
         }
     }
@@ -369,6 +372,10 @@ private struct PaneSplitDropOverlay: View {
 /// add the rendering branch in `PaneStatusBar.segment(for:)`, and add the
 /// data-presence branch in `paneStatusBarHasData`.
 enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
+    /// Opens the multiline prompt composer (`⌘L`). Unlike data-bearing
+    /// environment slots, this is a persistent control; hiding it lets the
+    /// bottom chrome row collapse when no other enabled slot has content.
+    case promptComposer = "prompt-composer"
     /// Tool-call activity pill, shown for agents that feed kooky their
     /// tool calls (`AgentTemplate.reportsToolCalls` — Claude + Pi).
     /// Special-positioned on the left of the bar (not inside the
@@ -386,6 +393,7 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
 
     var displayName: String {
         switch self {
+        case .promptComposer: return "Prompt composer"
         case .toolCallActivity: return "Tool calls"
         case .pythonVenv: return "Python venv"
         case .nodeVersion: return "Node version"
@@ -402,6 +410,7 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     /// section per tool-reporting agent — Claude / Pi), so no per-row glyph.
     var symbol: String? {
         switch self {
+        case .promptComposer: return "long.text.page.and.pencil"
         case .toolCallActivity: return nil
         case .pythonVenv: return "p.circle.fill"
         case .nodeVersion: return "n.circle.fill"
@@ -413,18 +422,19 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     }
 
     /// Default order shipped with kooky — used when the user hasn't
-    /// touched Settings → Status Bar. Tool-call activity goes first so a
-    /// fresh Settings → Status Bar list renders it at the top.
+    /// touched Settings → Status Bar. Prompt composer stays first because it
+    /// is the bottom row's persistent affordance; tool-call activity follows
+    /// so a fresh Settings → Status Bar list renders it before environment
+    /// data.
     static let defaultOrder: [StatusBarItemKind] = [
-        .toolCallActivity, .remoteLogin, .pythonVenv, .nodeVersion, .proxy, .gitBranch, .gitDiff,
+        .promptComposer, .toolCallActivity, .remoteLogin, .pythonVenv, .nodeVersion, .proxy, .gitBranch, .gitDiff,
     ]
 }
 
-/// Decides whether to draw the status-bar hairline + row. Returns false
-/// when every enabled kind has no data, so a bottom chrome divider
-/// doesn't draw over an empty row. Includes the activity pill — when a
-/// Claude session is alive but no other slot has data (no git repo, no
-/// venv), the bar appears just to host the pill.
+/// Decides whether data/configured controls exist for the status bar. Returns
+/// false when every enabled kind has no visible content, so a bottom chrome
+/// divider doesn't draw over an empty row. Includes persistent controls such
+/// as the prompt composer and dynamic content such as the activity pill.
 @MainActor
 func paneStatusBarHasData(session: Session) -> Bool {
     let model = KookySettingsModel.shared
@@ -435,6 +445,7 @@ func paneStatusBarHasData(session: Session) -> Bool {
         // question (is Claude active in this tab?) since the kind-enabled
         // gate already lives in the loop predicate.
         switch item {
+        case .promptComposer: return true
         case .toolCallActivity: if sessionWantsToolCallActivity(session) { return true }
         case .pythonVenv: if session.environment.pythonVenv != nil { return true }
         case .nodeVersion: if session.environment.nodeVersion != nil { return true }
@@ -445,6 +456,18 @@ func paneStatusBarHasData(session: Session) -> Bool {
         }
     }
     return false
+}
+
+@MainActor
+func showPromptComposerControl() -> Bool {
+    let model = KookySettingsModel.shared
+    return model.statusBarItems.contains(.promptComposer)
+        && !model.hiddenStatusBarItems.contains(.promptComposer)
+}
+
+@MainActor
+private func paneStatusBarShouldRender(session: Session, workspace: Workspace) -> Bool {
+    workspace.canZoom || paneStatusBarHasData(session: session)
 }
 
 /// Tool-call activity-pill visibility predicate — `true` when the tab's
@@ -522,8 +545,7 @@ private struct PaneStatusBar: View {
     var body: some View {
         HStack(spacing: 8) {
             // Zoom + compose: bracket-pill icon buttons. Zoom shows only when
-            // meaningful; compose is always present — the reason the bar's
-            // visibility gate is gone (the bar is the stable host for it).
+            // meaningful; compose follows Settings → Status Bar.
             if workspace.canZoom {
                 let isZoomed = workspace.isZoomed(paneId)
                 StatusBarIconButton(
@@ -538,12 +560,14 @@ private struct PaneStatusBar: View {
                     }
                 }
             }
-            StatusBarIconButton(
-                systemName: "long.text.page.and.pencil",
-                isActive: session.composerActive,
-                help: "Compose (⌘L)"
-            ) {
-                session.composerActive.toggle()
+            if showPromptComposerControl() {
+                StatusBarIconButton(
+                    systemName: "long.text.page.and.pencil",
+                    isActive: session.composerActive,
+                    help: "Compose (⌘L)"
+                ) {
+                    session.composerActive.toggle()
+                }
             }
             // Tool-call activity pill — Claude-only, shows the latest
             // tool call + click-to-popover for history. Sits on the left
@@ -575,13 +599,14 @@ private struct PaneStatusBar: View {
     /// honors the kind's hidden/visible state).
     private var visibleItems: [StatusBarItemKind] {
         model.statusBarItems.filter {
-            $0 != .toolCallActivity && !model.hiddenStatusBarItems.contains($0)
+            $0 != .promptComposer && $0 != .toolCallActivity && !model.hiddenStatusBarItems.contains($0)
         }
     }
 
     @ViewBuilder
     private func segment(for item: StatusBarItemKind) -> some View {
         switch item {
+        case .promptComposer: EmptyView()  // rendered separately on the left
         case .toolCallActivity: EmptyView()  // rendered separately on the left
         case .pythonVenv: pythonSegment
         case .nodeVersion: nodeSegment
