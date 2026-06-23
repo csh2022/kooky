@@ -1533,12 +1533,14 @@ private struct StatusBarReorderList: View {
     @State private var endTargeted: Bool = false
 
     /// Items that participate in drag-reorder + right-side FlowLayout
-    /// rendering. Excludes `.toolCallActivity` because its visual position
-    /// is hardcoded (leftmost in the bar) and reordering wouldn't change
-    /// anything visible. It still appears in the list under the "claude
-    /// code" section, but without a drag handle.
+    /// rendering. Excludes hardcoded left-side controls whose visual position
+    /// does not change with order.
     private var reorderableItems: [StatusBarItemKind] {
-        model.statusBarItems.filter { $0 != .toolCallActivity }
+        model.statusBarItems.filter { $0 != .promptComposer && $0 != .toolCallActivity }
+    }
+
+    private var controlItems: [StatusBarItemKind] {
+        model.statusBarItems.filter { $0 == .promptComposer }
     }
 
     /// Builtin agents that feed tool-call activity — each gets its own
@@ -1551,6 +1553,22 @@ private struct StatusBarReorderList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if !controlItems.isEmpty {
+                sectionHeader("Controls")
+                ForEach(Array(controlItems.enumerated()), id: \.element) { index, item in
+                    if index > 0 { SettingsHairline() }
+                    StatusBarRow(
+                        item: item,
+                        visible: !model.hiddenStatusBarItems.contains(item),
+                        isDragging: false,
+                        reorderable: false,
+                        onToggleVisible: { toggleVisible(item) },
+                        onBeginDrag: nil,
+                        onDrop: nil
+                    )
+                }
+                SettingsHairline()
+            }
             sectionHeader("Environment")
             ForEach(Array(reorderableItems.enumerated()), id: \.element) { index, item in
                 if index > 0 { SettingsHairline() }
@@ -1591,6 +1609,7 @@ private struct StatusBarReorderList: View {
                     defer { draggingItem = nil }
                     guard let raw = items.first,
                           let dropped = StatusBarItemKind(rawValue: raw),
+                          dropped != .promptComposer,
                           dropped != .toolCallActivity
                     else { return false }
                     return moveToEnd(dropped)
@@ -1684,7 +1703,7 @@ private struct StatusBarRow: View {
     /// When `false` the drag handle is replaced by an invisible spacer
     /// (matching `ReorderHandle`'s 22pt frame so the icon column stays
     /// aligned) and the row no longer hosts a `ReorderDropZone`. Used by
-    /// the `.toolCallActivity` row whose position is hardcoded in the bar.
+    /// rows whose positions are hardcoded in the bar.
     let reorderable: Bool
     let onToggleVisible: () -> Void
     let onBeginDrag: (() -> Void)?

@@ -888,6 +888,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
     @objc private func handleComposePrompt() {
         guard let session = activeStore?.active?.activeSession else { return }
+        guard showPromptComposerControl() else {
+            session.composerActive = false
+            return
+        }
         // ⌘L toggles the composer on the active tab. Per-session, like search.
         session.composerActive.toggle()
     }
