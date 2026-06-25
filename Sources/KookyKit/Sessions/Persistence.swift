@@ -15,6 +15,12 @@ struct PersistedState: Codable, Equatable {
 /// kooky window's `WorkspaceStore`; array order is window restore order.
 struct PersistedApp: Codable, Equatable {
     var windows: [PersistedWindow]
+    var recentWorkspacePaths: [String]?
+
+    init(windows: [PersistedWindow], recentWorkspacePaths: [String]? = nil) {
+        self.windows = windows
+        self.recentWorkspacePaths = recentWorkspacePaths
+    }
 }
 
 /// Window frame (size / position) is intentionally not persisted — kooky
@@ -272,14 +278,39 @@ final class AppPersistence {
 
     private let fileURL: URL
     private var windows: [PersistedWindow]
+    private var recentWorkspacePaths: [String]
+    private static let recentWorkspaceLimit = 12
 
     init(fileURL: URL = AppPersistence.defaultFileURL) {
         self.fileURL = fileURL
-        windows = Self.loadFromDisk(from: fileURL)
+        let loaded = Self.loadAppFromDisk(from: fileURL)
+        windows = loaded.windows
+        recentWorkspacePaths = loaded.recentWorkspacePaths
     }
 
     /// Window ids in restore order — `AppDelegate` rebuilds one window each.
     var windowIds: [UUID] { windows.map(\.id) }
+
+    /// Existing recent workspace directories, most-recent first. Deleted or
+    /// currently-unmounted paths stay on disk but are hidden from the chooser.
+    var recentWorkspaceURLs: [URL] {
+        recentWorkspacePaths.compactMap { path in
+            let url = URL(fileURLWithPath: path)
+            return isDirectory(url) ? url : nil
+        }
+    }
+
+    /// Moves `url` to the front of the app-level workspace MRU list.
+    func noteRecentWorkspace(_ url: URL) {
+        guard isDirectory(url) else { return }
+        let path = url.standardizedFileURL.path
+        recentWorkspacePaths.removeAll { $0 == path }
+        recentWorkspacePaths.insert(path, at: 0)
+        if recentWorkspacePaths.count > Self.recentWorkspaceLimit {
+            recentWorkspacePaths.removeLast(recentWorkspacePaths.count - Self.recentWorkspaceLimit)
+        }
+        writeToDisk()
+    }
 
     func state(for id: UUID) -> PersistedState? {
         windows.first { $0.id == id }?.state
@@ -306,7 +337,7 @@ final class AppPersistence {
     private func writeToDisk() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(PersistedApp(windows: windows)) else { return }
+        guard let data = try? encoder.encode(PersistedApp(windows: windows, recentWorkspacePaths: recentWorkspacePaths)) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
 
@@ -314,15 +345,49 @@ final class AppPersistence {
     /// and the legacy bare `PersistedState` (pre-multi-window) — a legacy
     /// file migrates to one window. Returns `[]` for a missing / corrupt file.
     static func loadFromDisk(from url: URL) -> [PersistedWindow] {
-        guard let data = try? Data(contentsOf: url) else { return [] }
+        loadAppFromDisk(from: url).windows
+    }
+
+    private struct LoadedApp {
+        var windows: [PersistedWindow]
+        var recentWorkspacePaths: [String]
+    }
+
+    private static func loadAppFromDisk(from url: URL) -> LoadedApp {
+        guard let data = try? Data(contentsOf: url) else {
+            return LoadedApp(windows: [], recentWorkspacePaths: [])
+        }
         let decoder = JSONDecoder()
         if let app = try? decoder.decode(PersistedApp.self, from: data) {
-            return app.windows
+            let recent = app.recentWorkspacePaths ?? seededRecentWorkspacePaths(from: app.windows)
+            return LoadedApp(windows: app.windows, recentWorkspacePaths: normalizedRecentPaths(recent))
         }
         if let legacy = try? decoder.decode(PersistedState.self, from: data) {
-            return [PersistedWindow(id: UUID(), state: legacy)]
+            let windows = [PersistedWindow(id: UUID(), state: legacy)]
+            return LoadedApp(
+                windows: windows,
+                recentWorkspacePaths: seededRecentWorkspacePaths(from: windows)
+            )
         }
-        return []
+        return LoadedApp(windows: [], recentWorkspacePaths: [])
+    }
+
+    private static func seededRecentWorkspacePaths(from windows: [PersistedWindow]) -> [String] {
+        normalizedRecentPaths(windows.flatMap { window in
+            window.state.workspaces.map(\.workingDirectoryPath)
+        })
+    }
+
+    private static func normalizedRecentPaths(_ paths: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for path in paths {
+            let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            result.append(normalized)
+            if result.count == recentWorkspaceLimit { break }
+        }
+        return result
     }
 }
 
