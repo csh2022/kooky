@@ -168,6 +168,7 @@ final class WorkspaceStore {
         let agent: AgentTemplate
         let cwd: URL
         let customTitle: String?
+        let currentTask: String?
         let workspaceId: UUID
         let paneId: UUID
         /// Captured conversation/session id so `⌘⇧T` resumes the agent
@@ -768,6 +769,19 @@ final class WorkspaceStore {
         scheduleSave()
     }
 
+    /// Set or clear the one-line status-bar task note for a session. Newlines
+    /// and repeated whitespace collapse so the bottom row never grows taller
+    /// because of pasted text.
+    func setCurrentTask(_ session: Session, to newTask: String) {
+        let collapsed = newTask
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = collapsed.isEmpty ? nil : collapsed
+        guard session.currentTask != next else { return }
+        session.currentTask = next
+        scheduleSave()
+    }
+
     func moveTab(from sourceIndex: Int, to destIndex: Int, in pane: Pane) {
         guard sourceIndex != destIndex,
               (0..<pane.tabs.count).contains(sourceIndex),
@@ -938,6 +952,7 @@ final class WorkspaceStore {
             agent: session.agent,
             cwd: session.currentDirectory,
             customTitle: session.customTitle,
+            currentTask: session.currentTask,
             workspaceId: workspace.id,
             paneId: pane.id,
             conversationId: session.conversationId
@@ -972,6 +987,7 @@ final class WorkspaceStore {
         if let custom = state.customTitle, !custom.isEmpty {
             session.customTitle = custom
         }
+        session.currentTask = state.currentTask
         activateWorkspace(workspace)
         activateTab(session, in: workspace)
         return session
@@ -1480,6 +1496,7 @@ final class WorkspaceStore {
                     conversationId: restoredConversationId
                 )
                 session.customTitle = tab.customTitle
+                session.currentTask = tab.currentTask
                 pane.tabs.append(session)
             }
             pane.activeTabId = pane.tabs.contains(where: { $0.id == p.activeTabId })

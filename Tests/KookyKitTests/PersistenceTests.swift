@@ -78,6 +78,18 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(decoded.resumeAgentId, AgentTemplate.claudeCodeID)
     }
 
+    func testPersistedTabRoundtripsCurrentTask() throws {
+        let tab = PersistedTab(
+            id: UUID(),
+            agentId: "terminal",
+            currentDirectoryPath: "/tmp",
+            currentTask: "ship the status bar task note"
+        )
+        let data = try JSONEncoder().encode(tab)
+        let decoded = try JSONDecoder().decode(PersistedTab.self, from: data)
+        XCTAssertEqual(decoded.currentTask, "ship the status bar task note")
+    }
+
     // MARK: - Window slots
 
     func testSetWindowUpsertsAndAppendsNewIdsLast() {

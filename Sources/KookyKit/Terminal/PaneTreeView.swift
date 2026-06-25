@@ -376,6 +376,10 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     /// environment slots, this is a persistent control; hiding it lets the
     /// bottom chrome row collapse when no other enabled slot has content.
     case promptComposer = "prompt-composer"
+    /// Editable one-line note for what this session is currently handling.
+    /// Like the composer, this is a persistent control; hiding it lets the
+    /// bottom chrome row collapse when no other enabled slot has content.
+    case currentTask = "current-task"
     /// Tool-call activity pill, shown for agents that feed kooky their
     /// tool calls (`AgentTemplate.reportsToolCalls` — Claude + Pi).
     /// Special-positioned on the left of the bar (not inside the
@@ -394,6 +398,7 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     var displayName: String {
         switch self {
         case .promptComposer: return "Prompt composer"
+        case .currentTask: return "Current task"
         case .toolCallActivity: return "Tool calls"
         case .pythonVenv: return "Python venv"
         case .nodeVersion: return "Node version"
@@ -411,6 +416,7 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     var symbol: String? {
         switch self {
         case .promptComposer: return "long.text.page.and.pencil"
+        case .currentTask: return "pencil"
         case .toolCallActivity: return nil
         case .pythonVenv: return "p.circle.fill"
         case .nodeVersion: return "n.circle.fill"
@@ -427,7 +433,7 @@ enum StatusBarItemKind: String, CaseIterable, Codable, Hashable, Sendable {
     /// so a fresh Settings → Status Bar list renders it before environment
     /// data.
     static let defaultOrder: [StatusBarItemKind] = [
-        .promptComposer, .toolCallActivity, .remoteLogin, .pythonVenv, .nodeVersion, .proxy, .gitBranch, .gitDiff,
+        .promptComposer, .currentTask, .toolCallActivity, .remoteLogin, .pythonVenv, .nodeVersion, .proxy, .gitBranch, .gitDiff,
     ]
 }
 
@@ -446,6 +452,7 @@ func paneStatusBarHasData(session: Session) -> Bool {
         // gate already lives in the loop predicate.
         switch item {
         case .promptComposer: return true
+        case .currentTask: return true
         case .toolCallActivity: if sessionWantsToolCallActivity(session) { return true }
         case .pythonVenv: if session.environment.pythonVenv != nil { return true }
         case .nodeVersion: if session.environment.nodeVersion != nil { return true }
@@ -463,6 +470,13 @@ func showPromptComposerControl() -> Bool {
     let model = KookySettingsModel.shared
     return model.statusBarItems.contains(.promptComposer)
         && !model.hiddenStatusBarItems.contains(.promptComposer)
+}
+
+@MainActor
+func showCurrentTaskControl() -> Bool {
+    let model = KookySettingsModel.shared
+    return model.statusBarItems.contains(.currentTask)
+        && !model.hiddenStatusBarItems.contains(.currentTask)
 }
 
 @MainActor
@@ -576,16 +590,15 @@ private struct PaneStatusBar: View {
             if showToolCallActivityPill(for: session) {
                 ToolCallActivityPill(session: session)
             }
+            if showCurrentTaskControl() {
+                CurrentTaskStatusSegment(session: session, store: store)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            }
             // Flow wraps overflowing segments to a new row instead of hiding
             // them — narrow panes still surface every status at the cost of
             // a taller chrome row. Each row is right-aligned so the visual
             // matches the single-row layout when nothing wraps.
-            FlowLayout(alignment: .trailing, spacing: 8, rowSpacing: 4) {
-                ForEach(visibleItems, id: \.self) { item in
-                    segment(for: item)
-                }
-            }
-            .frame(maxWidth: .infinity)
+            trailingSegments
         }
         .font(Theme.mono(11))
         .padding(.horizontal, Theme.space2)
@@ -599,7 +612,24 @@ private struct PaneStatusBar: View {
     /// honors the kind's hidden/visible state).
     private var visibleItems: [StatusBarItemKind] {
         model.statusBarItems.filter {
-            $0 != .promptComposer && $0 != .toolCallActivity && !model.hiddenStatusBarItems.contains($0)
+            $0 != .promptComposer
+                && $0 != .currentTask
+                && $0 != .toolCallActivity
+                && !model.hiddenStatusBarItems.contains($0)
+        }
+    }
+
+    @ViewBuilder
+    private var trailingSegments: some View {
+        let segments = FlowLayout(alignment: .trailing, spacing: 8, rowSpacing: 4) {
+            ForEach(visibleItems, id: \.self) { item in
+                segment(for: item)
+            }
+        }
+        if showCurrentTaskControl() {
+            segments
+        } else {
+            segments.frame(maxWidth: .infinity)
         }
     }
 
@@ -607,6 +637,7 @@ private struct PaneStatusBar: View {
     private func segment(for item: StatusBarItemKind) -> some View {
         switch item {
         case .promptComposer: EmptyView()  // rendered separately on the left
+        case .currentTask: EmptyView()  // rendered separately as the adaptive middle row
         case .toolCallActivity: EmptyView()  // rendered separately on the left
         case .pythonVenv: pythonSegment
         case .nodeVersion: nodeSegment
@@ -731,6 +762,101 @@ private struct StatusSegment<Content: View>: View {
             RoundedRectangle(cornerRadius: 4)
                 .stroke(Theme.chromeFaint, lineWidth: 1)
         )
+    }
+}
+
+private struct CurrentTaskStatusSegment: View {
+    @Bindable var session: Session
+    let store: WorkspaceStore
+
+    @State private var isEditing = false
+    @State private var isHovered = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Group {
+            if isEditing {
+                editor
+            } else {
+                display
+            }
+        }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var display: some View {
+        Button {
+            beginEditing()
+        } label: {
+            StatusSegment(systemImage: "pencil") {
+                Text(displayText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(session.currentTask == nil ? Theme.chromeMuted : Theme.chromeForeground)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isHovered ? Theme.chromeHover : .clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 4))
+        .help(helpText)
+        .onHover { isHovered = $0 }
+    }
+
+    private var editor: some View {
+        StatusSegment(systemImage: "pencil") {
+            TextField("current task", text: $draft)
+                .textFieldStyle(.plain)
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.chromeForeground)
+                .lineLimit(1)
+                .focused($focused)
+                .onSubmit(commit)
+                .onExitCommand(perform: cancel)
+                .frame(minWidth: 120, maxWidth: .infinity)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Theme.chromeActive)
+        )
+        .onAppear {
+            draft = session.currentTask ?? ""
+            DispatchQueue.main.async { focused = true }
+        }
+        .onChange(of: focused) { _, isFocused in
+            if isEditing && !isFocused { commit() }
+        }
+    }
+
+    private var displayText: String {
+        session.currentTask ?? "current task"
+    }
+
+    private var helpText: String {
+        session.currentTask ?? "Set current task"
+    }
+
+    private func beginEditing() {
+        draft = session.currentTask ?? ""
+        isEditing = true
+    }
+
+    private func commit() {
+        guard isEditing else { return }
+        isEditing = false
+        focused = false
+        store.setCurrentTask(session, to: draft)
+    }
+
+    private func cancel() {
+        guard isEditing else { return }
+        draft = session.currentTask ?? ""
+        isEditing = false
+        focused = false
     }
 }
 
