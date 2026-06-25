@@ -34,6 +34,8 @@ private struct PaneView: View {
 
     @State private var contextMenuOpen = false
     @State private var contextMenuAnchor: UnitPoint = .center
+    @State private var currentTaskEditorSessionId: UUID?
+    @State private var currentTaskDraft = ""
     /// Bumped on each status-bar visibility transition so rapid back-to-back
     /// toggles don't have an earlier restore Task prematurely clear a still-
     /// in-flight suspension window. Same pattern as `WorkspaceStore.toggleZoom`
@@ -109,15 +111,35 @@ private struct PaneView: View {
                     }
                 if paneStatusBarShouldRender(session: active, workspace: workspace) {
                     Rectangle().fill(Theme.chromeHairline).frame(height: 1)
-                    PaneStatusBar(session: active, paneId: pane.id, workspace: workspace, store: store)
+                    PaneStatusBar(
+                        session: active,
+                        paneId: pane.id,
+                        workspace: workspace,
+                        store: store,
+                        isCurrentTaskEditorOpen: currentTaskEditorSessionId == active.id,
+                        openCurrentTaskEditor: { openCurrentTaskEditor(for: active) }
+                    )
                 }
             } else {
                 Color.clear
             }
         }
+        .overlayPreferenceValue(CurrentTaskEditorAnchorKey.self) { anchor in
+            currentTaskEditorOverlay(anchor: anchor)
+        }
         .background(PaneActivationObserver(pane: pane, workspace: workspace, store: store))
         .opacity(paneOpacity)
         .animation(Theme.chromeTransition, value: isFocused)
+        .onChange(of: isFocused) { _, focused in
+            if !focused {
+                closeCurrentTaskEditor()
+            }
+        }
+        .onChange(of: pane.activeTab?.id) { _, activeTabId in
+            if currentTaskEditorSessionId != activeTabId {
+                closeCurrentTaskEditor()
+            }
+        }
         .onChange(of: pane.activeTab.map { paneStatusBarShouldRender(session: $0, workspace: workspace) } ?? false) { _, _ in
             // Status-bar height transition. A pill/segment/control appearing
             // or clearing moves chrome height → libghostty re-frames the
@@ -149,6 +171,57 @@ private struct PaneView: View {
                 for tab in pane.tabs { tab.composerActive = false }
             }
         }
+    }
+
+    @ViewBuilder
+    private func currentTaskEditorOverlay(anchor: Anchor<CGRect>?) -> some View {
+        if let anchor,
+           let active = pane.activeTab,
+           currentTaskEditorSessionId == active.id
+        {
+            GeometryReader { proxy in
+                let buttonRect = proxy[anchor]
+                let margin = Theme.space2
+                let editorWidth = min(
+                    CurrentTaskEditorPanel.preferredWidth,
+                    max(CurrentTaskEditorPanel.minimumWidth, proxy.size.width - margin * 2)
+                )
+                let maxOriginX = max(margin, proxy.size.width - editorWidth - margin)
+                let originX = min(max(buttonRect.minX, margin), maxOriginX)
+                let originY = max(margin, buttonRect.minY - CurrentTaskEditorPanel.height - 8)
+
+                ZStack(alignment: .topLeading) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            closeCurrentTaskEditor()
+                        }
+
+                    CurrentTaskEditorPanel(
+                        session: active,
+                        store: store,
+                        draft: $currentTaskDraft,
+                        onClose: closeCurrentTaskEditor
+                    )
+                    .frame(width: editorWidth, height: CurrentTaskEditorPanel.height)
+                    .position(
+                        x: originX + editorWidth / 2,
+                        y: originY + CurrentTaskEditorPanel.height / 2
+                    )
+                    .zIndex(1)
+                }
+            }
+        }
+    }
+
+    private func openCurrentTaskEditor(for session: Session) {
+        store.activateTab(session, in: workspace)
+        currentTaskDraft = session.currentTask ?? ""
+        currentTaskEditorSessionId = session.id
+    }
+
+    private func closeCurrentTaskEditor() {
+        currentTaskEditorSessionId = nil
     }
 }
 
@@ -555,6 +628,8 @@ private struct PaneStatusBar: View {
     /// reads, so observation is per-`statusBarItems` / per-`hiddenStatusBarItems`
     /// access without needing `@Bindable`.
     private let model = KookySettingsModel.shared
+    let isCurrentTaskEditorOpen: Bool
+    let openCurrentTaskEditor: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -591,7 +666,11 @@ private struct PaneStatusBar: View {
                 ToolCallActivityPill(session: session)
             }
             if showCurrentTaskControl() {
-                CurrentTaskStatusSegment(session: session, store: store)
+                CurrentTaskStatusSegment(
+                    session: session,
+                    isEditorOpen: isCurrentTaskEditorOpen,
+                    onEditRequested: openCurrentTaskEditor
+                )
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
             // Flow wraps overflowing segments to a new row instead of hiding
@@ -766,37 +845,33 @@ private struct StatusSegment<Content: View>: View {
 }
 
 private struct CurrentTaskStatusSegment: View {
-    private static let taskEditorWidth: CGFloat = 300
-    private static let taskEditorYOffset: CGFloat = -126
-
     @Bindable var session: Session
-    let store: WorkspaceStore
+    let isEditorOpen: Bool
+    let onEditRequested: () -> Void
 
-    @State private var isPopoverOpen = false
     @State private var isHovered = false
-    @State private var draft = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Button {
-                openPopover()
+                onEditRequested()
             } label: {
                 Image(systemName: "pencil")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isPopoverOpen || isHovered ? Theme.chromeForeground : Theme.chromeMuted)
+                    .foregroundStyle(isEditorOpen || isHovered ? Theme.chromeForeground : Theme.chromeMuted)
                     .frame(width: 18, height: 18)
                     .background(
                         RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(isPopoverOpen || isHovered ? Theme.chromeHover : .clear)
+                            .fill(isEditorOpen || isHovered ? Theme.chromeHover : .clear)
                     )
             }
             .buttonStyle(.plain)
             .help(buttonHelp)
+            .anchorPreference(key: CurrentTaskEditorAnchorKey.self, value: .bounds) { $0 }
 
             if let task = session.currentTask, !task.isEmpty {
                 Button {
-                    openPopover()
+                    onEditRequested()
                 } label: {
                     Text(task)
                         .lineLimit(1)
@@ -812,24 +887,35 @@ private struct CurrentTaskStatusSegment: View {
         }
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .overlay(alignment: .topLeading) {
-            if isPopoverOpen {
-                taskEditor
-                    .frame(width: Self.taskEditorWidth)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .stroke(Theme.chromeFaint, lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
-                    .offset(y: Self.taskEditorYOffset)
-                    .zIndex(10)
-            }
-        }
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
-    private var taskEditor: some View {
+    private var buttonHelp: String {
+        session.currentTask == nil ? "Set current task" : "Edit current task"
+    }
+}
+
+private struct CurrentTaskEditorAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+private struct CurrentTaskEditorPanel: View {
+    static let preferredWidth: CGFloat = 300
+    static let minimumWidth: CGFloat = 180
+    static let height: CGFloat = 124
+
+    @Bindable var session: Session
+    let store: WorkspaceStore
+    @Binding var draft: String
+    let onClose: () -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Current task")
                 .font(Theme.mono(11, weight: .medium))
@@ -846,7 +932,7 @@ private struct CurrentTaskStatusSegment: View {
                 .bracketBorder()
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                Button("Cancel") { closePopover() }
+                Button("Cancel") { onClose() }
                     .buttonStyle(.plain)
                     .font(Theme.mono(11))
                     .foregroundStyle(Theme.chromeMuted)
@@ -855,30 +941,22 @@ private struct CurrentTaskStatusSegment: View {
         }
         .padding(12)
         .background(Theme.chromeBackground)
-        .onExitCommand(perform: closePopover)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .stroke(Theme.chromeFaint, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
+        .contentShape(Rectangle())
+        .onExitCommand(perform: onClose)
         .onAppear {
             draft = session.currentTask ?? ""
             DispatchQueue.main.async { focused = true }
         }
     }
 
-    private var buttonHelp: String {
-        session.currentTask == nil ? "Set current task" : "Edit current task"
-    }
-
-    private func openPopover() {
-        draft = session.currentTask ?? ""
-        isPopoverOpen = true
-    }
-
     private func commit() {
         store.setCurrentTask(session, to: draft)
-        closePopover()
-    }
-
-    private func closePopover() {
-        isPopoverOpen = false
-        focused = false
+        onClose()
     }
 }
 
