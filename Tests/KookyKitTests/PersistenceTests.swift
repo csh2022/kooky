@@ -8,6 +8,13 @@ final class PersistenceTests: XCTestCase {
             .appendingPathComponent("kooky-test-\(UUID().uuidString).json")
     }
 
+    private func tempDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kooky-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     /// Minimal valid `PersistedState` — one workspace, one pane, one tab.
     private func makeState(workspaceId: UUID = UUID(), dir: String = "/tmp") -> PersistedState {
         let tab = PersistedTab(id: UUID(), agentId: "terminal", currentDirectoryPath: dir)
@@ -42,6 +49,42 @@ final class PersistenceTests: XCTestCase {
         let app = AppPersistence(fileURL: url)
         XCTAssertEqual(app.windowIds, [w1.id, w2.id])
         XCTAssertEqual(app.state(for: w2.id), w2.state)
+    }
+
+    func testLoadsRecentWorkspacePathsInOrder() throws {
+        let url = tempURL()
+        let first = try tempDirectory()
+        let second = try tempDirectory()
+        try write(
+            PersistedApp(windows: [], recentWorkspacePaths: [first.path, second.path]),
+            to: url
+        )
+
+        let app = AppPersistence(fileURL: url)
+        XCTAssertEqual(
+            app.recentWorkspaceURLs.map { $0.standardizedFileURL.path },
+            [first.standardizedFileURL.path, second.standardizedFileURL.path]
+        )
+    }
+
+    func testLegacyStateSeedsRecentWorkspacePathsFromSavedWorkspaces() throws {
+        let url = tempURL()
+        let dir = try tempDirectory()
+        let legacy = makeState(dir: dir.path)
+        try write(legacy, to: url)
+
+        let app = AppPersistence(fileURL: url)
+        XCTAssertEqual(app.recentWorkspaceURLs.map(\.path), [dir.standardizedFileURL.path])
+    }
+
+    func testEmptyRecentWorkspacePathsDoesNotSeedFromSavedWorkspaces() throws {
+        let url = tempURL()
+        let dir = try tempDirectory()
+        let window = PersistedWindow(id: UUID(), state: makeState(dir: dir.path))
+        try write(PersistedApp(windows: [window], recentWorkspacePaths: []), to: url)
+
+        let app = AppPersistence(fileURL: url)
+        XCTAssertTrue(app.recentWorkspaceURLs.isEmpty)
     }
 
     func testMissingOrCorruptFileLoadsEmpty() throws {
@@ -124,6 +167,24 @@ final class PersistenceTests: XCTestCase {
         let reloaded = AppPersistence(fileURL: url)
         XCTAssertEqual(reloaded.windowIds, [id])
         XCTAssertEqual(reloaded.state(for: id), state)
+    }
+
+    func testNoteRecentWorkspaceMovesDuplicateToFrontAndPersists() throws {
+        let url = tempURL()
+        let first = try tempDirectory()
+        let second = try tempDirectory()
+        let app = AppPersistence(fileURL: url)
+
+        app.noteRecentWorkspace(first)
+        app.noteRecentWorkspace(second)
+        app.noteRecentWorkspace(first)
+
+        let expected = [first.standardizedFileURL.path, second.standardizedFileURL.path]
+        XCTAssertEqual(app.recentWorkspaceURLs.map { $0.standardizedFileURL.path }, expected)
+        XCTAssertEqual(
+            AppPersistence(fileURL: url).recentWorkspaceURLs.map { $0.standardizedFileURL.path },
+            expected
+        )
     }
 
     // MARK: - WindowPersistence

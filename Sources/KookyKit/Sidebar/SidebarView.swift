@@ -74,8 +74,12 @@ struct SidebarView: View {
         .dropDestination(for: URL.self) { urls, _ in
             let folders = urls.filter(isDirectory)
             guard !folders.isEmpty else { return false }
-            for folder in folders {
-                store.addWorkspace(workingDirectory: folder)
+            if let delegate = NSApp.delegate as? AppDelegate {
+                delegate.openWorkspaceDirectories(folders, in: store)
+            } else {
+                for folder in folders {
+                    store.addWorkspace(workingDirectory: folder)
+                }
             }
             return true
         } isTargeted: { isFolderDropTargeted = $0 }
@@ -219,14 +223,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func brand(isCompact: Bool) -> some View {
         if isCompact {
-            HoverableIconButton(
-                systemName: "plus",
-                fontSize: 12,
-                size: 28,
-                help: "Open folder as workspace"
-            ) {
-                (NSApp.delegate as? AppDelegate)?.handleOpenFolder()
-            }
+            openWorkspaceControl()
             .padding(.top, Theme.space3)
             .padding(.bottom, Theme.space2)
         } else {
@@ -235,18 +232,37 @@ struct SidebarView: View {
                     .font(Theme.display(15, weight: .medium))
                     .foregroundStyle(Theme.chromeForeground)
                 Spacer()
-                HoverableIconButton(
-                    systemName: "plus",
-                    fontSize: 12,
-                    size: 28,
-                    help: "Open folder as workspace"
-                ) {
-                    (NSApp.delegate as? AppDelegate)?.handleOpenFolder()
-                }
+                openWorkspaceControl()
             }
             .padding(.horizontal, Theme.space4)
             .padding(.top, Theme.space3)
             .padding(.bottom, Theme.space2)
+        }
+    }
+
+    @ViewBuilder
+    private func openWorkspaceControl() -> some View {
+        let delegate = NSApp.delegate as? AppDelegate
+        let recentDirectories = Array((delegate?.recentWorkspaceDirectories() ?? []).prefix(8))
+        if recentDirectories.isEmpty {
+            HoverableIconButton(
+                systemName: "plus",
+                fontSize: 12,
+                size: 28,
+                help: "Open folder as workspace"
+            ) {
+                delegate?.handleOpenFolderForStore(store)
+            }
+        } else {
+            RecentWorkspaceMenuButton(
+                recentDirectories: recentDirectories,
+                openDirectory: { url in
+                    delegate?.openWorkspaceDirectory(url, in: store)
+                },
+                chooseFolder: {
+                    delegate?.handleOpenFolderForStore(store)
+                }
+            )
         }
     }
 
@@ -395,6 +411,52 @@ struct SidebarView: View {
         // / AppDelegate routes all go through here, so this stays the one
         // mechanism that opens the create sheet.
         store.pendingCreateWorktreeRequest = workspace
+    }
+}
+
+private struct RecentWorkspaceMenuButton: View {
+    let recentDirectories: [URL]
+    let openDirectory: (URL) -> Void
+    let chooseFolder: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Menu {
+            Section("Recent Folders") {
+                ForEach(recentDirectories, id: \.path) { url in
+                    Button {
+                        openDirectory(url)
+                    } label: {
+                        Label(menuTitle(for: url), systemImage: "folder")
+                    }
+                }
+            }
+            Divider()
+            Button {
+                DispatchQueue.main.async {
+                    chooseFolder()
+                }
+            } label: {
+                Label("Choose Folder...", systemImage: "folder.badge.plus")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 28, height: 28)
+                .background(isHovered ? Color.white.opacity(0.12) : .clear)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help("Open folder as workspace")
+    }
+
+    private func menuTitle(for url: URL) -> String {
+        let name = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+        let parent = (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+        return "\(name) (\(parent))"
     }
 }
 

@@ -417,6 +417,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// most-recently-key kooky window; nil only when no kooky window exists.
     private var activeStore: WorkspaceStore? { activeController?.store }
 
+    private func controller(for store: WorkspaceStore) -> KookyWindowController? {
+        windowControllers.first { $0.store === store }
+    }
+
+    func recentWorkspaceDirectories() -> [URL] {
+        appPersistence.recentWorkspaceURLs
+    }
+
+    func openWorkspaceDirectory(_ url: URL, in store: WorkspaceStore) {
+        guard isDirectory(url) else { return }
+        appPersistence.noteRecentWorkspace(url)
+        store.addWorkspace(workingDirectory: url)
+    }
+
+    func openWorkspaceDirectories(_ urls: [URL], in store: WorkspaceStore) {
+        for url in urls {
+            openWorkspaceDirectory(url, in: store)
+        }
+    }
+
+    func handleOpenFolderForStore(_ store: WorkspaceStore) {
+        openFolderPanel(controller: controller(for: store), store: store)
+    }
+
     /// Re-applies `Theme.windowAppearance` to every kooky-owned window so a
     /// theme switch flips title bar / traffic lights / sheets in lockstep
     /// with the SwiftUI chrome. Enumerated rather than walking `NSApp.windows`
@@ -735,6 +759,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     @objc func handleOpenFolder() {
+        openFolderPanel(controller: activeController, store: activeStore)
+    }
+
+    private func openFolderPanel(controller: KookyWindowController?, store: WorkspaceStore?) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -743,14 +771,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         panel.title = "Open Folder"
         panel.message = "Choose a folder to open as a workspace."
 
-        let controller = activeController
-        let store = controller?.store
+        let store = store ?? controller?.store
         // Start the picker at the active workspace's cwd — the user is
         // usually picking something nearby (sibling project, parent dir).
         panel.directoryURL = store?.active?.workingDirectory
 
         let openPicked: () -> Void = {
-            for url in panel.urls { store?.addWorkspace(workingDirectory: url) }
+            guard let store else { return }
+            self.openWorkspaceDirectories(panel.urls, in: store)
         }
         if let window = controller?.window {
             panel.beginSheetModal(for: window) { response in
