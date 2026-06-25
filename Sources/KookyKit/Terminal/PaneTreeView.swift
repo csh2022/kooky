@@ -790,7 +790,7 @@ private struct CurrentTaskStatusSegment: View {
             }
             .buttonStyle(.plain)
             .help(buttonHelp)
-            .popover(isPresented: $isPopoverOpen, attachmentAnchor: .point(.top), arrowEdge: .top) {
+            .popover(isPresented: $isPopoverOpen, attachmentAnchor: .point(.top), arrowEdge: .bottom) {
                 taskEditor
             }
 
