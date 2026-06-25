@@ -428,7 +428,7 @@ private struct RecentWorkspaceMenuButton: View {
                     Button {
                         openDirectory(url)
                     } label: {
-                        Label(menuTitle(for: url), systemImage: "folder")
+                        Label(recentWorkspaceMenuTitle(for: url), systemImage: "folder")
                     }
                 }
             }
@@ -453,11 +453,12 @@ private struct RecentWorkspaceMenuButton: View {
         .help("Open folder as workspace")
     }
 
-    private func menuTitle(for url: URL) -> String {
-        let name = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
-        let parent = (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
-        return "\(name) (\(parent))"
-    }
+}
+
+func recentWorkspaceMenuTitle(for url: URL) -> String {
+    let name = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+    let path = (url.path as NSString).abbreviatingWithTildeInPath
+    return "\(name) (\(path))"
 }
 
 /// Drag source + drop target with a direction-aware edge indicator —
