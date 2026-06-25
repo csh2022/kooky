@@ -127,7 +127,14 @@ private struct PaneView: View {
         .overlayPreferenceValue(CurrentTaskEditorAnchorKey.self) { anchor in
             currentTaskEditorOverlay(anchor: anchor)
         }
-        .background(PaneActivationObserver(pane: pane, workspace: workspace, store: store))
+        .background(
+            PaneActivationObserver(
+                pane: pane,
+                workspace: workspace,
+                store: store,
+                suppressActivation: { currentTaskEditorSessionId != nil }
+            )
+        )
         .opacity(paneOpacity)
         .animation(Theme.chromeTransition, value: isFocused)
         .onChange(of: isFocused) { _, focused in
@@ -190,26 +197,17 @@ private struct PaneView: View {
                 let originX = min(max(buttonRect.minX, margin), maxOriginX)
                 let originY = max(margin, buttonRect.minY - CurrentTaskEditorPanel.height - 8)
 
-                ZStack(alignment: .topLeading) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            closeCurrentTaskEditor()
-                        }
-
-                    CurrentTaskEditorPanel(
-                        session: active,
-                        store: store,
-                        draft: $currentTaskDraft,
-                        onClose: closeCurrentTaskEditor
-                    )
-                    .frame(width: editorWidth, height: CurrentTaskEditorPanel.height)
-                    .position(
-                        x: originX + editorWidth / 2,
-                        y: originY + CurrentTaskEditorPanel.height / 2
-                    )
-                    .zIndex(1)
-                }
+                CurrentTaskEditorPanel(
+                    session: active,
+                    store: store,
+                    draft: $currentTaskDraft,
+                    onClose: closeCurrentTaskEditor
+                )
+                .frame(width: editorWidth, height: CurrentTaskEditorPanel.height)
+                .position(
+                    x: originX + editorWidth / 2,
+                    y: originY + CurrentTaskEditorPanel.height / 2
+                )
             }
         }
     }
@@ -229,15 +227,18 @@ private struct PaneActivationObserver: NSViewRepresentable {
     let pane: Pane
     let workspace: Workspace
     let store: WorkspaceStore
+    let suppressActivation: () -> Bool
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
         view.onActivate = activatePane
+        view.suppressActivation = suppressActivation
         return view
     }
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
         nsView.onActivate = activatePane
+        nsView.suppressActivation = suppressActivation
     }
 
     static func dismantleNSView(_ nsView: ObserverView, coordinator: ()) {
@@ -253,6 +254,7 @@ private struct PaneActivationObserver: NSViewRepresentable {
 
     final class ObserverView: NSView {
         var onActivate: (() -> Void)?
+        var suppressActivation: (() -> Bool)?
         private var monitor: Any?
 
         override func viewDidMoveToWindow() {
@@ -275,6 +277,7 @@ private struct PaneActivationObserver: NSViewRepresentable {
         }
 
         private func activateIfEventIsInside(_ event: NSEvent) {
+            guard suppressActivation?() != true else { return }
             guard event.window === window else { return }
             let target = window?.contentView.flatMap { contentView -> NSView? in
                 contentView.hitTest(contentView.convert(event.locationInWindow, from: nil))
@@ -941,6 +944,7 @@ private struct CurrentTaskEditorPanel: View {
         }
         .padding(12)
         .background(Theme.chromeBackground)
+        .background(CurrentTaskOutsideClickMonitor(onOutsideClick: onClose))
         .overlay(
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .stroke(Theme.chromeFaint, lineWidth: 1)
@@ -957,6 +961,60 @@ private struct CurrentTaskEditorPanel: View {
     private func commit() {
         store.setCurrentTask(session, to: draft)
         onClose()
+    }
+}
+
+private struct CurrentTaskOutsideClickMonitor: NSViewRepresentable {
+    let onOutsideClick: () -> Void
+
+    func makeNSView(context: Context) -> MonitorView {
+        let view = MonitorView()
+        view.onOutsideClick = onOutsideClick
+        return view
+    }
+
+    func updateNSView(_ nsView: MonitorView, context: Context) {
+        nsView.onOutsideClick = onOutsideClick
+    }
+
+    static func dismantleNSView(_ nsView: MonitorView, coordinator: ()) {
+        nsView.removeMonitor()
+    }
+
+    final class MonitorView: NSView {
+        var onOutsideClick: (() -> Void)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil {
+                removeMonitor()
+            } else if monitor == nil {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                    self?.closeIfEventIsOutside(event)
+                    return event
+                }
+            }
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
+
+        func removeMonitor() {
+            guard let monitor else { return }
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+
+        private func closeIfEventIsOutside(_ event: NSEvent) {
+            guard event.window === window else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            guard !bounds.contains(point) else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.onOutsideClick?()
+            }
+        }
     }
 }
 
