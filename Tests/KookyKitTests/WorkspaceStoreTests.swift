@@ -941,6 +941,7 @@ final class WorkspaceStoreTests: XCTestCase {
         let ws = store.addWorkspace(workingDirectory: projectA)
         let session = store.addTab(in: ws, template: .claudeCode, initialCwd: projectB)
         session.customTitle = "release prep"
+        store.setCurrentTask(session, to: "validate release notes")
         XCTAssertEqual(firstPane(ws).tabs.count, 2)
 
         store.closeTab(session, in: ws)
@@ -953,6 +954,7 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(reopened?.agent.id, "claude-code")
         XCTAssertEqual(reopened?.currentDirectory.path, projectB.path)
         XCTAssertEqual(reopened?.customTitle, "release prep")
+        XCTAssertEqual(reopened?.currentTask, "validate release notes")
         XCTAssertEqual(pane.activeTabId, reopened?.id)
     }
 

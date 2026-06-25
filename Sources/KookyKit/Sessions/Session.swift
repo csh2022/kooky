@@ -67,6 +67,10 @@ final class Session: Identifiable {
     /// Empty / whitespace input via `renameTab` clears this back to `nil` so
     /// the tab title resumes tracking the cwd.
     var customTitle: String?
+    /// User-written one-line description of what this session is currently
+    /// handling. Persisted with the tab so the note follows tab switches and
+    /// app restore, unlike runtime-only activity/tool-call state.
+    var currentTask: String?
     /// Title the running program set via `OSC 0` / `OSC 2` (libghostty's
     /// `GHOSTTY_ACTION_SET_TITLE`) — e.g. the `user@host:dir` an `ssh` remote
     /// shell emits. Runtime-only, never persisted. The shell wrapper re-emits
@@ -296,6 +300,7 @@ final class Session: Identifiable {
         currentDirectory: URL,
         agent: AgentTemplate,
         customTitle: String? = nil,
+        currentTask: String? = nil,
         conversationId: String? = nil,
         resumeAgent: AgentTemplate? = nil
     ) {
@@ -304,6 +309,7 @@ final class Session: Identifiable {
         self.currentDirectory = currentDirectory
         self.agent = agent
         self.customTitle = customTitle
+        self.currentTask = currentTask
         self.conversationId = conversationId
         self.resumeAgent = resumeAgent
     }

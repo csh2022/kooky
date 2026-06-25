@@ -40,6 +40,7 @@ final class StatusBarItemKindTests: XCTestCase {
         // silently invalidates every user's saved configuration. Pin the
         // mapping so renames force an explicit test update.
         XCTAssertEqual(StatusBarItemKind.promptComposer.rawValue, "prompt-composer")
+        XCTAssertEqual(StatusBarItemKind.currentTask.rawValue, "current-task")
         XCTAssertEqual(StatusBarItemKind.toolCallActivity.rawValue, "tool-call-activity")
         XCTAssertEqual(StatusBarItemKind.pythonVenv.rawValue, "python-venv")
         XCTAssertEqual(StatusBarItemKind.nodeVersion.rawValue, "node-version")
@@ -62,6 +63,15 @@ final class StatusBarItemKindTests: XCTestCase {
 
             XCTAssertFalse(showPromptComposerControl())
             XCTAssertFalse(paneStatusBarHasData(session: makeSession()))
+        }
+    }
+
+    func testCurrentTaskCanBeOnlyVisibleStatusBarControl() {
+        withDefaultStatusBarSettings { model in
+            model.hiddenStatusBarItems = Set(StatusBarItemKind.allCases.filter { $0 != .currentTask })
+
+            XCTAssertTrue(showCurrentTaskControl())
+            XCTAssertTrue(paneStatusBarHasData(session: makeSession()))
         }
     }
 

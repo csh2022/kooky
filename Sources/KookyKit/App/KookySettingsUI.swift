@@ -1536,11 +1536,13 @@ private struct StatusBarReorderList: View {
     /// rendering. Excludes hardcoded left-side controls whose visual position
     /// does not change with order.
     private var reorderableItems: [StatusBarItemKind] {
-        model.statusBarItems.filter { $0 != .promptComposer && $0 != .toolCallActivity }
+        model.statusBarItems.filter {
+            $0 != .promptComposer && $0 != .currentTask && $0 != .toolCallActivity
+        }
     }
 
     private var controlItems: [StatusBarItemKind] {
-        model.statusBarItems.filter { $0 == .promptComposer }
+        model.statusBarItems.filter { $0 == .promptComposer || $0 == .currentTask }
     }
 
     /// Builtin agents that feed tool-call activity — each gets its own
@@ -1610,6 +1612,7 @@ private struct StatusBarReorderList: View {
                     guard let raw = items.first,
                           let dropped = StatusBarItemKind(rawValue: raw),
                           dropped != .promptComposer,
+                          dropped != .currentTask,
                           dropped != .toolCallActivity
                     else { return false }
                     return moveToEnd(dropped)

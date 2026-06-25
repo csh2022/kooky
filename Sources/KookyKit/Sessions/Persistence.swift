@@ -203,6 +203,9 @@ struct PersistedTab: Codable, Equatable {
     var agentId: String
     var currentDirectoryPath: String
     var customTitle: String?
+    /// User-provided one-line "what this session is working on" note.
+    /// Optional for backward compatibility with older state.json files.
+    var currentTask: String?
     /// Optional conversation/session id reported by resumable agents such as
     /// Claude and Pi. Decoded with `decodeIfPresent` so state.json files
     /// written by pre-resume kooky versions still load.
@@ -218,6 +221,7 @@ struct PersistedTab: Codable, Equatable {
         self.agentId = session.agent.id
         self.currentDirectoryPath = session.currentDirectory.path
         self.customTitle = session.customTitle
+        self.currentTask = session.currentTask
         self.conversationId = session.conversationId
         if session.conversationId != nil {
             self.resumeAgentId = session.resumeAgent?.id
@@ -232,6 +236,7 @@ struct PersistedTab: Codable, Equatable {
         agentId: String,
         currentDirectoryPath: String,
         customTitle: String? = nil,
+        currentTask: String? = nil,
         conversationId: String? = nil,
         resumeAgentId: String? = nil
     ) {
@@ -239,6 +244,7 @@ struct PersistedTab: Codable, Equatable {
         self.agentId = agentId
         self.currentDirectoryPath = currentDirectoryPath
         self.customTitle = customTitle
+        self.currentTask = currentTask
         self.conversationId = conversationId
         self.resumeAgentId = resumeAgentId
     }
