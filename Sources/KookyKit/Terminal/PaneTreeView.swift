@@ -769,93 +769,101 @@ private struct CurrentTaskStatusSegment: View {
     @Bindable var session: Session
     let store: WorkspaceStore
 
-    @State private var isEditing = false
+    @State private var isPopoverOpen = false
     @State private var isHovered = false
     @State private var draft = ""
     @FocusState private var focused: Bool
 
     var body: some View {
-        Group {
-            if isEditing {
-                editor
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Button {
+                openPopover()
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isPopoverOpen || isHovered ? Theme.chromeForeground : Theme.chromeMuted)
+                    .frame(width: 18, height: 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isPopoverOpen || isHovered ? Theme.chromeHover : .clear)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(buttonHelp)
+
+            if let task = session.currentTask, !task.isEmpty {
+                Button {
+                    openPopover()
+                } label: {
+                    Text(task)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(Theme.chromeForeground)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .help(task)
             } else {
-                display
+                Spacer(minLength: 0)
             }
         }
-        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var display: some View {
-        Button {
-            beginEditing()
-        } label: {
-            StatusSegment(systemImage: "pencil") {
-                Text(displayText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(session.currentTask == nil ? Theme.chromeMuted : Theme.chromeForeground)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isHovered ? Theme.chromeHover : .clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .contentShape(RoundedRectangle(cornerRadius: 4))
-        .help(helpText)
+        .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .popover(isPresented: $isPopoverOpen, arrowEdge: .bottom) {
+            taskEditor
+        }
     }
 
-    private var editor: some View {
-        StatusSegment(systemImage: "pencil") {
-            TextField("current task", text: $draft)
+    private var taskEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Current task")
+                .font(Theme.mono(11, weight: .medium))
+                .foregroundStyle(Theme.chromeMuted)
+            TextField("What is this session handling?", text: $draft)
                 .textFieldStyle(.plain)
-                .font(Theme.mono(11))
+                .font(Theme.mono(12))
                 .foregroundStyle(Theme.chromeForeground)
                 .lineLimit(1)
                 .focused($focused)
                 .onSubmit(commit)
-                .onExitCommand(perform: cancel)
-                .frame(minWidth: 120, maxWidth: .infinity)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .bracketBorder()
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button("Cancel") { closePopover() }
+                    .buttonStyle(.plain)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.chromeMuted)
+                BracketButton("Confirm", action: commit)
+            }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Theme.chromeActive)
-        )
+        .padding(12)
+        .frame(width: 300)
+        .background(Theme.chromeBackground)
         .onAppear {
             draft = session.currentTask ?? ""
             DispatchQueue.main.async { focused = true }
         }
-        .onChange(of: focused) { _, isFocused in
-            if isEditing && !isFocused { commit() }
-        }
     }
 
-    private var displayText: String {
-        session.currentTask ?? "current task"
+    private var buttonHelp: String {
+        session.currentTask == nil ? "Set current task" : "Edit current task"
     }
 
-    private var helpText: String {
-        session.currentTask ?? "Set current task"
-    }
-
-    private func beginEditing() {
+    private func openPopover() {
         draft = session.currentTask ?? ""
-        isEditing = true
+        isPopoverOpen = true
     }
 
     private func commit() {
-        guard isEditing else { return }
-        isEditing = false
-        focused = false
         store.setCurrentTask(session, to: draft)
+        closePopover()
     }
 
-    private func cancel() {
-        guard isEditing else { return }
-        draft = session.currentTask ?? ""
-        isEditing = false
+    private func closePopover() {
+        isPopoverOpen = false
         focused = false
     }
 }
