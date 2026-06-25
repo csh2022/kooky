@@ -766,6 +766,9 @@ private struct StatusSegment<Content: View>: View {
 }
 
 private struct CurrentTaskStatusSegment: View {
+    private static let taskEditorWidth: CGFloat = 300
+    private static let taskEditorYOffset: CGFloat = -126
+
     @Bindable var session: Session
     let store: WorkspaceStore
 
@@ -790,9 +793,6 @@ private struct CurrentTaskStatusSegment: View {
             }
             .buttonStyle(.plain)
             .help(buttonHelp)
-            .popover(isPresented: $isPopoverOpen, attachmentAnchor: .point(.top), arrowEdge: .bottom) {
-                taskEditor
-            }
 
             if let task = session.currentTask, !task.isEmpty {
                 Button {
@@ -812,6 +812,20 @@ private struct CurrentTaskStatusSegment: View {
         }
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .overlay(alignment: .topLeading) {
+            if isPopoverOpen {
+                taskEditor
+                    .frame(width: Self.taskEditorWidth)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .stroke(Theme.chromeFaint, lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
+                    .offset(y: Self.taskEditorYOffset)
+                    .zIndex(10)
+            }
+        }
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
@@ -840,8 +854,8 @@ private struct CurrentTaskStatusSegment: View {
             }
         }
         .padding(12)
-        .frame(width: 300)
         .background(Theme.chromeBackground)
+        .onExitCommand(perform: closePopover)
         .onAppear {
             draft = session.currentTask ?? ""
             DispatchQueue.main.async { focused = true }
