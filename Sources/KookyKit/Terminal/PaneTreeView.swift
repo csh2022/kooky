@@ -790,6 +790,9 @@ private struct CurrentTaskStatusSegment: View {
             }
             .buttonStyle(.plain)
             .help(buttonHelp)
+            .popover(isPresented: $isPopoverOpen, arrowEdge: .bottom) {
+                taskEditor
+            }
 
             if let task = session.currentTask, !task.isEmpty {
                 Button {
@@ -810,9 +813,6 @@ private struct CurrentTaskStatusSegment: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        .popover(isPresented: $isPopoverOpen, arrowEdge: .bottom) {
-            taskEditor
-        }
     }
 
     private var taskEditor: some View {
