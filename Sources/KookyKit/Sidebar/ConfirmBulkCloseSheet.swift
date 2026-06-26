@@ -36,15 +36,17 @@ struct ConfirmBulkCloseSheet: View {
             subtitle
                 .padding(.top, 6)
 
-            Rectangle()
-                .fill(Theme.chromeHairline)
-                .frame(width: 32, height: 1)
-                .padding(.vertical, 22)
+            if hasWorktreeDeletionOption {
+                Rectangle()
+                    .fill(Theme.chromeHairline)
+                    .frame(width: 32, height: 1)
+                    .padding(.vertical, 22)
 
-            worktreeList
-                .padding(.bottom, 14)
+                worktreeList
+                    .padding(.bottom, 14)
 
-            alsoDeleteCheckbox
+                alsoDeleteCheckbox
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -124,9 +126,14 @@ struct ConfirmBulkCloseSheet: View {
     }
 
     private var buttonLabel: String {
+        guard hasWorktreeDeletionOption else {
+            return isWorking ? "closing…" : "close"
+        }
         if isWorking { return alsoDelete ? "deleting…" : "closing…" }
         return alsoDelete ? "close & delete" : "close"
     }
+
+    private var hasWorktreeDeletionOption: Bool { !worktreesAmong.isEmpty }
 
     private func worktreePath(for workspace: Workspace) -> URL { workspace.diskPath }
 

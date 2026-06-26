@@ -189,9 +189,9 @@ private struct DraggableTabRow: View {
             isActive: pane.activeTabId == tab.id,
             canCloseToRight: canCloseToRight,
             onActivate: { store.activateTab(tab, in: workspace) },
-            onClose: { store.closeTab(tab, in: workspace) },
-            onCloseOthers: { store.closeOtherTabs(keeping: tab, in: workspace) },
-            onCloseToRight: { store.closeTabsToRight(of: tab, in: workspace) },
+            onClose: { store.requestCloseTab(tab, in: workspace) },
+            onCloseOthers: { store.requestCloseOtherTabs(keeping: tab, in: workspace) },
+            onCloseToRight: { store.requestCloseTabsToRight(of: tab, in: workspace) },
             onDuplicate: { store.duplicateTab(tab, in: workspace) },
             onRename: { store.renameTab(tab, to: $0) },
             onSplit: { store.splitPane(pane, orientation: $0, in: workspace) },
@@ -333,4 +333,3 @@ private final class TabBarDropNSView: NSView {
         sender.draggingPasteboard.string(forType: .string)
     }
 }
-
