@@ -792,7 +792,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     @objc private func handleCloseTab() {
         guard let store = activeStore, let workspace = store.active,
               let session = workspace.activeSession else { return }
-        store.closeTab(session, in: workspace)
+        store.requestCloseTab(session, in: workspace)
     }
 
     @objc private func handleReopenClosedTab() {

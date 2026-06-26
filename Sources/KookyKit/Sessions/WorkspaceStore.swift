@@ -366,12 +366,21 @@ final class WorkspaceStore {
         }
     }
 
+    /// Plain top-level workspace close request. UI callers park the request
+    /// here first so close buttons, context menus, and menu shortcuts all ask
+    /// before terminating the workspace's sessions.
+    struct CloseWorkspaceRequest {
+        let id = UUID()
+        let workspace: Workspace
+    }
+
+    var pendingCloseWorkspaceRequest: CloseWorkspaceRequest?
+
     /// Worktree workspaces close through this request first so the
-    /// sidebar can pop the brutalist confirm sheet before anything
-    /// destructive runs. Plain workspaces skip the prompt and go
-    /// straight to `closeWorkspace`. Set non-nil to mean "user asked to
-    /// close this worktree, sidebar please ask them about the dir";
-    /// cleared by the sheet on dismiss / confirm.
+    /// confirm sheet can ask whether the directory/branch should also be
+    /// removed before anything destructive runs. Set non-nil to mean "user
+    /// asked to close this worktree"; cleared by the sheet on dismiss /
+    /// confirm.
     var pendingRemovalRequest: Workspace?
 
     /// Cross-view create request. Sidebar rows open the sheet directly, but
@@ -393,6 +402,7 @@ final class WorkspaceStore {
     /// worktrees would either show as orphan rows (the sidebar fallback)
     /// or vanish silently. Either way the user's mental model breaks.
     struct CloseSourceRequest {
+        let id = UUID()
         let source: Workspace
         let worktrees: [Workspace]
     }
@@ -403,8 +413,8 @@ final class WorkspaceStore {
     var pendingCloseSourceRequest: CloseSourceRequest?
 
     /// UI-level close request. Callers from the sidebar (× button, right-
-    /// click menu) and the ⌘⇧W menu item both funnel here so the
-    /// confirm prompt only lives in one place.
+    /// click menu) and the ⌘⇧W menu item both funnel here so confirm prompts
+    /// only live in one place.
     func requestCloseWorkspace(_ workspace: Workspace) {
         if workspace.worktreeParentId != nil {
             pendingRemovalRequest = workspace
@@ -412,10 +422,15 @@ final class WorkspaceStore {
         }
         let worktrees = workspaces.filter { $0.worktreeParentId == workspace.id }
         if worktrees.isEmpty {
-            closeWorkspace(workspace)
-            return
+            pendingCloseWorkspaceRequest = CloseWorkspaceRequest(workspace: workspace)
+        } else {
+            pendingCloseSourceRequest = CloseSourceRequest(source: workspace, worktrees: worktrees)
         }
-        pendingCloseSourceRequest = CloseSourceRequest(source: workspace, worktrees: worktrees)
+    }
+
+    func performCloseWorkspace(_ request: CloseWorkspaceRequest) {
+        closeWorkspace(request.workspace)
+        pendingCloseWorkspaceRequest = nil
     }
 
     /// Performs the deferred source-with-worktrees close from the sheet.
@@ -663,6 +678,7 @@ final class WorkspaceStore {
     /// so the sheet can show the count and make the directory deletion
     /// explicit before running it.
     struct BulkRemovalRequest {
+        let id = UUID()
         let keeping: Workspace
         let others: [Workspace]
         let worktreeOthers: [Workspace]
@@ -675,10 +691,9 @@ final class WorkspaceStore {
         }
     }
 
-    /// Set when `closeOtherWorkspaces` detects a worktree among the
-    /// workspaces about to close; sidebar's onChange listener pops the
-    /// summary sheet from here. Plain bulk closes skip this and run
-    /// inline.
+    /// Set when `closeOtherWorkspaces` finds any workspace to close; the UI
+    /// asks before terminating sessions. Worktree entries additionally expose
+    /// the opt-in disk/branch deletion checkbox.
     var pendingCloseOthersRequest: BulkRemovalRequest?
 
     func closeOtherWorkspaces(keeping workspace: Workspace) {
@@ -695,11 +710,8 @@ final class WorkspaceStore {
             }
         }
         let others = workspaces.filter { !keepIds.contains($0.id) }
-        if others.contains(where: { $0.worktreeParentId != nil }) {
-            pendingCloseOthersRequest = BulkRemovalRequest(keeping: workspace, others: others)
-            return
-        }
-        for ws in others { closeWorkspace(ws) }
+        guard !others.isEmpty else { return }
+        pendingCloseOthersRequest = BulkRemovalRequest(keeping: workspace, others: others)
     }
 
     /// Performs the deferred bulk close from the confirm sheet.
@@ -722,6 +734,16 @@ final class WorkspaceStore {
     }
 
     // MARK: - Tabs
+
+    struct CloseSessionsRequest {
+        let id = UUID()
+        let workspace: Workspace
+        let sessions: [Session]
+
+        var isSingleSession: Bool { sessions.count == 1 }
+    }
+
+    var pendingCloseSessionsRequest: CloseSessionsRequest?
 
     @discardableResult
     func addTab(
@@ -896,6 +918,39 @@ final class WorkspaceStore {
     /// which creates a fresh window and moves the session into it.
     func moveTabToNewWindow(_ sessionId: UUID) {
         moveToNewWindow(sessionId)
+    }
+
+    func requestCloseTab(_ session: Session, in workspace: Workspace) {
+        guard let pane = pane(containing: session, in: workspace) else { return }
+        if workspace.root.allPanes.count == 1 && pane.tabs.count == 1 {
+            requestCloseWorkspace(workspace)
+            return
+        }
+        pendingCloseSessionsRequest = CloseSessionsRequest(workspace: workspace, sessions: [session])
+    }
+
+    func requestCloseOtherTabs(keeping session: Session, in workspace: Workspace) {
+        guard let pane = pane(containing: session, in: workspace) else { return }
+        let toClose = pane.tabs.filter { $0.id != session.id }
+        guard !toClose.isEmpty else { return }
+        pendingCloseSessionsRequest = CloseSessionsRequest(workspace: workspace, sessions: toClose)
+    }
+
+    func requestCloseTabsToRight(of session: Session, in workspace: Workspace) {
+        guard let pane = pane(containing: session, in: workspace),
+              let idx = pane.tabs.firstIndex(where: { $0.id == session.id }),
+              idx < pane.tabs.count - 1 else { return }
+        pendingCloseSessionsRequest = CloseSessionsRequest(
+            workspace: workspace,
+            sessions: Array(pane.tabs[(idx + 1)...])
+        )
+    }
+
+    func performCloseSessions(_ request: CloseSessionsRequest) {
+        for session in request.sessions {
+            closeTab(session, in: request.workspace)
+        }
+        pendingCloseSessionsRequest = nil
     }
 
     func closeOtherTabs(keeping session: Session, in workspace: Workspace) {

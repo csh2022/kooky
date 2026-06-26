@@ -185,13 +185,28 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(firstPane(ws).tabs.first?.agent.id, AgentTemplate.claudeCode.id)
     }
 
-    func testRequestCloseWorkspaceClosesPlainWorkspaceImmediately() {
+    func testRequestCloseWorkspaceParksPlainWorkspaceForConfirmation() {
         let store = makeStore()
         let plain = store.addWorkspace(workingDirectory: projectA)
         XCTAssertTrue(store.workspaces.contains { $0.id == plain.id })
         store.requestCloseWorkspace(plain)
-        XCTAssertFalse(store.workspaces.contains { $0.id == plain.id })
+        XCTAssertTrue(store.workspaces.contains { $0.id == plain.id },
+                      "plain workspace must remain until the sheet confirms")
+        XCTAssertEqual(store.pendingCloseWorkspaceRequest?.workspace.id, plain.id)
         XCTAssertNil(store.pendingRemovalRequest)
+    }
+
+    func testPerformCloseWorkspaceClosesConfirmedWorkspace() {
+        let store = makeStore()
+        let plain = store.addWorkspace(workingDirectory: projectA)
+        store.requestCloseWorkspace(plain)
+        guard let request = store.pendingCloseWorkspaceRequest else {
+            XCTFail("expected pending close request")
+            return
+        }
+        store.performCloseWorkspace(request)
+        XCTAssertFalse(store.workspaces.contains { $0.id == plain.id })
+        XCTAssertNil(store.pendingCloseWorkspaceRequest)
     }
 
     func testRequestCloseWorkspaceParksWorktreeForConfirmation() {
@@ -211,7 +226,7 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(store.pendingRemovalRequest?.id, wt.id)
     }
 
-    func testCloseOtherWorkspacesKeepsWorktreeFamilyIntact() {
+    func testCloseOtherWorkspacesKeepsWorktreeFamilyIntact() async {
         // Repro of the "close-other on a worktree row strands the family"
         // bug: closing siblings while keeping a worktree must also retain
         // its source workspace — otherwise the sidebar's parent-id lookup
@@ -225,6 +240,13 @@ final class WorkspaceStoreTests: XCTestCase {
         let unrelated = store.addWorkspace(workingDirectory: projectB)
 
         store.closeOtherWorkspaces(keeping: wt)
+        guard let request = store.pendingCloseOthersRequest else {
+            XCTFail("expected pending close-others request")
+            return
+        }
+        XCTAssertEqual(request.others.map(\.id), [unrelated.id])
+        _ = await store.performCloseOthers(request, alsoDelete: false)
+
         let ids = store.workspaces.map(\.id)
         XCTAssertTrue(ids.contains(wt.id))
         XCTAssertTrue(ids.contains(source.id), "source must stay so the worktree has a parent to nest under")
@@ -392,13 +414,12 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(Set(req?.worktrees.map(\.id) ?? []), Set([wtA.id, wtB.id]))
     }
 
-    func testRequestCloseSourceWithoutWorktreesClosesInline() {
-        // A top-level workspace with no worktree children still closes
-        // immediately — only the worktree-owning case needs the sheet.
+    func testRequestCloseSourceWithoutWorktreesParksPlainConfirm() {
         let store = makeStore()
         let solo = store.addWorkspace(workingDirectory: projectB)
         store.requestCloseWorkspace(solo)
-        XCTAssertFalse(store.workspaces.contains { $0.id == solo.id })
+        XCTAssertTrue(store.workspaces.contains { $0.id == solo.id })
+        XCTAssertEqual(store.pendingCloseWorkspaceRequest?.workspace.id, solo.id)
         XCTAssertNil(store.pendingCloseSourceRequest)
     }
 
@@ -469,16 +490,25 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(store.pendingRemovalRequest?.id, wt.id)
     }
 
-    func testCloseOtherWithoutWorktreesRunsInline() {
-        // No worktrees in `others` → close runs immediately, no sheet.
+    func testCloseOtherWithoutWorktreesParksForConfirmSheet() async {
         let store = makeStore()
         let kept = store.workspaces[0]
         _ = store.addWorkspace(workingDirectory: projectA)
         _ = store.addWorkspace(workingDirectory: projectB)
         store.closeOtherWorkspaces(keeping: kept)
+        XCTAssertEqual(store.workspaces.count, 3)
+        let request = store.pendingCloseOthersRequest
+        XCTAssertEqual(request?.keeping.id, kept.id)
+        XCTAssertEqual(request?.worktreeOthers.count, 0)
+
+        guard let request else {
+            XCTFail("expected pending close-others request")
+            return
+        }
+        let message = await store.performCloseOthers(request, alsoDelete: false)
+        XCTAssertNil(message)
         XCTAssertEqual(store.workspaces.count, 1)
         XCTAssertEqual(store.workspaces.first?.id, kept.id)
-        XCTAssertNil(store.pendingCloseOthersRequest)
     }
 
     func testCloseOtherWithWorktreesParksForConfirmSheet() {
@@ -501,9 +531,7 @@ final class WorkspaceStoreTests: XCTestCase {
     }
 
     func testPerformCloseOthersClosesPlainWorkspacesWhenNoWorktrees() async {
-        // sidebar = disk: bulk close always tries `git worktree remove`
-        // for every worktree in the request. If there are no worktrees in
-        // `others`, no git is invoked — pure close path.
+        // No worktrees in `others`, so this is a pure app-state close path.
         let store = makeStore()
         let kept = store.workspaces[0]
         let p1 = store.addWorkspace(workingDirectory: projectA)
@@ -538,7 +566,7 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertTrue(store.workspaces.contains { $0.id == wt.id })
     }
 
-    func testCloseOtherWorkspacesKeepsAllWorktreesUnderKeptSource() {
+    func testCloseOtherWorkspacesKeepsAllWorktreesUnderKeptSource() async {
         // Symmetric case: closing others while keeping a source workspace
         // should also keep every worktree hanging off it — otherwise the
         // sidebar tree degenerates into a bunch of useless empty parents.
@@ -555,6 +583,13 @@ final class WorkspaceStoreTests: XCTestCase {
         let unrelated = store.addWorkspace(workingDirectory: projectB)
 
         store.closeOtherWorkspaces(keeping: source)
+        guard let request = store.pendingCloseOthersRequest else {
+            XCTFail("expected pending close-others request")
+            return
+        }
+        XCTAssertEqual(request.others.map(\.id), [unrelated.id])
+        _ = await store.performCloseOthers(request, alsoDelete: false)
+
         let ids = store.workspaces.map(\.id)
         XCTAssertTrue(ids.contains(source.id))
         XCTAssertTrue(ids.contains(wtA.id))
@@ -934,6 +969,79 @@ final class WorkspaceStoreTests: XCTestCase {
         let session = store.addTab(in: ws, template: .claudeCode)
         XCTAssertEqual(session.agent.id, "claude-code")
         XCTAssertEqual(engine(session).startedConfigs.first?.environment["KOOKY_AGENT"], "claude")
+    }
+
+    func testRequestCloseTabParksSessionForConfirmation() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let first = pane.tabs[0]
+        let second = store.addTab(in: ws)
+
+        store.requestCloseTab(second, in: ws)
+
+        XCTAssertEqual(pane.tabs.map(\.id), [first.id, second.id])
+        XCTAssertEqual(store.pendingCloseSessionsRequest?.workspace.id, ws.id)
+        XCTAssertEqual(store.pendingCloseSessionsRequest?.sessions.map(\.id), [second.id])
+    }
+
+    func testPerformCloseSessionsClosesConfirmedSession() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let first = pane.tabs[0]
+        let second = store.addTab(in: ws)
+        store.requestCloseTab(second, in: ws)
+
+        guard let request = store.pendingCloseSessionsRequest else {
+            XCTFail("expected pending close-sessions request")
+            return
+        }
+        store.performCloseSessions(request)
+
+        XCTAssertEqual(pane.tabs.map(\.id), [first.id])
+        XCTAssertNil(store.pendingCloseSessionsRequest)
+        XCTAssertEqual(engine(second).terminateCount, 1)
+    }
+
+    func testRequestCloseOnlyTabRoutesThroughWorkspaceConfirmation() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let only = firstPane(ws).tabs[0]
+
+        store.requestCloseTab(only, in: ws)
+
+        XCTAssertEqual(firstPane(ws).tabs.count, 1)
+        XCTAssertNil(store.pendingCloseSessionsRequest)
+        XCTAssertEqual(store.pendingCloseWorkspaceRequest?.workspace.id, ws.id)
+    }
+
+    func testRequestCloseOtherTabsParksSessionsForConfirmation() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let kept = pane.tabs[0]
+        let second = store.addTab(in: ws)
+        let third = store.addTab(in: ws)
+
+        store.requestCloseOtherTabs(keeping: kept, in: ws)
+
+        XCTAssertEqual(pane.tabs.count, 3)
+        XCTAssertEqual(store.pendingCloseSessionsRequest?.sessions.map(\.id), [second.id, third.id])
+    }
+
+    func testRequestCloseTabsToRightParksRightSideSessionsForConfirmation() {
+        let store = makeStore()
+        let ws = store.workspaces[0]
+        let pane = firstPane(ws)
+        let first = pane.tabs[0]
+        let second = store.addTab(in: ws)
+        let third = store.addTab(in: ws)
+
+        store.requestCloseTabsToRight(of: first, in: ws)
+
+        XCTAssertEqual(pane.tabs.count, 3)
+        XCTAssertEqual(store.pendingCloseSessionsRequest?.sessions.map(\.id), [second.id, third.id])
     }
 
     func testReopenLastClosedTabRestoresAgentAndCwd() {

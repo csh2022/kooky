@@ -1,20 +1,14 @@
 import SwiftUI
 
-/// Bundles every modal sheet the sidebar can show so they share one
-/// `.sheet(item:)` modifier. `.sheet(isPresented:)` per state would race
-/// when switching directly between modes (create → confirm-remove).
+/// Bundles modal sheets owned by the sidebar so they share one
+/// `.sheet(item:)` modifier. Close confirmations live at `ContentView` level
+/// so shortcuts still work when the sidebar is hidden.
 private enum SidebarSheet: Identifiable {
     case createWorktree(Workspace)
-    case confirmRemoveWorktree(Workspace)
-    case confirmCloseOthers(WorkspaceStore.BulkRemovalRequest)
-    case confirmCloseSource(WorkspaceStore.CloseSourceRequest)
 
     var id: String {
         switch self {
         case .createWorktree(let ws): return "create-\(ws.id.uuidString)"
-        case .confirmRemoveWorktree(let ws): return "remove-\(ws.id.uuidString)"
-        case .confirmCloseOthers(let req): return "close-others-\(req.keeping.id.uuidString)"
-        case .confirmCloseSource(let req): return "close-source-\(req.source.id.uuidString)"
         }
     }
 }
@@ -36,9 +30,9 @@ struct SidebarView: View {
     /// land here. Ephemeral by design: a kooky relaunch always shows every
     /// worktree on first paint so nothing is hidden by stale state.
     @State private var collapsedParents: Set<UUID> = []
-    /// Active modal sheet (create worktree / confirm-delete worktree).
+    /// Active modal sheet for sidebar-owned flows.
     /// Nil = no sheet. Set by row callbacks and an onChange observer that
-    /// watches `store.pendingRemovalRequest` for ⌘⇧W routed via AppDelegate.
+    /// watches global create requests.
     @State private var sheet: SidebarSheet?
 
     var body: some View {
@@ -110,73 +104,6 @@ struct SidebarView: View {
                         sheet = nil
                     }
                 )
-            case .confirmRemoveWorktree(let workspace):
-                ConfirmRemoveWorktreeSheet(
-                    workspace: workspace,
-                    confirm: { alsoDelete in
-                        if alsoDelete {
-                            if let message = await store.removeWorktreeDirectory(workspace) {
-                                return .failure(message)
-                            }
-                        }
-                        store.closeWorkspace(workspace)
-                        store.pendingRemovalRequest = nil
-                        return .success
-                    },
-                    dismiss: {
-                        store.pendingRemovalRequest = nil
-                        sheet = nil
-                    }
-                )
-            case .confirmCloseOthers(let request):
-                ConfirmBulkCloseSheet(
-                    statusLabel: "CLOSE-OTHERS",
-                    headlineText: "keeping \(request.keeping.title)",
-                    subtitleText: bulkSubtitle(
-                        closingCount: request.others.count,
-                        worktreeCount: request.worktreeOthers.count
-                    ),
-                    worktreesAmong: request.worktreeOthers,
-                    confirm: { alsoDelete in
-                        if let message = await store.performCloseOthers(request, alsoDelete: alsoDelete) {
-                            return .failure(message)
-                        }
-                        return .success
-                    },
-                    dismiss: {
-                        store.pendingCloseOthersRequest = nil
-                        sheet = nil
-                    }
-                )
-            case .confirmCloseSource(let request):
-                ConfirmBulkCloseSheet(
-                    statusLabel: "CLOSE-WORKSPACE",
-                    headlineText: "closing \(request.source.title)",
-                    subtitleText: bulkSubtitle(
-                        closingCount: request.worktrees.count + 1,
-                        worktreeCount: request.worktrees.count
-                    ),
-                    worktreesAmong: request.worktrees,
-                    confirm: { alsoDelete in
-                        if let message = await store.performCloseSource(request, alsoDelete: alsoDelete) {
-                            return .failure(message)
-                        }
-                        return .success
-                    },
-                    dismiss: {
-                        store.pendingCloseSourceRequest = nil
-                        sheet = nil
-                    }
-                )
-            }
-        }
-        // ⌘⇧W routes through AppDelegate → store.requestCloseWorkspace,
-        // which parks worktree workspaces in `pendingRemovalRequest` for
-        // the sidebar to pop the confirm sheet on. Identity-keyed so the
-        // observer only fires on a fresh request, not internal renames.
-        .onChange(of: store.pendingRemovalRequest?.id) { _, _ in
-            if let workspace = store.pendingRemovalRequest {
-                sheet = .confirmRemoveWorktree(workspace)
             }
         }
         // Global create requests (currently the command palette). When the
@@ -193,31 +120,6 @@ struct SidebarView: View {
                 sheet = .createWorktree(workspace)
             }
         }
-        // Bulk close-others request — keyed off keeping.id since the
-        // others list can vary in length but each request is anchored
-        // on its keeping workspace.
-        .onChange(of: store.pendingCloseOthersRequest?.keeping.id) { _, _ in
-            if let request = store.pendingCloseOthersRequest {
-                sheet = .confirmCloseOthers(request)
-            }
-        }
-        // Close-source-with-worktrees request — keyed off source.id; the
-        // store parks it when ⌘⇧W / × on a top-level workspace would
-        // strand its worktrees.
-        .onChange(of: store.pendingCloseSourceRequest?.source.id) { _, _ in
-            if let request = store.pendingCloseSourceRequest {
-                sheet = .confirmCloseSource(request)
-            }
-        }
-    }
-
-    /// Shared subtitle string between the two bulk-close flows — folds
-    /// pluralisation into one place so the count never reads as
-    /// "1 workspaces" or "1 worktrees".
-    private func bulkSubtitle(closingCount: Int, worktreeCount: Int) -> String {
-        let workspaceWord = closingCount == 1 ? "workspace" : "workspaces"
-        let worktreeWord = worktreeCount == 1 ? "worktree" : "worktrees"
-        return "\(closingCount) \(workspaceWord) will close · \(worktreeCount) \(worktreeWord)"
     }
 
     @ViewBuilder
