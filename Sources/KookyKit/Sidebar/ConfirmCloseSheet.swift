@@ -27,8 +27,8 @@ struct ConfirmCloseSheet: View {
 
             HStack(spacing: 10) {
                 Spacer()
-                BracketButton("cancel") { dismiss() }
-                BracketButton(confirmLabel) {
+                BracketButton("cancel", tone: .secondary) { dismiss() }
+                BracketButton(confirmLabel, tone: .destructive) {
                     confirm()
                     dismiss()
                 }

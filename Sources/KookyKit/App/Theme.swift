@@ -156,18 +156,52 @@ private func mix(_ a: NSColor, _ b: NSColor, _ amount: CGFloat) -> NSColor {
 /// 1pt hairline stroke, sharp corners — the brutalist border shared by
 /// `BracketButton`, settings option fields, and the update prompt window.
 extension View {
-    func bracketBorder() -> some View {
-        overlay(Rectangle().stroke(Theme.chromeHairline, lineWidth: 1))
+    func bracketBorder(_ color: Color = Theme.chromeHairline) -> some View {
+        overlay(Rectangle().stroke(color, lineWidth: 1))
     }
 }
 
 /// Plain-text `[bracketed]` button. Hairline border, mono, sharp corners.
 struct BracketButton: View {
+    enum Tone {
+        case primary
+        case secondary
+        case destructive
+
+        @MainActor
+        var foreground: Color {
+            switch self {
+            case .primary: return Theme.chromeForeground
+            case .secondary: return Theme.chromeMuted
+            case .destructive: return Theme.activityFailure
+            }
+        }
+
+        @MainActor
+        var border: Color {
+            switch self {
+            case .primary: return Theme.chromeHairline
+            case .secondary: return Theme.chromeMuted.opacity(0.45)
+            case .destructive: return Theme.activityFailure.opacity(0.85)
+            }
+        }
+
+        @MainActor
+        var background: Color {
+            switch self {
+            case .primary, .secondary: return .clear
+            case .destructive: return Theme.activityFailure.opacity(0.10)
+            }
+        }
+    }
+
     let title: String
+    let tone: Tone
     let action: () -> Void
 
-    init(_ title: String, action: @escaping () -> Void) {
+    init(_ title: String, tone: Tone = .primary, action: @escaping () -> Void) {
         self.title = title
+        self.tone = tone
         self.action = action
     }
 
@@ -175,10 +209,11 @@ struct BracketButton: View {
         Button(action: action) {
             Text(title)
                 .font(Theme.mono(11.5, weight: .medium))
-                .foregroundStyle(Theme.chromeForeground)
+                .foregroundStyle(tone.foreground)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .bracketBorder()
+                .background(tone.background)
+                .bracketBorder(tone.border)
         }
         .buttonStyle(.plain)
     }
