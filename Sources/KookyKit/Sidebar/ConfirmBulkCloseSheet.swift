@@ -58,10 +58,10 @@ struct ConfirmBulkCloseSheet: View {
 
             HStack(spacing: 10) {
                 Spacer()
-                BracketButton("cancel") { dismiss() }
+                BracketButton("cancel", tone: .secondary) { dismiss() }
                     .disabled(isWorking)
                     .opacity(isWorking ? 0.4 : 1)
-                BracketButton(buttonLabel) { submit() }
+                BracketButton(buttonLabel, tone: .destructive) { submit() }
                     .disabled(isWorking)
                     .opacity(isWorking ? 0.4 : 1)
             }
