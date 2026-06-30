@@ -34,7 +34,8 @@ APP_NAME="Kooky"
 APP="dist/${APP_NAME}.app"
 
 echo "==> Building release config"
-swift build -c release
+swift build -c release --product Kooky
+swift build -c release --product KookyHook
 
 echo "==> Verifying build artifacts"
 for f in .build/release/Kooky .build/release/KookyHook; do
