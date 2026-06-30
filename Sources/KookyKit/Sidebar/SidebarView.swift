@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Bundles modal sheets owned by the sidebar so they share one
-/// `.sheet(item:)` modifier. Close confirmations live at `ContentView` level
-/// so shortcuts still work when the sidebar is hidden.
+/// `.sheet(item:)` modifier. Shortcut/menu-driven close confirmations and
+/// worktree close flows live at `ContentView` level so they still work when
+/// the sidebar is hidden.
 private enum SidebarSheet: Identifiable {
     case createWorktree(Workspace)
 
@@ -398,6 +399,8 @@ private struct DraggableWorkspaceRow: View {
             canCloseOthers: canCloseOthers,
             onActivate: { store.activateWorkspace(workspace) },
             onClose: { store.requestCloseWorkspace(workspace) },
+            closeConfirmation: closeConfirmation,
+            onConfirmedClose: canCloseInline ? { store.closeWorkspace(workspace) } : nil,
             onCloseOthers: { store.closeOtherWorkspaces(keeping: workspace) },
             onDuplicate: { store.duplicateWorkspace(workspace) },
             onRename: { store.renameWorkspace(workspace, to: $0) },
@@ -420,5 +423,15 @@ private struct DraggableWorkspaceRow: View {
             }
             return true
         } isTargeted: { isTargeted = $0 }
+    }
+
+    private var closeConfirmation: CloseConfirmation? {
+        guard canCloseInline else { return nil }
+        return CloseConfirmation(title: "Close workspace?", confirmLabel: "close")
+    }
+
+    private var canCloseInline: Bool {
+        workspace.worktreeParentId == nil
+            && !store.workspaces.contains { $0.worktreeParentId == workspace.id }
     }
 }

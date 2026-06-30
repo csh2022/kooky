@@ -15,6 +15,8 @@ struct SidebarWorkspaceRow: View {
     let canCloseOthers: Bool
     let onActivate: () -> Void
     let onClose: () -> Void
+    var closeConfirmation: CloseConfirmation? = nil
+    var onConfirmedClose: (() -> Void)? = nil
     let onCloseOthers: () -> Void
     let onDuplicate: () -> Void
     let onRename: (String) -> Void
@@ -32,6 +34,7 @@ struct SidebarWorkspaceRow: View {
 
     @State private var isHovered = false
     @State private var isContextMenuOpen = false
+    @State private var isCloseConfirmationOpen = false
     @State private var isRenameOpen = false
     @State private var pendingRename = ""
 
@@ -187,10 +190,19 @@ struct SidebarWorkspaceRow: View {
                         fontSize: 10,
                         size: 20,
                         help: workspace.worktreeParentId == nil ? "Close workspace" : "Close worktree",
-                        action: onClose
+                        action: requestCloseFromButton
                     )
                     .opacity(isHovered ? 1 : 0)
                     .allowsHitTesting(isHovered)
+                    .popover(isPresented: $isCloseConfirmationOpen, arrowEdge: .trailing) {
+                        if let closeConfirmation, let onConfirmedClose {
+                            ConfirmClosePopover(
+                                confirmation: closeConfirmation,
+                                confirm: onConfirmedClose,
+                                dismiss: { isCloseConfirmationOpen = false }
+                            )
+                        }
+                    }
                 }
                 .frame(width: 20, alignment: .trailing)
             }
@@ -198,6 +210,14 @@ struct SidebarWorkspaceRow: View {
         }
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, 11)
+    }
+
+    private func requestCloseFromButton() {
+        guard closeConfirmation != nil, onConfirmedClose != nil else {
+            onClose()
+            return
+        }
+        isCloseConfirmationOpen = true
     }
 
     private func compactBody(agents: [AgentTemplate], dotColor: Color?) -> some View {
