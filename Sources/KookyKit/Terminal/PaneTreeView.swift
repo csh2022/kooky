@@ -18,6 +18,10 @@ struct PaneTreeView: View {
                 store: store,
                 isFocused: workspace.activePaneId == pane.id
             )
+        case .browser(let browser):
+            BrowserPaneView(browser: browser) {
+                store.closeBrowserPane(browser, in: workspace)
+            }
         case .split:
             SplitContainer(node: node, workspace: workspace, store: store)
         }
@@ -51,6 +55,7 @@ private struct PaneView: View {
             Rectangle().fill(Theme.chromeHairline).frame(height: 1)
             if let active = pane.activeTab {
                 TerminalView(engine: active.engine, grabsFocusOnMount: isFocused)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // Pin identity to the session so a `.split` → `.pane`
                     // collapse (closing the sibling pane) doesn't shift this
                     // view's structural position and force a remount. Without
@@ -135,6 +140,7 @@ private struct PaneView: View {
                 suppressActivation: { currentTaskEditorSessionId != nil }
             )
         )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .opacity(paneOpacity)
         .animation(Theme.chromeTransition, value: isFocused)
         .onChange(of: isFocused) { _, focused in
@@ -1758,6 +1764,7 @@ private struct SplitContainer: View {
                         HStack(spacing: 0) {
                             PaneTreeView(node: first, workspace: workspace, store: store)
                                 .frame(width: firstSize)
+                                .frame(maxHeight: .infinity)
                                 .offset(x: firstPushX, y: firstPushY)
                                 .clipped()
                             Rectangle().fill(Theme.chromeHairline)
@@ -1765,9 +1772,11 @@ private struct SplitContainer: View {
                                 .opacity(chromeVisible)
                             PaneTreeView(node: second, workspace: workspace, store: store)
                                 .frame(width: secondSize)
+                                .frame(maxHeight: .infinity)
                                 .offset(x: secondPushX, y: secondPushY)
                                 .clipped()
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         DividerHandle(orientation: .horizontal)
                             .frame(width: Self.handleHitSize, height: geo.size.height)
                             .offset(x: handleOffset, y: 0)
@@ -1778,6 +1787,7 @@ private struct SplitContainer: View {
                         VStack(spacing: 0) {
                             PaneTreeView(node: first, workspace: workspace, store: store)
                                 .frame(height: firstSize)
+                                .frame(maxWidth: .infinity)
                                 .offset(x: firstPushX, y: firstPushY)
                                 .clipped()
                             Rectangle().fill(Theme.chromeHairline)
@@ -1785,9 +1795,11 @@ private struct SplitContainer: View {
                                 .opacity(chromeVisible)
                             PaneTreeView(node: second, workspace: workspace, store: store)
                                 .frame(height: secondSize)
+                                .frame(maxWidth: .infinity)
                                 .offset(x: secondPushX, y: secondPushY)
                                 .clipped()
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         DividerHandle(orientation: .vertical)
                             .frame(width: geo.size.width, height: Self.handleHitSize)
                             .offset(x: 0, y: handleOffset)
@@ -1797,6 +1809,7 @@ private struct SplitContainer: View {
                     }
                 }
                 .clipped()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // Animation now driven by `withAnimation(Theme.chromeTransition)`
                 // at the toggle call sites — that propagates to the outer
                 // PaneStatusBar visibility too, so the chrome row that

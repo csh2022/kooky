@@ -75,10 +75,9 @@ final class WorkspaceStore {
     /// even when the source lives in a different pane.
     var draggingTabId: UUID?
     var sidebarMode: SidebarMode = .full
-    /// Right-side agent-overview sidebar — per-window collapse state, sharing
-    /// the left sidebar's three modes (full / compact / hidden). The content is
-    /// the global `AgentMonitor`; each window toggles its own panel. Defaults
-    /// to hidden since it's opt-in.
+    /// Right-side agent overview sidebar — per-window collapse state, sharing
+    /// the left sidebar's three modes (full / compact / hidden). Defaults to
+    /// hidden since it's opt-in.
     var rightSidebarMode: SidebarMode = .hidden
     /// Fired when the last workspace closes. `KookyWindowController` wires
     /// this to close its window — a window with zero workspaces is empty.
@@ -129,6 +128,7 @@ final class WorkspaceStore {
     /// Codex conversation id capture, or where Codex notify did not report
     /// a usable id. Looks up the latest Codex session file for the tab cwd.
     private let codexSessionLookup: @MainActor (URL) -> String?
+    private let browserEngineFactory: @MainActor () -> any BrowserEngine
     /// Every live window's store (including this one) — injected by
     /// `AppDelegate` so a tab dropped here from another window can be located
     /// in the store it came from. Tests default to `{ [] }`, keeping each
@@ -201,6 +201,7 @@ final class WorkspaceStore {
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
         codexSessionLookup: @escaping @MainActor (URL) -> String? = { CodexSessionLocator.latestSessionId(cwd: $0) },
+        browserEngineFactory: @escaping @MainActor () -> any BrowserEngine = { WebKitBrowserEngine() },
         peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] },
         moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in },
         onSessionAlert: @escaping @MainActor (UUID, SessionAlertKind) -> Void = { _, _ in },
@@ -211,6 +212,7 @@ final class WorkspaceStore {
         self.optionsProvider = optionsProvider
         self.resumeProvider = resumeProvider
         self.codexSessionLookup = codexSessionLookup
+        self.browserEngineFactory = browserEngineFactory
         self.peerStores = peerStores
         self.moveToNewWindow = moveToNewWindow
         self.onSessionAlert = onSessionAlert
@@ -1258,6 +1260,186 @@ final class WorkspaceStore {
     }
 
     @discardableResult
+    func openBrowserSplit(
+        address: String? = nil,
+        owner: BrowserPaneOwner = .user,
+        in workspace: Workspace? = nil
+    ) -> BrowserPane? {
+        let resolved: (workspace: Workspace, sourcePane: Pane)?
+        if case .agent(let sessionId) = owner {
+            if let located = location(ofSessionId: sessionId) {
+                resolved = (located.workspace, located.pane)
+            } else {
+                resolved = nil
+            }
+        } else if let workspace = workspace ?? active,
+                  let pane = workspace.activePane ?? workspace.root.firstPane {
+            resolved = (workspace, pane)
+        } else {
+            resolved = nil
+        }
+        guard let resolved else { return nil }
+        let workspace = resolved.workspace
+        if let existing = reusableBrowser(owner: owner, in: workspace) {
+            load(address, in: existing)
+            return existing
+        }
+        let sourcePane = resolved.sourcePane
+        guard canSplitPane(sourcePane, in: workspace),
+              let leafNode = workspace.root.paneNode(paneId: sourcePane.id),
+              case .pane(let existingPane) = leafNode.content
+        else { return nil }
+
+        let browser = BrowserPane(
+            surface: BrowserSurface(engine: browserEngineFactory()),
+            owner: owner
+        )
+        splitLeaf(
+            leafNode,
+            existingPane: existingPane,
+            browser: browser,
+            orientation: .horizontal,
+            placement: .second
+        )
+        load(address, in: browser)
+        if workspace.zoomedPaneId != nil { workspace.zoomedPaneId = nil }
+        scheduleSave()
+        return browser
+    }
+
+    func closeBrowserPane(_ browser: BrowserPane, in workspace: Workspace) {
+        closeBrowserPane(browser, in: workspace, requireAutoOwned: false)
+    }
+
+    @discardableResult
+    func closeBrowserIfAutoOwned(browserId: UUID, in workspace: Workspace? = nil) -> Bool {
+        guard let workspace = workspace ?? active,
+              let browser = workspace.root.browserPane(id: browserId)
+        else { return false }
+        return closeBrowserPane(browser, in: workspace, requireAutoOwned: true)
+    }
+
+    @discardableResult
+    func closeBrowserIfAutoOwned(owner: BrowserPaneOwner, in workspace: Workspace? = nil) -> Bool {
+        let resolvedWorkspace: Workspace?
+        if case .agent(let sessionId) = owner {
+            resolvedWorkspace = location(ofSessionId: sessionId)?.workspace
+        } else {
+            resolvedWorkspace = workspace ?? active
+        }
+        guard let resolvedWorkspace,
+              let browser = reusableBrowser(owner: owner, in: resolvedWorkspace)
+        else { return false }
+        return closeBrowserPane(browser, in: resolvedWorkspace, requireAutoOwned: true)
+    }
+
+    @discardableResult
+    func applyBrowserCommand(_ command: HookBrowserCommand, sessionId: UUID) -> String? {
+        let owner = BrowserPaneOwner.agent(sessionId)
+        guard location(ofSessionId: sessionId) != nil || reusableBrowser(owner: owner) != nil else {
+            return nil
+        }
+        switch command {
+        case .open(let address):
+            guard let browser = openBrowserSplit(address: address, owner: owner) else {
+                return "browser open failed\n"
+            }
+            return browserStateDescription(browser)
+        case .state:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return browserStateDescription(browser)
+        case .click(let text):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.click(text: text)
+            return "ok clicked text: \(text)\n"
+        case .fill(let field, let text):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.fill(field: field, text: text)
+            return "ok filled field: \(field)\n"
+        case .type(let text):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.type(text: text)
+            return "ok typed \(text.count) characters\n"
+        case .press(let key):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.press(key: key)
+            return "ok pressed key: \(key)\n"
+        case .scroll(let direction, let amount):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.scroll(direction: direction, amount: amount)
+            return "ok scrolled \(direction)\n"
+        case .back:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.goBack()
+            return "ok back\n"
+        case .forward:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.goForward()
+            return "ok forward\n"
+        case .reload:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.reload()
+            return "ok reload\n"
+        case .stop:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.stopLoading()
+            return "ok stop\n"
+        case .close:
+            return closeBrowserIfAutoOwned(owner: owner) ? "ok closed\n" : "browser not closed\n"
+        }
+    }
+
+    @discardableResult
+    private func closeBrowserPane(
+        _ browser: BrowserPane,
+        in workspace: Workspace,
+        requireAutoOwned: Bool
+    ) -> Bool {
+        if requireAutoOwned, !browser.canAutoClose { return false }
+        guard let leafNode = workspace.root.browserNode(browserId: browser.id) else { return false }
+        if leafNode === workspace.root {
+            closeWorkspace(workspace)
+            return true
+        }
+        guard let info = workspace.root.parentInfo(forBrowser: browser.id) else { return false }
+        info.parent.content = info.sibling.content
+        if workspace.activePaneId == nil {
+            workspace.activePaneId = info.sibling.firstPane?.id
+        }
+        scheduleSave()
+        return true
+    }
+
+    private func reusableBrowser(owner: BrowserPaneOwner, in workspace: Workspace) -> BrowserPane? {
+        workspace.root.allBrowserPanes.first { $0.owner == owner }
+    }
+
+    private func reusableBrowser(owner: BrowserPaneOwner) -> BrowserPane? {
+        for workspace in workspaces {
+            if let browser = reusableBrowser(owner: owner, in: workspace) {
+                return browser
+            }
+        }
+        return nil
+    }
+
+    private func browserStateDescription(_ browser: BrowserPane) -> String {
+        let snapshot = browser.surface.snapshot
+        return """
+        title: \(snapshot.title)
+        url: \(snapshot.urlString)
+        loading: \(snapshot.isLoading)
+
+        """
+    }
+
+    private func load(_ address: String?, in browser: BrowserPane) {
+        guard let address, let request = BrowserLoadRequest(address) else { return }
+        browser.surface.addressText = request.displayString
+        browser.surface.loadAddressText()
+    }
+
+    @discardableResult
     func splitPane(
         _ targetPane: Pane,
         byMovingSessionId sessionId: UUID,
@@ -1347,6 +1529,21 @@ final class WorkspaceStore {
         leafNode.content = .split(orientation: orientation, first: firstChild, second: secondChild, fraction: 0.5)
         return movedPane
     }
+
+    private func splitLeaf(
+        _ leafNode: PaneNode,
+        existingPane: Pane,
+        browser: BrowserPane,
+        orientation: SplitOrientation,
+        placement: SplitPlacement
+    ) {
+        let existingChild = PaneNode(pane: existingPane)
+        let browserChild = PaneNode(browser: browser)
+        let firstChild = placement == .first ? browserChild : existingChild
+        let secondChild = placement == .first ? existingChild : browserChild
+        leafNode.content = .split(orientation: orientation, first: firstChild, second: secondChild, fraction: 0.5)
+    }
+
 
     /// Removes `pane` and its tabs. If it's the workspace's only pane, the
     /// whole workspace closes. Otherwise the sibling pane collapses up to

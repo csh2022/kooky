@@ -41,7 +41,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     /// window's store — `applyHookEvent` & friends no-op when the session
     /// isn't theirs, so exactly the owning window reacts.
     private lazy var hookServer = HookServer { [weak self] message in
-        guard let self else { return }
+        guard let self else { return nil }
+        var response: String?
         for controller in self.windowControllers {
             let store = controller.store
             switch message {
@@ -51,6 +52,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                 store.applyShellEnvironment(env, sessionId: sessionId)
             case .conversationId(let conversationId, let sessionId):
                 store.applyConversationId(conversationId: conversationId, sessionId: sessionId)
+            case .browser(let command, let sessionId):
+                response = response ?? store.applyBrowserCommand(command, sessionId: sessionId)
             case .toolCall(let agent, let toolName, let identifier, let event, let success, let toolUseId, let sessionId):
                 store.applyToolCallEvent(
                     agent: agent,
@@ -63,6 +66,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
                 )
             }
         }
+        return response
     }
 
 

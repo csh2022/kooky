@@ -16,6 +16,27 @@ enum KookyShellIntegration {
         "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
+    static func tomlBasicString(_ s: String) -> String {
+        var result = "\""
+        for scalar in s.unicodeScalars {
+            switch scalar.value {
+            case 0x08: result += "\\b"
+            case 0x09: result += "\\t"
+            case 0x0A: result += "\\n"
+            case 0x0C: result += "\\f"
+            case 0x0D: result += "\\r"
+            case 0x22: result += "\\\""
+            case 0x5C: result += "\\\\"
+            case 0x00...0x1F, 0x7F:
+                result += String(format: "\\u%04X", scalar.value)
+            default:
+                result.unicodeScalars.append(scalar)
+            }
+        }
+        result += "\""
+        return result
+    }
+
     /// Backslash-escape every POSIX shell metacharacter — matches the
     /// `\ ` / `\'` style Finder uses when dragging a file onto Terminal.app
     /// or ghostty.app. Picks this over `quote(_:)` for the drag-and-drop
@@ -277,6 +298,21 @@ enum KookyShellIntegration {
         }
     }()
 
+    static let codexBrowserDeveloperInstructions = """
+    Kooky provides a built-in browser for this session.
+
+    For browser-page tasks, use the built-in browser before any external browser path:
+    - First run: "$KOOKY_HOOK_BIN" browser help
+    - Open or search with: "$KOOKY_HOOK_BIN" browser open <url-or-query>
+    - Interact with the page using the browser commands listed by help, such as click, fill, type, press, scroll, back, forward, reload, stop, state, and close.
+
+    Read the help output before choosing browser commands so newly added Kooky browser capabilities are discovered automatically. Do not launch or automate an external browser, Peekaboo, or host UI automation for browser-page tasks unless the user explicitly asks for an external browser session or the Kooky browser help does not provide the needed capability.
+    """
+
+    static let codexBrowserDeveloperConfigArgument: String = {
+        "developer_instructions=\(tomlBasicString(codexBrowserDeveloperInstructions))"
+    }()
+
     /// Per-session env vars our wrappers + hook helper read. Caller supplies
     /// the surface UUID; everything else is process-wide. PATH prepends
     /// `kookyBinDirectory` so wrapper shims resolve before the real binaries.
@@ -294,6 +330,9 @@ enum KookyShellIntegration {
             "KOOKY_HOOKS_PATH": hooksPath,
             "KOOKY_BIN_DIR": kookyBinDirectory,
             "KOOKY_HOOK_BIN": kookyHookBinaryPath,
+            "KOOKY_BROWSER": "1",
+            "KOOKY_BROWSER_POLICY": "prefer_kooky_browser_over_external_chrome",
+            "KOOKY_BROWSER_HELP": "Run \"$KOOKY_HOOK_BIN\" browser help before browser-page tasks, then use the listed Kooky built-in browser commands for navigation and page interaction.",
             // KOOKY_AGENT_MARKERS is deliberately NOT set locally: the
             // KookyHook socket is the local status channel. OSC-title markers
             // are the ssh-remote fallback (the remote bootstrap exports the
@@ -817,7 +856,7 @@ enum KookyShellIntegration {
         \(agentMarkerCommand(slug: "codex", event: .running))
         if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
             "$KOOKY_HOOK_BIN" codex running 2>/dev/null
-            "$real" -c "notify=[\\"$KOOKY_HOOK_BIN\\",\\"codex\\",\\"attention\\"]" "$@"
+            "$real" -c \(quote(codexBrowserDeveloperConfigArgument)) -c "notify=[\\"$KOOKY_HOOK_BIN\\",\\"codex\\",\\"attention\\"]" "$@"
         else
             "$real" "$@"
         fi

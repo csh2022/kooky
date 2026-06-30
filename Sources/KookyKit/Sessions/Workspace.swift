@@ -122,6 +122,8 @@ final class Workspace: Identifiable {
         switch node.content {
         case .pane(let p):
             visit(p)
+        case .browser:
+            break
         case .split(_, let a, let b, _):
             walk(a, visit: visit, shouldStop: shouldStop)
             if shouldStop() { return }

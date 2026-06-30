@@ -25,10 +25,15 @@ final class PaneNode: Identifiable {
     convenience init(pane: Pane) {
         self.init(id: pane.id, content: .pane(pane))
     }
+
+    convenience init(browser: BrowserPane) {
+        self.init(id: browser.id, content: .browser(browser))
+    }
 }
 
 enum PaneContent {
     case pane(Pane)
+    case browser(BrowserPane)
     indirect case split(orientation: SplitOrientation, first: PaneNode, second: PaneNode, fraction: Double)
 }
 
@@ -43,6 +48,7 @@ extension PaneNode {
     private func collectPanes(into out: inout [Pane]) {
         switch content {
         case .pane(let p): out.append(p)
+        case .browser: break
         case .split(_, let a, let b, _):
             a.collectPanes(into: &out)
             b.collectPanes(into: &out)
@@ -52,7 +58,8 @@ extension PaneNode {
     var firstPane: Pane? {
         switch content {
         case .pane(let p): return p
-        case .split(_, let a, _, _): return a.firstPane
+        case .browser: return nil
+        case .split(_, let a, let b, _): return a.firstPane ?? b.firstPane
         }
     }
 
@@ -62,6 +69,8 @@ extension PaneNode {
         switch content {
         case .pane(let p):
             return p.id == id ? p : nil
+        case .browser:
+            return nil
         case .split(_, let a, let b, _):
             return a.pane(id: id) ?? b.pane(id: id)
         }
@@ -78,6 +87,7 @@ extension PaneNode {
     var hasMultiplePanes: Bool {
         switch content {
         case .pane: return false
+        case .browser: return false
         case .split: return true
         }
     }
@@ -86,8 +96,50 @@ extension PaneNode {
         switch content {
         case .pane(let p):
             return p.id == paneId ? self : nil
+        case .browser:
+            return nil
         case .split(_, let a, let b, _):
             return a.paneNode(paneId: paneId) ?? b.paneNode(paneId: paneId)
+        }
+    }
+
+    func browserPane(id: UUID) -> BrowserPane? {
+        switch content {
+        case .browser(let browser):
+            return browser.id == id ? browser : nil
+        case .pane:
+            return nil
+        case .split(_, let a, let b, _):
+            return a.browserPane(id: id) ?? b.browserPane(id: id)
+        }
+    }
+
+    func browserNode(browserId: UUID) -> PaneNode? {
+        switch content {
+        case .browser(let browser):
+            return browser.id == browserId ? self : nil
+        case .pane:
+            return nil
+        case .split(_, let a, let b, _):
+            return a.browserNode(browserId: browserId) ?? b.browserNode(browserId: browserId)
+        }
+    }
+
+    var allBrowserPanes: [BrowserPane] {
+        var out: [BrowserPane] = []
+        collectBrowserPanes(into: &out)
+        return out
+    }
+
+    private func collectBrowserPanes(into out: inout [BrowserPane]) {
+        switch content {
+        case .browser(let browser):
+            out.append(browser)
+        case .pane:
+            break
+        case .split(_, let a, let b, _):
+            a.collectBrowserPanes(into: &out)
+            b.collectBrowserPanes(into: &out)
         }
     }
 
@@ -95,6 +147,8 @@ extension PaneNode {
         switch content {
         case .pane(let p):
             return p.id == paneId ? currentDepth : nil
+        case .browser:
+            return nil
         case .split(_, let a, let b, _):
             return a.depth(ofPane: paneId, currentDepth: currentDepth + 1)
                 ?? b.depth(ofPane: paneId, currentDepth: currentDepth + 1)
@@ -106,6 +160,8 @@ extension PaneNode {
         switch content {
         case .pane(let p):
             return p.tabs.contains(where: { $0.id == sessionId }) ? p : nil
+        case .browser:
+            return nil
         case .split(_, let a, let b, _):
             return a.pane(containingSessionId: sessionId) ?? b.pane(containingSessionId: sessionId)
         }
@@ -123,5 +179,16 @@ extension PaneNode {
             return (self, second, first)
         }
         return first.parentInfo(forPane: paneId) ?? second.parentInfo(forPane: paneId)
+    }
+
+    func parentInfo(forBrowser browserId: UUID) -> (parent: PaneNode, leaf: PaneNode, sibling: PaneNode)? {
+        guard case .split(_, let first, let second, _) = content else { return nil }
+        if case .browser(let browser) = first.content, browser.id == browserId {
+            return (self, first, second)
+        }
+        if case .browser(let browser) = second.content, browser.id == browserId {
+            return (self, second, first)
+        }
+        return first.parentInfo(forBrowser: browserId) ?? second.parentInfo(forBrowser: browserId)
     }
 }

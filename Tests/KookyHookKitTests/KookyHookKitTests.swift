@@ -169,6 +169,52 @@ final class KookyHookKitTests: XCTestCase {
         ])
     }
 
+    // MARK: browser payload
+
+    func testBrowserHelpDocumentsCurrentCommands() {
+        let help = KookyHookKit.browserHelpText
+
+        XCTAssertTrue(help.contains("browser help"))
+        XCTAssertTrue(help.contains("browser open <url-or-query>"))
+        XCTAssertTrue(help.contains("browser state"))
+        XCTAssertTrue(help.contains("browser click <visible-text>"))
+        XCTAssertTrue(help.contains("browser fill <field-label-or-placeholder> <text>"))
+        XCTAssertTrue(help.contains("browser type <text>"))
+        XCTAssertTrue(help.contains("browser press <key>"))
+        XCTAssertTrue(help.contains("browser scroll <up|down|left|right> [amount]"))
+        XCTAssertTrue(help.contains("browser back"))
+        XCTAssertTrue(help.contains("browser close"))
+        XCTAssertTrue(help.contains("Future commands will be listed here"))
+    }
+
+    func testBuildBrowserOpenPayload() {
+        let payload = KookyHookKit.buildBrowserOpenPayload(surface: "abc", address: "http://localhost:3000")
+        XCTAssertEqual(payload["kind"], "browser")
+        XCTAssertEqual(payload["surface"], "abc")
+        XCTAssertEqual(payload["command"], "open")
+        XCTAssertEqual(payload["address"], "http://localhost:3000")
+    }
+
+    func testBuildBrowserClosePayload() {
+        let payload = KookyHookKit.buildBrowserClosePayload(surface: "abc")
+        XCTAssertEqual(payload, [
+            "kind": "browser",
+            "surface": "abc",
+            "command": "close",
+        ])
+    }
+
+    func testBuildBrowserInteractionPayloads() {
+        XCTAssertEqual(KookyHookKit.buildBrowserStatePayload(surface: "abc")["command"], "state")
+        XCTAssertEqual(KookyHookKit.buildBrowserClickPayload(surface: "abc", text: "Wikipedia")["text"], "Wikipedia")
+        XCTAssertEqual(KookyHookKit.buildBrowserFillPayload(surface: "abc", field: "Search", text: "query")["field"], "Search")
+        XCTAssertEqual(KookyHookKit.buildBrowserFillPayload(surface: "abc", field: "Search", text: "query")["text"], "query")
+        XCTAssertEqual(KookyHookKit.buildBrowserTypePayload(surface: "abc", text: "typed")["text"], "typed")
+        XCTAssertEqual(KookyHookKit.buildBrowserPressPayload(surface: "abc", key: "Enter")["key"], "Enter")
+        XCTAssertEqual(KookyHookKit.buildBrowserScrollPayload(surface: "abc", direction: "down", amount: "600")["amount"], "600")
+        XCTAssertEqual(KookyHookKit.buildBrowserSimplePayload(surface: "abc", command: "reload")["command"], "reload")
+    }
+
     // MARK: Tool event payload — happy paths per tool kind
 
     // MARK: tool_use_id + PostToolUseFailure

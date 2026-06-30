@@ -46,6 +46,54 @@ final class HookServerTests: XCTestCase {
         XCTAssertEqual(conversationId, "sess_abc")
     }
 
+    func testParseBrowserOpenPayload() throws {
+        let json = #"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"open","address":"http://localhost:3000"}"#
+        let message = HookServer.parseMessage(data(json))
+        guard case let .browser(command, sessionId) = message else {
+            return XCTFail("Expected .browser, got \(String(describing: message))")
+        }
+        XCTAssertEqual(command, .open(address: "http://localhost:3000"))
+        XCTAssertEqual(sessionId, Self.surfaceUUID)
+    }
+
+    func testParseBrowserClosePayload() throws {
+        let json = #"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"close"}"#
+        let message = HookServer.parseMessage(data(json))
+        guard case let .browser(command, sessionId) = message else {
+            return XCTFail("Expected .browser, got \(String(describing: message))")
+        }
+        XCTAssertEqual(command, .close)
+        XCTAssertEqual(sessionId, Self.surfaceUUID)
+    }
+
+    func testParseBrowserInteractionPayloads() throws {
+        let cases: [(String, HookBrowserCommand)] = [
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"state"}"#, .state),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"click","text":"Wikipedia"}"#, .click(text: "Wikipedia")),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"fill","field":"Search","text":"query"}"#, .fill(field: "Search", text: "query")),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"type","text":"typed"}"#, .type(text: "typed")),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"press","key":"Enter"}"#, .press(key: "Enter")),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"scroll","direction":"down","amount":"600"}"#, .scroll(direction: "down", amount: 600)),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"back"}"#, .back),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"forward"}"#, .forward),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"reload"}"#, .reload),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"stop"}"#, .stop),
+        ]
+
+        for (json, expected) in cases {
+            let message = HookServer.parseMessage(data(json))
+            guard case let .browser(command, _) = message else {
+                return XCTFail("Expected .browser, got \(String(describing: message))")
+            }
+            XCTAssertEqual(command, expected)
+        }
+    }
+
+    func testParseBrowserOpenRejectsMissingAddress() {
+        let json = #"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"open"}"#
+        XCTAssertNil(HookServer.parseMessage(data(json)))
+    }
+
     // MARK: Tool event payload — happy paths
 
     func testParseToolCallPrePayload() throws {

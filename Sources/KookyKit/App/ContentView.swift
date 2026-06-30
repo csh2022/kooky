@@ -209,6 +209,16 @@ struct ContentView: View {
                     store.setRightSidebarMode(store.rightSidebarMode.next)
                 }
             }
+            HoverableIconButton(
+                systemName: "globe",
+                fontSize: 12,
+                size: 28,
+                help: "Browser Panel"
+            ) {
+                withAnimation(Theme.chromeTransition) {
+                    _ = store.openBrowserSplit()
+                }
+            }
             InboxBell()
                 .padding(.trailing, 8)
         }

@@ -50,7 +50,8 @@ struct PersistedWorkspace: Codable, Equatable {
     init(_ ws: Workspace) {
         self.id = ws.id
         self.workingDirectoryPath = ws.workingDirectory.path
-        self.root = PersistedPaneNode(ws.root)
+        self.root = PersistedPaneNode.persisting(ws.root)
+            ?? PersistedPaneNode(PaneNode(pane: Pane()))
         self.activePaneId = ws.activePaneId
         self.customTitle = ws.customTitle
         self.worktreeParentId = ws.worktreeParentId
@@ -138,6 +139,37 @@ extension PersistedPaneNode {
                 second: PersistedPaneNode(second),
                 fraction: fraction
             )
+        case .browser:
+            self.kind = .pane(PersistedPane(Pane()))
+        }
+    }
+
+    @MainActor
+    static func persisting(_ node: PaneNode) -> PersistedPaneNode? {
+        switch node.content {
+        case .pane(let pane):
+            return PersistedPaneNode(PaneNode(pane: pane))
+        case .browser:
+            return nil
+        case .split(let orientation, let first, let second, let fraction):
+            let persistedFirst = persisting(first)
+            let persistedSecond = persisting(second)
+            switch (persistedFirst, persistedSecond) {
+            case (.some(let first), .some(let second)):
+                return PersistedPaneNode(
+                    id: node.id,
+                    kind: .split(
+                        orientation: orientation,
+                        first: first,
+                        second: second,
+                        fraction: fraction
+                    )
+                )
+            case (.some(let only), .none), (.none, .some(let only)):
+                return only
+            case (.none, .none):
+                return nil
+            }
         }
     }
 }

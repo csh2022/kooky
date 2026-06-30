@@ -10,6 +10,14 @@ import XCTest
 /// avoided: the writers are trivial, the content getters are the
 /// load-bearing surface.
 final class ShellIntegrationTests: XCTestCase {
+    func testKookyEnvironmentAdvertisesBuiltInBrowser() {
+        let env = KookyShellIntegration.kookyEnvironment(for: UUID())
+        XCTAssertEqual(env["KOOKY_BROWSER"], "1")
+        XCTAssertEqual(env["KOOKY_BROWSER_POLICY"], "prefer_kooky_browser_over_external_chrome")
+        XCTAssertTrue(env["KOOKY_BROWSER_HELP"]?.contains("browser help") == true)
+        XCTAssertTrue(env["KOOKY_BROWSER_HELP"]?.contains("built-in browser commands") == true)
+    }
+
     private static let stubHook = "/usr/local/bin/KookyHook"
 
     func testGeminiDefaultsExposesAllFourLifecycleEvents() throws {
@@ -112,6 +120,36 @@ final class ShellIntegrationTests: XCTestCase {
         let notifyIdx = script.range(of: "notify=")!.lowerBound
         XCTAssertLessThan(guardIdx, pingIdx, "tty guard must precede the KookyHook running ping")
         XCTAssertLessThan(guardIdx, notifyIdx, "tty guard must precede the -c notify injection")
+    }
+
+    func testCodexWrapperInjectsKookyBrowserDeveloperInstructionsOnlyInsideKookySession() {
+        let script = KookyShellIntegration.codexWrapperScript
+
+        XCTAssertTrue(script.contains("developer_instructions="))
+        XCTAssertTrue(script.contains("Kooky provides a built-in browser"))
+        XCTAssertFalse(script.contains("export CODEX_HOME"))
+
+        let guardIdx = script.range(of: "if [[ ! -t 0 && ! -t 1 ]]; then")!.lowerBound
+        let instructionsIdx = script.range(of: "developer_instructions=")!.lowerBound
+        let passthroughIdx = script.range(of: "exec \"$real\" \"$@\"", options: .backwards)!.lowerBound
+        XCTAssertLessThan(guardIdx, instructionsIdx, "pipe-driven background calls must not receive the Kooky browser instruction override")
+        XCTAssertLessThan(instructionsIdx, passthroughIdx, "non-Kooky passthrough remains untouched")
+    }
+
+    func testCodexDeveloperInstructionsConfigIsValidTomlString() {
+        let argument = KookyShellIntegration.codexBrowserDeveloperConfigArgument
+
+        XCTAssertTrue(argument.hasPrefix("developer_instructions=\""))
+        XCTAssertTrue(argument.contains("\\n"))
+        XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser help"))
+        XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser open"))
+        XCTAssertFalse(argument.contains("\n"), "config override must stay one argv token")
+    }
+
+    func testTomlBasicStringEscapesControlCharacters() {
+        let encoded = KookyShellIntegration.tomlBasicString("a\"b\\c\n")
+
+        XCTAssertEqual(encoded, #""a\"b\\c\n""#)
     }
 
     func testAntigravityIDEShimCheckPrecedesTtyPassthrough() {

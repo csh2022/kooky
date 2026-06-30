@@ -30,6 +30,21 @@ enum HookToolEvent: String {
     case pre, post
 }
 
+enum HookBrowserCommand: Equatable {
+    case open(address: String)
+    case state
+    case click(text: String)
+    case fill(field: String, text: String)
+    case type(text: String)
+    case press(key: String)
+    case scroll(direction: String, amount: Double?)
+    case back
+    case forward
+    case reload
+    case stop
+    case close
+}
+
 enum HookMessage {
     case agent(agent: AgentTemplate, event: HookEvent, sessionId: UUID)
     case shellEnvironment(env: [String: String], sessionId: UUID)
@@ -56,11 +71,12 @@ enum HookMessage {
         toolUseId: String?,
         sessionId: UUID
     )
+    case browser(command: HookBrowserCommand, sessionId: UUID)
 }
 
 @MainActor
 final class HookServer {
-    typealias Handler = (_ message: HookMessage) -> Void
+    typealias Handler = (_ message: HookMessage) -> String?
 
     private let handler: Handler
     private var listenFd: Int32 = -1
@@ -134,7 +150,11 @@ final class HookServer {
             close(listenFd)
             listenFd = -1
         }
-        try? FileManager.default.removeItem(atPath: Self.socketPath)
+        // Do not unlink `socketPath` on shutdown. Kooky supports temporary
+        // dev instances alongside an installed app; if an older instance exits
+        // after a newer instance has rebound the shared path, unconditional
+        // removal here unlinks the live socket and future KookyHook clients
+        // fail to connect. `start()` already removes stale paths before bind.
     }
 
     private func acceptOne() {
@@ -150,7 +170,9 @@ final class HookServer {
         guard n > 0 else { return }
         let data = Data(bytes: buffer, count: n)
         guard let message = Self.parseMessage(data) else { return }
-        handler(message)
+        if let response = handler(message), !response.isEmpty {
+            _ = response.withCString { write(clientFd, $0, strlen($0)) }
+        }
     }
 
     private static let envKeys = [
@@ -177,6 +199,50 @@ final class HookServer {
            let conversationId = dict["conversationId"] as? String,
            !conversationId.isEmpty {
             return .conversationId(conversationId: conversationId, sessionId: id)
+        }
+
+        if dict["kind"] as? String == "browser",
+           let command = dict["command"] as? String {
+            switch command {
+            case "open":
+                guard let address = dict["address"] as? String,
+                      !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return .browser(command: .open(address: address), sessionId: id)
+            case "state":
+                return .browser(command: .state, sessionId: id)
+            case "click":
+                guard let text = dict["text"] as? String,
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return .browser(command: .click(text: text), sessionId: id)
+            case "fill":
+                guard let field = dict["field"] as? String,
+                      !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let text = dict["text"] as? String else { return nil }
+                return .browser(command: .fill(field: field, text: text), sessionId: id)
+            case "type":
+                guard let text = dict["text"] as? String, !text.isEmpty else { return nil }
+                return .browser(command: .type(text: text), sessionId: id)
+            case "press":
+                guard let key = dict["key"] as? String,
+                      !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return .browser(command: .press(key: key), sessionId: id)
+            case "scroll":
+                let direction = dict["direction"] as? String ?? "down"
+                let amount = (dict["amount"] as? String).flatMap(Double.init)
+                return .browser(command: .scroll(direction: direction, amount: amount), sessionId: id)
+            case "back":
+                return .browser(command: .back, sessionId: id)
+            case "forward":
+                return .browser(command: .forward, sessionId: id)
+            case "reload":
+                return .browser(command: .reload, sessionId: id)
+            case "stop":
+                return .browser(command: .stop, sessionId: id)
+            case "close":
+                return .browser(command: .close, sessionId: id)
+            default:
+                return nil
+            }
         }
 
         if dict["kind"] as? String == "tool" {

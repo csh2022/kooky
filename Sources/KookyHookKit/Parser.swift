@@ -8,6 +8,52 @@ import Foundation
 /// PostToolUse payloads) without spawning a subprocess. Stays off
 /// `KookyKit` on purpose — the CLI binary must remain dependency-free.
 public enum KookyHookKit {
+    public static let browserHelpText = """
+    Kooky built-in browser commands:
+
+      KookyHook browser help
+          Show this help. Agents should run this before browser-page tasks to discover current capabilities.
+
+      KookyHook browser open <url-or-query>
+          Open or reuse this agent's browser split and navigate to a URL or search query.
+          Examples:
+            KookyHook browser open https://example.com
+            KookyHook browser open localhost:3000
+            KookyHook browser open "weather shanghai"
+
+      KookyHook browser state
+          Print the current built-in browser title, URL, and loading state.
+
+      KookyHook browser click <visible-text>
+          Click the first visible link, button, or clickable element whose text contains <visible-text>.
+
+      KookyHook browser fill <field-label-or-placeholder> <text>
+          Focus and replace the value of a visible input/textarea/contenteditable field.
+
+      KookyHook browser type <text>
+          Type text into the currently focused page element.
+
+      KookyHook browser press <key>
+          Press a page key such as Enter, Escape, Tab, Backspace, ArrowDown, or ArrowUp.
+
+      KookyHook browser scroll <up|down|left|right> [amount]
+          Scroll the page. Amount is optional pixels; default is about one viewport.
+
+      KookyHook browser back
+      KookyHook browser forward
+      KookyHook browser reload
+      KookyHook browser stop
+          Browser navigation controls.
+
+      KookyHook browser close
+          Close this agent's browser split if it is still auto-owned by the agent.
+
+    Notes:
+      - These commands target Kooky's built-in browser, not an external browser.
+      - The browser opens as a split next to the calling Kooky session.
+      - Future commands will be listed here as they are added.
+    """
+
     public static var socketPath: String {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return support.appendingPathComponent("kooky/socket").path
@@ -16,17 +62,21 @@ public enum KookyHookKit {
     /// One-shot socket write. Returns true on success. `HookServer` accepts
     /// one payload per connection so each call opens / writes / closes.
     public static func sendPayload(_ object: [String: String], to path: String) -> Bool {
-        guard var payload = try? JSONSerialization.data(withJSONObject: object) else { return false }
+        sendPayloadAndReadResponse(object, to: path) != nil
+    }
+
+    public static func sendPayloadAndReadResponse(_ object: [String: String], to path: String) -> String? {
+        guard var payload = try? JSONSerialization.data(withJSONObject: object) else { return nil }
         payload.append(0x0A)
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else { return nil }
         defer { close(fd) }
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = Array(path.utf8)
-        guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return false }
+        guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return nil }
         withUnsafeMutableBytes(of: &addr.sun_path) { dst in
             pathBytes.withUnsafeBufferPointer { src in
                 dst.baseAddress?.copyMemory(from: src.baseAddress!, byteCount: src.count)
@@ -39,10 +89,25 @@ public enum KookyHookKit {
                 connect(fd, $0, len)
             }
         }
-        guard connected == 0 else { return false }
+        guard connected == 0 else { return nil }
 
         let written = payload.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-        return written >= 0
+        guard written >= 0 else { return nil }
+        shutdown(fd, SHUT_WR)
+
+        var response = [UInt8]()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = buffer.withUnsafeMutableBufferPointer { read(fd, $0.baseAddress, $0.count) }
+            if count > 0 {
+                response.append(contentsOf: buffer.prefix(count))
+                if response.count >= 16_384 { break }
+            } else {
+                break
+            }
+        }
+        guard !response.isEmpty else { return "" }
+        return String(decoding: response, as: UTF8.self)
     }
 
     /// Env-snapshot payload from positional args. Order follows the
@@ -107,6 +172,86 @@ public enum KookyHookKit {
             "kind": "conversationId",
             "surface": surface,
             "conversationId": conversationId,
+        ]
+    }
+
+    public static func buildBrowserOpenPayload(surface: String, address: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "open",
+            "address": address,
+        ]
+    }
+
+    public static func buildBrowserClosePayload(surface: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "close",
+        ]
+    }
+
+    public static func buildBrowserStatePayload(surface: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "state",
+        ]
+    }
+
+    public static func buildBrowserClickPayload(surface: String, text: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "click",
+            "text": text,
+        ]
+    }
+
+    public static func buildBrowserFillPayload(surface: String, field: String, text: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "fill",
+            "field": field,
+            "text": text,
+        ]
+    }
+
+    public static func buildBrowserTypePayload(surface: String, text: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "type",
+            "text": text,
+        ]
+    }
+
+    public static func buildBrowserPressPayload(surface: String, key: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "press",
+            "key": key,
+        ]
+    }
+
+    public static func buildBrowserScrollPayload(surface: String, direction: String, amount: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "scroll",
+            "direction": direction,
+            "amount": amount,
+        ]
+    }
+
+    public static func buildBrowserSimplePayload(surface: String, command: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": command,
         ]
     }
 

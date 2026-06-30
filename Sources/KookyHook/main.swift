@@ -17,6 +17,16 @@ import KookyHookKit
 //       failure (kooky restarting, socket recreated) would freeze the env
 //       cache permanently.
 //
+// Usage: kooky-hook browser help
+//        kooky-hook browser open <url-or-query>
+//        kooky-hook browser state
+//        kooky-hook browser click <visible-text>
+//        kooky-hook browser fill <field-label-or-placeholder> <text>
+//        kooky-hook browser type <text>
+//        kooky-hook browser press <key>
+//        kooky-hook browser scroll <up|down|left|right> [amount]
+//        kooky-hook browser back|forward|reload|stop
+//        kooky-hook browser close
 // Usage: kooky-hook <agent> <event>
 //   <agent> ∈ claude | codex | pi (or any AgentTemplate.id)
 //   <event> ∈ running | attention | idle    (lifecycle events)
@@ -37,6 +47,14 @@ import KookyHookKit
 // Reads:  argv[3]                 Codex appends notify JSON as the final
 //                                 argv; we mirror its UUID session id as a
 //                                 separate `kind: conversationId` payload.
+
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "browser" {
+    let command = CommandLine.arguments.count >= 3 ? CommandLine.arguments[2] : "help"
+    if command == "help" || command == "-h" || command == "--help" {
+        print(KookyHookKit.browserHelpText)
+        exit(0)
+    }
+}
 
 let surface = ProcessInfo.processInfo.environment["KOOKY_SURFACE_ID"] ?? ""
 guard !surface.isEmpty else { exit(0) }
@@ -62,7 +80,45 @@ let codexNotifyData: Data = (agentArg == "codex" && CommandLine.arguments.count 
     : Data()
 
 let payloadObject: [String: String]
-if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "env" {
+if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "browser" {
+    let command = CommandLine.arguments[2]
+    if command == "open" {
+        let address = CommandLine.arguments.dropFirst(3).joined(separator: " ")
+        guard !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { exit(0) }
+        payloadObject = KookyHookKit.buildBrowserOpenPayload(surface: surface, address: address)
+    } else if command == "state" {
+        payloadObject = KookyHookKit.buildBrowserStatePayload(surface: surface)
+    } else if command == "click" {
+        let text = CommandLine.arguments.dropFirst(3).joined(separator: " ")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { exit(0) }
+        payloadObject = KookyHookKit.buildBrowserClickPayload(surface: surface, text: text)
+    } else if command == "fill" {
+        let args = Array(CommandLine.arguments.dropFirst(3))
+        guard args.count >= 2 else { exit(0) }
+        let field = args[0]
+        let text = args.dropFirst().joined(separator: " ")
+        guard !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { exit(0) }
+        payloadObject = KookyHookKit.buildBrowserFillPayload(surface: surface, field: field, text: text)
+    } else if command == "type" {
+        let text = CommandLine.arguments.dropFirst(3).joined(separator: " ")
+        guard !text.isEmpty else { exit(0) }
+        payloadObject = KookyHookKit.buildBrowserTypePayload(surface: surface, text: text)
+    } else if command == "press" {
+        let key = CommandLine.arguments.dropFirst(3).joined(separator: " ")
+        guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { exit(0) }
+        payloadObject = KookyHookKit.buildBrowserPressPayload(surface: surface, key: key)
+    } else if command == "scroll" {
+        let direction = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "down"
+        let amount = CommandLine.arguments.count >= 5 ? CommandLine.arguments[4] : ""
+        payloadObject = KookyHookKit.buildBrowserScrollPayload(surface: surface, direction: direction, amount: amount)
+    } else if ["back", "forward", "reload", "stop"].contains(command) {
+        payloadObject = KookyHookKit.buildBrowserSimplePayload(surface: surface, command: command)
+    } else if command == "close" {
+        payloadObject = KookyHookKit.buildBrowserClosePayload(surface: surface)
+    } else {
+        exit(0)
+    }
+} else if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "env" {
     let envArgs = Array(CommandLine.arguments.dropFirst(2))
     payloadObject = KookyHookKit.buildEnvPayload(surface: surface, args: envArgs)
 } else if CommandLine.arguments.count >= 3 {
@@ -127,7 +183,19 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "env" {
     exit(0)
 }
 
-let eventSent = KookyHookKit.sendPayload(payloadObject, to: socketPath)
+let eventSent: Bool
+if payloadObject["kind"] == "browser" {
+    if let response = KookyHookKit.sendPayloadAndReadResponse(payloadObject, to: socketPath) {
+        if !response.isEmpty {
+            print(response, terminator: response.hasSuffix("\n") ? "" : "\n")
+        }
+        eventSent = true
+    } else {
+        eventSent = false
+    }
+} else {
+    eventSent = KookyHookKit.sendPayload(payloadObject, to: socketPath)
+}
 
 // Bonus payload: Claude pipes `session_id` on every hook (lifecycle +
 // tool). Mirror it so `WorkspaceStore` can persist the conversation id
