@@ -707,8 +707,8 @@ private struct PaneStatusBar: View {
             let isZoomed = workspace.isZoomed(paneId)
             StatusBarIconButton(
                 systemName: isZoomed
-                    ? "arrow.down.left.and.arrow.up.right"
-                    : "arrow.up.right.and.arrow.down.left",
+                    ? "arrow.up.right.and.arrow.down.left"
+                    : "arrow.down.left.and.arrow.up.right",
                 isActive: isZoomed,
                 help: isZoomed ? "Exit zoom (⌘⇧E)" : "Zoom pane (⌘⇧E)"
             ) {
