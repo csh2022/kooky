@@ -152,7 +152,7 @@ private struct AddTabButton: View {
         }
         .dropDestination(for: String.self) { dropped, _ in
             defer { store.draggingTabId = nil }
-            guard let id = dropped.first.flatMap(UUID.init) else { return false }
+            guard let id = dropped.first.flatMap(KookyDragPayload.tabId) else { return false }
             return withAnimation(.easeInOut(duration: 0.18)) {
                 store.handleTabDrop(droppedId: id, to: pane, at: pane.tabs.count, in: workspace)
             }
@@ -208,11 +208,11 @@ private struct DraggableTabRow: View {
         .dropIndicator(active: isTargeted && !isSelfDrag, on: edge)
         .onDrag {
             store.draggingTabId = tab.id
-            return NSItemProvider(object: tab.id.uuidString as NSString)
+            return NSItemProvider(object: KookyDragPayload.tab(tab.id).encoded as NSString)
         }
         .dropDestination(for: String.self) { dropped, _ in
             defer { store.draggingTabId = nil }
-            guard let id = dropped.first.flatMap(UUID.init) else { return false }
+            guard let id = dropped.first.flatMap(KookyDragPayload.tabId) else { return false }
             return withAnimation(.easeInOut(duration: 0.18)) {
                 store.handleTabDrop(droppedId: id, to: pane, at: myIndex, in: workspace)
             }
@@ -297,7 +297,7 @@ private struct TabBarDropSurface: NSViewRepresentable {
                 store.draggingTabId = nil
                 previewIndex = nil
             }
-            guard let id = UUID(uuidString: raw), isInsideTitleDropBand(point) else { return false }
+            guard let id = KookyDragPayload.tabId(from: raw), isInsideTitleDropBand(point) else { return false }
             return onDrop(id, insertionIndex(forX: point.x))
         }
         return view

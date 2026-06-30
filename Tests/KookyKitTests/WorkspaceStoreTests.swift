@@ -1867,6 +1867,103 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertTrue(dest.tabs.contains { $0 === session })
     }
 
+    func testMoveTabToWorkspaceMovesSessionWithoutTerminating() {
+        let store = makeStore()
+        let source = store.workspaces[0]
+        let moved = store.addTab(in: source, template: .claudeCode)
+        let dest = store.addWorkspace(workingDirectory: projectB)
+        let destPane = firstPane(dest)
+
+        let ok = store.moveTab(moved.id, toWorkspace: dest)
+
+        XCTAssertTrue(ok)
+        XCTAssertFalse(firstPane(source).tabs.contains { $0 === moved }, "session left the source workspace")
+        XCTAssertTrue(destPane.tabs.contains { $0 === moved }, "session now lives in destination workspace")
+        XCTAssertEqual(destPane.activeTabId, moved.id)
+        XCTAssertEqual(store.activeWorkspaceId, dest.id)
+        XCTAssertEqual(engine(moved).terminateCount, 0, "moving must preserve the live engine")
+    }
+
+    func testMoveTabToWorkspaceRewiresEngineCallbacksToDestination() {
+        let store = makeStore()
+        let source = store.addWorkspace(workingDirectory: projectA)
+        let moved = store.addTab(in: source, template: .terminal)
+        let dest = store.addWorkspace(workingDirectory: projectB)
+
+        XCTAssertTrue(store.moveTab(moved.id, toWorkspace: dest))
+        engine(moved).emitPwd("/tmp/projectC")
+
+        XCTAssertEqual(dest.workingDirectory.path, "/tmp/projectC", "pwd change reaches destination workspace")
+        XCTAssertNotEqual(source.workingDirectory.path, "/tmp/projectC", "source workspace is no longer wired")
+    }
+
+    func testMoveOnlyTabToExistingWorkspaceRemovesSourceWorkspace() {
+        let store = makeStore()
+        let source = store.workspaces[0]
+        let moved = firstPane(source).tabs[0]
+        let dest = store.addWorkspace(workingDirectory: projectB)
+
+        XCTAssertTrue(store.moveTab(moved.id, toWorkspace: dest))
+
+        XCTAssertFalse(store.workspaces.contains { $0 === source }, "empty source workspace closes after its only tab moves")
+        XCTAssertTrue(firstPane(dest).tabs.contains { $0 === moved })
+        XCTAssertEqual(engine(moved).terminateCount, 0)
+    }
+
+    func testMoveOnlyTabToNewWorkspaceKeepsWindowAlive() {
+        let store = makeStore()
+        let source = store.workspaces[0]
+        let moved = firstPane(source).tabs[0]
+        engine(moved).emitPwd("/tmp/projectA/sub")
+        var becameEmptyCount = 0
+        store.onBecameEmpty = { becameEmptyCount += 1 }
+
+        XCTAssertTrue(store.moveTabToNewWorkspace(moved.id))
+
+        XCTAssertEqual(store.workspaces.count, 1)
+        let created = store.workspaces[0]
+        XCTAssertFalse(created === source)
+        XCTAssertEqual(created.workingDirectory.path, "/tmp/projectA/sub")
+        XCTAssertTrue(firstPane(created).tabs.contains { $0 === moved })
+        XCTAssertEqual(store.activeWorkspaceId, created.id)
+        XCTAssertEqual(becameEmptyCount, 0, "creating the destination first keeps the window alive")
+        XCTAssertEqual(engine(moved).terminateCount, 0)
+    }
+
+    func testMoveWorktreeOnlyTabDoesNotParkRemovalConfirmation() {
+        let store = makeStore()
+        let source = store.addWorkspace(workingDirectory: projectA)
+        let worktree = store.addWorkspace(
+            workingDirectory: URL(fileURLWithPath: "/tmp/projectA-session-drop"),
+            worktreeParent: source,
+            worktreeBranch: "session-drop"
+        )
+        let moved = firstPane(worktree).tabs[0]
+        let dest = store.addWorkspace(workingDirectory: projectB)
+
+        XCTAssertTrue(store.moveTab(moved.id, toWorkspace: dest))
+
+        XCTAssertFalse(store.workspaces.contains { $0 === worktree })
+        XCTAssertNil(store.pendingRemovalRequest)
+        XCTAssertTrue(firstPane(dest).tabs.contains { $0 === moved })
+        XCTAssertEqual(engine(moved).terminateCount, 0)
+    }
+
+    func testCrossWindowMoveTabToWorkspaceRewiresCallbacks() {
+        let (a, b) = makeWindowPair()
+        let wsA = a.workspaces[0]
+        let moved = firstPane(wsA).tabs[0]
+        let dest = b.addWorkspace(workingDirectory: projectB)
+
+        XCTAssertTrue(b.moveTab(moved.id, toWorkspace: dest))
+        engine(moved).emitPwd("/tmp/projectC")
+
+        XCTAssertTrue(a.workspaces.isEmpty)
+        XCTAssertTrue(firstPane(dest).tabs.contains { $0 === moved })
+        XCTAssertEqual(dest.workingDirectory.path, "/tmp/projectC")
+        XCTAssertEqual(engine(moved).terminateCount, 0)
+    }
+
     func testCrossWindowDropMovesSessionToOtherWindow() {
         let (a, b) = makeWindowPair()
         let wsA = a.workspaces[0]

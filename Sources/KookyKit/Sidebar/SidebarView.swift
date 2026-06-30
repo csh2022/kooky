@@ -219,6 +219,9 @@ struct SidebarView: View {
                         )
                     }
                 }
+                if store.draggingTabId != nil {
+                    NewWorkspaceTabDropRow(store: store, isCompact: isCompact)
+                }
             }
             .padding(.horizontal, Theme.space2)
             .padding(.vertical, Theme.space2)
@@ -262,16 +265,14 @@ struct SidebarView: View {
 
         if hasWorktrees && !isCollapsed {
             ForEach(worktrees) { worktree in
-                SidebarWorkspaceRow(
+                DraggableWorkspaceRow(
                     workspace: worktree,
-                    isActive: worktree.id == store.activeWorkspaceId,
+                    store: store,
+                    myIndex: store.workspaces.firstIndex(where: { $0.id == worktree.id }) ?? 0,
                     isCompact: false,
                     canCloseOthers: canCloseOthers,
-                    onActivate: { store.activateWorkspace(worktree) },
-                    onClose: { store.requestCloseWorkspace(worktree) },
-                    onCloseOthers: { store.closeOtherWorkspaces(keeping: worktree) },
-                    onDuplicate: { store.duplicateWorkspace(worktree) },
-                    onRename: { store.renameWorkspace(worktree, to: $0) },
+                    draggingId: $draggingWorkspaceId,
+                    allowsWorkspaceReorder: false,
                     onGoToSource: { store.activateWorkspace(parent) }
                 )
             }
@@ -374,9 +375,10 @@ private struct DraggableWorkspaceRow: View {
     let isCompact: Bool
     let canCloseOthers: Bool
     @Binding var draggingId: UUID?
+    var allowsWorkspaceReorder: Bool = true
     /// Non-nil only for source workspaces that own at least one worktree.
-    /// Worktree rows themselves render via `SidebarWorkspaceRow` directly,
-    /// without this wrapper, so they don't pick up drag/drop handlers.
+    /// Worktree child rows also use this wrapper for tab drops, but pass
+    /// `allowsWorkspaceReorder: false` so full-mode nesting stays stable.
     var disclosure: SidebarWorkspaceRow.WorktreeDisclosure? = nil
     var onCreateWorktree: (() -> Void)? = nil
     var onGoToSource: (() -> Void)? = nil
@@ -391,7 +393,22 @@ private struct DraggableWorkspaceRow: View {
         let dragsDownward = (originIndex ?? Int.max) < myIndex
         let edge: Alignment = dragsDownward ? .bottom : .top
         let isSelfDrag = draggingId == workspace.id
+        let isTabDrag = store.draggingTabId != nil
 
+        Group {
+            if allowsWorkspaceReorder {
+                rowContent(edge: edge, isSelfDrag: isSelfDrag, isTabDrag: isTabDrag)
+                    .onDrag {
+                        draggingId = workspace.id
+                        return NSItemProvider(object: KookyDragPayload.workspace(workspace.id).encoded as NSString)
+                    }
+            } else {
+                rowContent(edge: edge, isSelfDrag: isSelfDrag, isTabDrag: isTabDrag)
+            }
+        }
+    }
+
+    private func rowContent(edge: Alignment, isSelfDrag: Bool, isTabDrag: Bool) -> some View {
         SidebarWorkspaceRow(
             workspace: workspace,
             isActive: workspace.id == store.activeWorkspaceId,
@@ -408,20 +425,76 @@ private struct DraggableWorkspaceRow: View {
             onCreateWorktree: onCreateWorktree,
             onGoToSource: onGoToSource
         )
-        .dropIndicator(active: isTargeted && !isSelfDrag, on: edge)
-        .onDrag {
-            draggingId = workspace.id
-            return NSItemProvider(object: workspace.id.uuidString as NSString)
+        .dropIndicator(active: allowsWorkspaceReorder && isTargeted && !isSelfDrag && !isTabDrag, on: edge)
+        .overlay {
+            if isTargeted && isTabDrag {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Theme.chromeForeground.opacity(0.62), lineWidth: 1.5)
+            }
         }
         .dropDestination(for: String.self) { dropped, _ in
-            defer { draggingId = nil }
-            guard let id = dropped.first.flatMap(UUID.init),
-                  let from = store.workspaces.firstIndex(where: { $0.id == id })
-            else { return false }
-            withAnimation(.easeInOut(duration: 0.18)) {
-                store.moveWorkspace(from: from, to: myIndex)
+            defer {
+                draggingId = nil
+                store.draggingTabId = nil
             }
-            return true
+            guard let raw = dropped.first,
+                  let payload = KookyDragPayload(encoded: raw)
+            else { return false }
+            switch payload {
+            case .tab(let id):
+                return withAnimation(.easeInOut(duration: 0.18)) {
+                    store.moveTab(id, toWorkspace: workspace)
+                }
+            case .workspace(let id):
+                guard allowsWorkspaceReorder,
+                      let from = store.workspaces.firstIndex(where: { $0.id == id })
+                else { return false }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    store.moveWorkspace(from: from, to: myIndex)
+                }
+                return true
+            }
+        } isTargeted: { isTargeted = $0 }
+    }
+}
+
+private struct NewWorkspaceTabDropRow: View {
+    @Bindable var store: WorkspaceStore
+    let isCompact: Bool
+    @State private var isTargeted = false
+
+    var body: some View {
+        HStack(spacing: Theme.space2) {
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 18, height: 18)
+            if !isCompact {
+                Text("New workspace")
+                    .font(Theme.display(12, weight: .regular))
+                    .lineLimit(1)
+            }
+        }
+        .foregroundStyle(isTargeted ? Theme.chromeForeground : Theme.chromeMuted)
+        .frame(maxWidth: .infinity, minHeight: isCompact ? 30 : 36, alignment: isCompact ? .center : .leading)
+        .padding(.horizontal, isCompact ? 0 : Theme.space3)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isTargeted ? Theme.chromeActive : Theme.chromeHover.opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(
+                    isTargeted ? Theme.chromeForeground.opacity(0.62) : Theme.chromeHairline,
+                    lineWidth: isTargeted ? 1.5 : 1
+                )
+        )
+        .contentShape(Rectangle())
+        .dropDestination(for: String.self) { dropped, _ in
+            defer { store.draggingTabId = nil }
+            guard let id = dropped.first.flatMap(KookyDragPayload.tabId) else { return false }
+            return withAnimation(.easeInOut(duration: 0.18)) {
+                store.moveTabToNewWorkspace(id)
+            }
         } isTargeted: { isTargeted = $0 }
     }
 
