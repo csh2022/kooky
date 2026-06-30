@@ -13,6 +13,8 @@ struct TabBarItem: View {
     let canCloseToRight: Bool
     let onActivate: () -> Void
     let onClose: () -> Void
+    let closeConfirmation: CloseConfirmation?
+    let onConfirmedClose: () -> Void
     let onCloseOthers: () -> Void
     let onCloseToRight: () -> Void
     let onDuplicate: () -> Void
@@ -22,6 +24,7 @@ struct TabBarItem: View {
 
     @State private var isHovered = false
     @State private var isContextMenuOpen = false
+    @State private var isCloseConfirmationOpen = false
     @State private var isRenameOpen = false
     @State private var pendingRename = ""
 
@@ -39,10 +42,19 @@ struct TabBarItem: View {
                 fontSize: 9,
                 size: 16,
                 help: "Close tab",
-                action: onClose
+                action: requestCloseFromButton
             )
             .opacity(isHovered || isActive ? 1 : 0)
             .allowsHitTesting(isHovered || isActive)
+            .popover(isPresented: $isCloseConfirmationOpen, arrowEdge: .bottom) {
+                if let closeConfirmation {
+                    ConfirmClosePopover(
+                        confirmation: closeConfirmation,
+                        confirm: onConfirmedClose,
+                        dismiss: { isCloseConfirmationOpen = false }
+                    )
+                }
+            }
         }
         .foregroundStyle(isActive ? Theme.chromeForeground : Theme.chromeForeground.opacity(0.6))
         .padding(.horizontal, Theme.space3)
@@ -117,6 +129,14 @@ struct TabBarItem: View {
             tab.renameRequested = false
             beginRename(deferred: false)
         }
+    }
+
+    private func requestCloseFromButton() {
+        guard closeConfirmation != nil else {
+            onClose()
+            return
+        }
+        isCloseConfirmationOpen = true
     }
 
     /// Seed the edit field from the current title and open the rename popover.

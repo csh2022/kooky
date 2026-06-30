@@ -190,6 +190,14 @@ private struct DraggableTabRow: View {
             canCloseToRight: canCloseToRight,
             onActivate: { store.activateTab(tab, in: workspace) },
             onClose: { store.requestCloseTab(tab, in: workspace) },
+            closeConfirmation: closeConfirmation,
+            onConfirmedClose: {
+                if closesWorkspace {
+                    store.closeWorkspace(workspace)
+                } else {
+                    store.closeTab(tab, in: workspace)
+                }
+            },
             onCloseOthers: { store.requestCloseOtherTabs(keeping: tab, in: workspace) },
             onCloseToRight: { store.requestCloseTabsToRight(of: tab, in: workspace) },
             onDuplicate: { store.duplicateTab(tab, in: workspace) },
@@ -209,6 +217,25 @@ private struct DraggableTabRow: View {
                 store.handleTabDrop(droppedId: id, to: pane, at: myIndex, in: workspace)
             }
         } isTargeted: { isTargeted = $0 }
+    }
+
+    private var closesWorkspace: Bool {
+        workspace.root.allPanes.count == 1 && pane.tabs.count == 1
+    }
+
+    private var closeConfirmation: CloseConfirmation? {
+        if closesWorkspace && workspaceNeedsDedicatedCloseSheet {
+            return nil
+        }
+        return CloseConfirmation(
+            title: closesWorkspace ? "Close workspace?" : "Close session?",
+            confirmLabel: "close"
+        )
+    }
+
+    private var workspaceNeedsDedicatedCloseSheet: Bool {
+        workspace.worktreeParentId != nil
+            || store.workspaces.contains { $0.worktreeParentId == workspace.id }
     }
 }
 
