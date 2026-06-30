@@ -456,6 +456,16 @@ private struct DraggableWorkspaceRow: View {
             }
         } isTargeted: { isTargeted = $0 }
     }
+
+    private var closeConfirmation: CloseConfirmation? {
+        guard canCloseInline else { return nil }
+        return CloseConfirmation(title: "Close workspace?", confirmLabel: "close")
+    }
+
+    private var canCloseInline: Bool {
+        workspace.worktreeParentId == nil
+            && !store.workspaces.contains { $0.worktreeParentId == workspace.id }
+    }
 }
 
 private struct NewWorkspaceTabDropRow: View {
@@ -496,15 +506,5 @@ private struct NewWorkspaceTabDropRow: View {
                 store.moveTabToNewWorkspace(id)
             }
         } isTargeted: { isTargeted = $0 }
-    }
-
-    private var closeConfirmation: CloseConfirmation? {
-        guard canCloseInline else { return nil }
-        return CloseConfirmation(title: "Close workspace?", confirmLabel: "close")
-    }
-
-    private var canCloseInline: Bool {
-        workspace.worktreeParentId == nil
-            && !store.workspaces.contains { $0.worktreeParentId == workspace.id }
     }
 }
