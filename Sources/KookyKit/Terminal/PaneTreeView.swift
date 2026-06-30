@@ -636,22 +636,7 @@ private struct PaneStatusBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Zoom + compose: bracket-pill icon buttons. Zoom shows only when
-            // meaningful; compose follows Settings → Status Bar.
-            if workspace.canZoom {
-                let isZoomed = workspace.isZoomed(paneId)
-                StatusBarIconButton(
-                    systemName: isZoomed
-                        ? "arrow.down.right.and.arrow.up.left"
-                        : "arrow.up.left.and.arrow.down.right",
-                    isActive: isZoomed,
-                    help: isZoomed ? "Exit zoom (⌘⇧E)" : "Zoom pane (⌘⇧E)"
-                ) {
-                    withAnimation(Theme.chromeTransition) {
-                        store.toggleZoom(in: workspace, paneId: paneId)
-                    }
-                }
-            }
+            // Compose follows Settings → Status Bar.
             if showPromptComposerControl() {
                 StatusBarIconButton(
                     systemName: "long.text.page.and.pencil",
@@ -681,6 +666,7 @@ private struct PaneStatusBar: View {
             // a taller chrome row. Each row is right-aligned so the visual
             // matches the single-row layout when nothing wraps.
             trailingSegments
+            zoomControl
         }
         .font(Theme.mono(11))
         .padding(.horizontal, Theme.space2)
@@ -712,6 +698,24 @@ private struct PaneStatusBar: View {
             segments
         } else {
             segments.frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var zoomControl: some View {
+        if workspace.canZoom {
+            let isZoomed = workspace.isZoomed(paneId)
+            StatusBarIconButton(
+                systemName: isZoomed
+                    ? "arrow.down.left.and.arrow.up.right"
+                    : "arrow.up.right.and.arrow.down.left",
+                isActive: isZoomed,
+                help: isZoomed ? "Exit zoom (⌘⇧E)" : "Zoom pane (⌘⇧E)"
+            ) {
+                withAnimation(Theme.chromeTransition) {
+                    store.toggleZoom(in: workspace, paneId: paneId)
+                }
+            }
         }
     }
 
