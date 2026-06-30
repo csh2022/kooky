@@ -22,7 +22,6 @@ struct ConfirmClosePopover: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
-                Spacer(minLength: 0)
                 BracketButton("cancel", tone: .secondary) {
                     dismiss()
                 }
