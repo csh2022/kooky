@@ -413,7 +413,7 @@ private struct PaneSplitDropOverlay: View {
                     store.draggingTabId = nil
                     targetedEdge = nil
                 }
-                guard let id = dropped.first.flatMap(UUID.init), canSplit(sessionId: id) else { return false }
+                guard let id = dropped.first.flatMap(KookyDragPayload.tabId), canSplit(sessionId: id) else { return false }
                 return withAnimation(Theme.chromeTransition) {
                     store.splitPane(
                         pane,

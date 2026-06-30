@@ -825,6 +825,71 @@ final class WorkspaceStore {
         attachSession(session, to: destPane, at: destIndex, in: workspace)
     }
 
+    /// Move a live session into another workspace's active pane. This is the
+    /// sidebar drop path: the session keeps its engine/scrollback, while
+    /// engine callbacks are rebound so future cwd/title/focus events mutate
+    /// the destination workspace.
+    @discardableResult
+    func moveTab(_ sessionId: UUID, toWorkspace workspace: Workspace) -> Bool {
+        guard workspaces.contains(where: { $0 === workspace }),
+              let destPane = workspace.activePane ?? workspace.root.firstPane
+        else { return false }
+
+        if let (sourceWorkspace, sourcePane) = location(ofSessionId: sessionId) {
+            guard sourceWorkspace.id != workspace.id,
+                  let sourceIndex = sourcePane.tabs.firstIndex(where: { $0.id == sessionId })
+            else { return false }
+            let session = sourcePane.tabs[sourceIndex]
+            gitWatchers.removeValue(forKey: session.id)?.cancel()
+            detachSessionForMove(session, from: sourcePane, at: sourceIndex, in: sourceWorkspace)
+            attachSession(session, to: destPane, at: destPane.tabs.count, in: workspace)
+            wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
+            activateWorkspace(workspace)
+            return true
+        }
+
+        for source in peerStores() where source !== self {
+            if let session = source.surrenderSession(id: sessionId) {
+                attachSession(session, to: destPane, at: destPane.tabs.count, in: workspace)
+                wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
+                activateWorkspace(workspace)
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /// Move a live session into a freshly-created top-level workspace at the
+    /// bottom of the sidebar. Unlike `addWorkspace`, this does not spawn a
+    /// placeholder terminal; the moved session is the new workspace's only tab.
+    @discardableResult
+    func moveTabToNewWorkspace(_ sessionId: UUID) -> Bool {
+        if let (sourceWorkspace, sourcePane) = location(ofSessionId: sessionId) {
+            guard let sourceIndex = sourcePane.tabs.firstIndex(where: { $0.id == sessionId }) else { return false }
+            let session = sourcePane.tabs[sourceIndex]
+            gitWatchers.removeValue(forKey: session.id)?.cancel()
+            let workspace = addWorkspace(containingExisting: session, workingDirectory: session.currentDirectory)
+            wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
+            detachSessionForMove(session, from: sourcePane, at: sourceIndex, in: sourceWorkspace)
+            activeWorkspaceId = workspace.id
+            scheduleSave()
+            return true
+        }
+
+        for source in peerStores() where source !== self {
+            if let session = source.surrenderSession(id: sessionId) {
+                let workspace = addWorkspace(containingExisting: session, workingDirectory: session.currentDirectory)
+                wireSessionCallbacks(engine: session.engine, session: session, workspace: workspace)
+                activeWorkspaceId = workspace.id
+                scheduleSave()
+                return true
+            }
+        }
+
+        return false
+    }
+
     /// Removes `session` from `pane`. An emptied pane collapses — cascading
     /// to closing the workspace, and the window, when it was the last one;
     /// otherwise the active-tab crown passes to the neighbour and the
@@ -835,6 +900,25 @@ final class WorkspaceStore {
         pane.tabs.remove(at: idx)
         if pane.tabs.isEmpty {
             closePane(pane, in: workspace)
+            return
+        }
+        if pane.activeTabId == session.id {
+            let next = pane.tabs[min(idx, pane.tabs.count - 1)]
+            pane.activeTabId = next.id
+            if workspace.activePane?.id == pane.id, workspace.workingDirectory != next.currentDirectory {
+                workspace.workingDirectory = next.currentDirectory
+            }
+        }
+        scheduleSave()
+    }
+
+    /// Structural detach for live moves. It mirrors `detachSession` but an
+    /// emptied worktree workspace closes as a sidebar entry instead of routing
+    /// through the destructive-close confirmation sheet.
+    private func detachSessionForMove(_ session: Session, from pane: Pane, at idx: Int, in workspace: Workspace) {
+        pane.tabs.remove(at: idx)
+        if pane.tabs.isEmpty {
+            closeEmptyPaneAfterMove(pane, in: workspace)
             return
         }
         if pane.activeTabId == session.id {
@@ -861,6 +945,17 @@ final class WorkspaceStore {
             workspace.workingDirectory = session.currentDirectory
         }
         scheduleSave()
+    }
+
+    private func addWorkspace(containingExisting session: Session, workingDirectory: URL) -> Workspace {
+        let pane = Pane(tabs: [session], activeTabId: session.id)
+        let root = PaneNode(pane: pane)
+        let workspace = Workspace(workingDirectory: workingDirectory, root: root)
+        workspaces.append(workspace)
+        activeWorkspaceId = workspace.id
+        refreshWorktreeCapability(for: workspace)
+        scheduleSave()
+        return workspace
     }
 
     /// One-shot drop handler for tab reorder gestures. Dispatches three ways:
@@ -910,7 +1005,7 @@ final class WorkspaceStore {
         // its own. Clear ours so this window's drop indicators reset.
         draggingTabId = nil
         gitWatchers.removeValue(forKey: id)?.cancel()
-        detachSession(session, from: pane, at: idx, in: workspace)
+        detachSessionForMove(session, from: pane, at: idx, in: workspace)
         return session
     }
 
@@ -1290,6 +1385,32 @@ final class WorkspaceStore {
             }
         }
         // After collapse, focus whichever pane is now nearest.
+        if workspace.activePaneId == pane.id {
+            workspace.activePaneId = info.sibling.firstPane?.id
+            if let session = workspace.activeSession,
+               workspace.workingDirectory != session.currentDirectory {
+                workspace.workingDirectory = session.currentDirectory
+            }
+        }
+        scheduleSave()
+    }
+
+    private func closeEmptyPaneAfterMove(_ pane: Pane, in workspace: Workspace) {
+        guard let leafNode = workspace.root.paneNode(paneId: pane.id) else { return }
+        if workspace.zoomedPaneId == pane.id { workspace.zoomedPaneId = nil }
+        if leafNode === workspace.root {
+            closeWorkspace(workspace)
+            return
+        }
+        guard let info = workspace.root.parentInfo(forPane: pane.id) else { return }
+        info.parent.content = info.sibling.content
+        let survivingEngines = info.sibling.allPanes.flatMap { $0.tabs.map(\.engine) }
+        DispatchQueue.main.async {
+            for engine in survivingEngines {
+                engine.isRenderingActive = true
+                engine.flushSize()
+            }
+        }
         if workspace.activePaneId == pane.id {
             workspace.activePaneId = info.sibling.firstPane?.id
             if let session = workspace.activeSession,
