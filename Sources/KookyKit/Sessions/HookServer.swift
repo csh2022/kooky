@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 /// Listens on a per-user unix socket for one-shot JSON event lines from
-/// hooks (sent by the `KookyHook` CLI): agent lifecycle events and prompt-time
+/// hooks (sent by Kooky's hook CLI mode): agent lifecycle events and prompt-time
 /// shell env snapshots. Wire format is one JSON object per line.
 ///
 /// The hooks themselves run as short-lived child processes of the agent (e.g.
@@ -25,7 +25,7 @@ enum HookEvent: String {
 /// PreToolUse / PostToolUse phase carried on `HookMessage.toolCall`. Pre
 /// fires before Claude runs the tool; Post fires after — duration / orphan
 /// timing are computed `WorkspaceStore`-side from the gap between matched
-/// events (KookyHook is fork-per-event and can't keep state).
+/// events (the hook CLI is process-per-event and can't keep state).
 enum HookToolEvent: String {
     case pre, post
 }
@@ -49,7 +49,7 @@ enum HookMessage {
     case agent(agent: AgentTemplate, event: HookEvent, sessionId: UUID)
     case shellEnvironment(env: [String: String], sessionId: UUID)
     /// Agent hook/extension payload carrying a conversation or session id.
-    /// `KookyHook` emits this message so kooky can persist the id on the
+    /// The hook CLI emits this message so kooky can persist the id on the
     /// originating Session and reuse it on next launch. The matching agent
     /// template is tracked on `Session.resumeAgent`, so the payload only
     /// carries surface + id.
@@ -86,7 +86,7 @@ final class HookServer {
 
     /// Path agents and the CLI both target. Public so the CLI doesn't have to
     /// hardcode the same string in two places — but agents run in their own
-    /// processes and read it via `KookyHook` reaching into `Application
+    /// processes and read it via Kooky's hook CLI reaching into `Application
     /// Support`, not via this property.
     static let socketPath: String = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -153,7 +153,7 @@ final class HookServer {
         // Do not unlink `socketPath` on shutdown. Kooky supports temporary
         // dev instances alongside an installed app; if an older instance exits
         // after a newer instance has rebound the shared path, unconditional
-        // removal here unlinks the live socket and future KookyHook clients
+        // removal here unlinks the live socket and future hook CLI clients
         // fail to connect. `start()` already removes stale paths before bind.
     }
 

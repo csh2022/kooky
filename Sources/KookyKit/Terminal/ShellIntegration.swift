@@ -264,38 +264,13 @@ enum KookyShellIntegration {
         return dir
     }()
 
-    /// Absolute path to the `KookyHook` helper we exec for IPC. We do NOT run
-    /// it in place from the bundle: macOS Gatekeeper silently SIGKILLs an
-    /// adhoc-signed (unnotarized) *secondary* binary the first time its cdhash
-    /// is assessed from inside an app in `/Applications`, and a helper we exec
-    /// ourselves has no "Open Anyway" affordance to clear that the way the
-    /// main binary does — so every build that changes KookyHook's code (new
-    /// cdhash) would break manual agent detection, Claude hooks, and tool
-    /// pills on first install. The exact same bytes run fine from a path
-    /// outside `/Applications` (verified: a /tmp copy exits 0 where the
-    /// bundled one exits 137). So copy KookyHook into Application Support — a
-    /// location Gatekeeper doesn't exec-assess — on launch and run the copy.
-    /// Re-copied every launch so a freshly-installed build's helper supersedes
-    /// the stale copy. Falls back to the in-bundle path if the copy fails
-    /// (dev `swift run` runs fine in place from `.build/<config>/` anyway).
+    /// Absolute path to Kooky's hook-capable executable. The GUI app and hook
+    /// client are the same binary: plain `Kooky` launches the app, while
+    /// `Kooky browser ...`, `Kooky env ...`, or `Kooky <agent> <event>` run the
+    /// short-lived IPC client path and exit. Keeping one executable prevents
+    /// the app/helper version skew that can happen with separate SPM products.
     static let kookyHookBinaryPath: String = {
-        guard let exe = Bundle.main.executablePath else { return "" }
-        let bundled = (exe as NSString).deletingLastPathComponent + "/KookyHook"
-        let fm = FileManager.default
-        // No bundled helper next to us (e.g. the xctest runner) → return the
-        // bundle path and DON'T touch the Application Support copy, so running
-        // the test suite can't clobber the helper a live kooky depends on.
-        guard fm.fileExists(atPath: bundled) else { return bundled }
-        // `kookyBinDirectory` is the App Support `kooky/bin` dir (already created).
-        let dest = (kookyBinDirectory as NSString).appendingPathComponent("KookyHook")
-        do {
-            try? fm.removeItem(atPath: dest)  // throws when absent — copyItem just needs a clear dest
-            try fm.copyItem(atPath: bundled, toPath: dest)
-            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest)
-            return dest
-        } catch {
-            return bundled
-        }
+        Bundle.main.executablePath ?? ""
     }()
 
     static let codexBrowserDeveloperInstructions = """
@@ -334,7 +309,7 @@ enum KookyShellIntegration {
             "KOOKY_BROWSER_POLICY": "prefer_kooky_browser_over_external_chrome",
             "KOOKY_BROWSER_HELP": "Run \"$KOOKY_HOOK_BIN\" browser help before browser-page tasks, then use the listed Kooky built-in browser commands for navigation and page interaction.",
             // KOOKY_AGENT_MARKERS is deliberately NOT set locally: the
-            // KookyHook socket is the local status channel. OSC-title markers
+            // The hook socket is the local status channel. OSC-title markers
             // are the ssh-remote fallback (the remote bootstrap exports the
             // var there), so emitting them locally would double-report and
             // risk leaking OSC bytes into a redirected agent's stdout.
@@ -362,7 +337,7 @@ enum KookyShellIntegration {
 
     /// Writes wrapper shims, hook configs, and the OpenCode plugin to disk.
     /// Idempotent — call on every app launch so each agent's hook command
-    /// tracks the latest `KookyHook` location.
+    /// tracks the latest hook CLI entry point.
     static func installAgentHooks(sshRemoteAgentDetection: Bool = false) {
         writeWrapper(name: "claude", script: claudeWrapperScript)
         writeWrapper(name: "codex", script: codexWrapperScript)
@@ -398,7 +373,7 @@ enum KookyShellIntegration {
         //
         // Pi rides a kooky-managed TypeScript extension (installed only when
         // `~/.pi/` exists — see `installPiExtensionIfPresent`) that subscribes
-        // to pi's session / turn events and pings KookyHook, same model as the
+        // to pi's session / turn events and pings Kooky's hook CLI, same model as the
         // OpenCode plugin — so the dot also reaches `attention` (waiting on
         // you), not just the bracket wrapper's running/ended.
         //
@@ -451,7 +426,7 @@ enum KookyShellIntegration {
     }
 
     /// Pi extension (TypeScript, auto-loaded from `~/.pi/agent/extensions/`).
-    /// Subscribes to pi's lifecycle events and pings KookyHook so the sidebar
+    /// Subscribes to pi's lifecycle events and pings Kooky's hook CLI so the sidebar
     /// dot tracks per-session activity — running while a turn executes,
     /// attention when the turn ends and pi waits on the user. Mirrors the
     /// OpenCode plugin: gated on `KOOKY_SURFACE_ID`, reads `KOOKY_HOOK_BIN`
@@ -459,7 +434,7 @@ enum KookyShellIntegration {
     /// edit isn't clobbered. Pi runs extensions under Node, so `process.env`
     /// and `pi.exec` are available.
     static let piExtensionScript = """
-    // \(managedFileMarker) — pings KookyHook on pi's session / turn / tool
+    // \(managedFileMarker) — pings Kooky's hook CLI on pi's session / turn / tool
     // events so the sidebar agent dot tracks per-session activity (running
     // while a turn runs, attention when it ends and waits on you), the pane
     // status bar shows the tool pi is running right now (its tool_execution_*
@@ -603,7 +578,7 @@ enum KookyShellIntegration {
 
     /// Gemini's hook event names diverge from Claude's (BeforeAgent / AfterAgent
     /// instead of UserPromptSubmit / Stop). Hook scripts must not write to
-    /// stdout — `KookyHook` only writes to its socket so this is safe.
+    /// stdout — the hook CLI only writes to its socket so this is safe.
     /// SessionStart promotes manually-typed `gemini` to `.gemini` immediately,
     /// same pattern as Claude.
     static func geminiDefaultsObject(hookCmd: String) -> [String: Any] {
@@ -677,7 +652,7 @@ enum KookyShellIntegration {
 
         var hooks: [String: Any] = [:]
         // Claude / Gemini run `command` through `/bin/sh -c`, so an unquoted
-        // `KookyHook` path breaks the moment the app lives under a path with
+        // hook entry path breaks the moment the app lives under a path with
         // spaces or shell metacharacters (e.g. `/Applications/Kooky 2.app/…`).
         let quotedCmd = quote(hookCmd)
         for (event, state) in events {
@@ -747,7 +722,7 @@ enum KookyShellIntegration {
 
     /// OSC-2 status marker, gated and tty-targeted. Fires only when
     /// `KOOKY_AGENT_MARKERS` is set — ssh remotes export it, local sessions
-    /// don't (they report through the KookyHook socket), so the local bracket
+    /// don't (they report through the hook socket), so the local bracket
     /// wrappers stay silent and never double-report. Writes to `/dev/tty`, not
     /// stdout: a redirected agent (`claude -p … > out`) must not get OSC bytes
     /// in its output, and the marker must still reach the terminal when the
@@ -800,7 +775,7 @@ enum KookyShellIntegration {
 
     /// Pass a pipe-driven programmatic invocation (a broker spawning the agent
     /// for JSON-RPC over stdio — `codex app-server`, the `codex:review` hang)
-    /// straight through, skipping instrumentation: a KookyHook ping, OSC
+    /// straight through, skipping instrumentation: a hook CLI ping, OSC
     /// markers, and `-c notify` / `--settings` injection would all perturb the
     /// agent it spawned. Gate on BOTH fds (not `||`) so `claude -p … | tee`
     /// (stdin still a tty) keeps its sidebar dot. Each wrapper places this after
@@ -814,7 +789,7 @@ enum KookyShellIntegration {
 
     /// Inside a kooky session ($KOOKY_SURFACE_ID set), injects --settings so
     /// Claude Code's hooks report state back to the app via the bundled
-    /// KookyHook helper. `KOOKY_AGENT_MARKERS` enables the OSC-title fallback
+    /// hook CLI. `KOOKY_AGENT_MARKERS` enables the OSC-title fallback
     /// for remote shells that can write terminal bytes but cannot reach the
     /// local unix socket. Outside both, transparent passthrough.
     private static let claudeWrapperScript = """
@@ -1066,7 +1041,7 @@ enum KookyShellIntegration {
     /// "Antigravity CLI" from the `+` menu. Detect the IDE shim by
     /// resolving one symlink hop and matching `/Antigravity.app/`; on
     /// match, route through the same "not installed" path the preamble
-    /// uses (red message + KookyHook `ended` ping so the tab icon
+    /// uses (red message + hook CLI `ended` ping so the tab icon
     /// reverts) plus surface the official CLI install command.
     static let antigravityWrapperScript = """
     \(wrapperPreamble(binary: "agy"))
@@ -1133,12 +1108,12 @@ enum KookyShellIntegration {
     /// `$XDG_CONFIG_HOME/opencode/plugin/` (or `~/.config/opencode/plugin/`)
     /// at startup. The plugin runs in opencode's own Bun runtime, inherits
     /// KOOKY_SURFACE_ID + KOOKY_HOOK_BIN from the shell, and shells out to
-    /// KookyHook on each lifecycle event. The first-line marker
+    /// Kooky's hook CLI on each lifecycle event. The first-line marker
     /// (`managedFileMarker`) lets `writeManagedFile` recognise the file as
     /// kooky-generated on upgrade — a user's own `kooky.ts` plugin would
     /// not carry the marker and stays untouched.
     static let opencodePluginScript = """
-    // \(managedFileMarker) — pings KookyHook on prompt-submit and turn-end so
+    // \(managedFileMarker) — pings Kooky's hook CLI on prompt-submit and turn-end so
     // the sidebar agent dot tracks per-session activity. Safe to delete; will
     // be regenerated next time kooky launches.
     export const KookyPlugin = async ({ $ }) => {

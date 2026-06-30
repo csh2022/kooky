@@ -1,7 +1,7 @@
 import Foundation
 
 /// Private terminal-title marker used as a remote-friendly fallback for agent
-/// status. Unlike `KookyHook`, this rides the terminal byte stream itself, so
+/// status. Unlike the hook CLI, this rides the terminal byte stream itself, so
 /// an ssh remote can report `claude running` without reaching kooky's local
 /// unix socket.
 ///

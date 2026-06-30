@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Build and install Kooky on this Mac, keeping the app bundle and hook helper
-# in sync. This is the local developer install path; public distribution still
-# goes through build-dmg.sh.
+# Build and install Kooky on this Mac. This is the local developer install
+# path; public distribution still goes through build-dmg.sh.
 
 set -euo pipefail
 
@@ -36,7 +35,7 @@ echo "==> Installing ${INSTALL_APP}"
 rm -rf "$INSTALL_APP"
 cp -R "$BUILT_APP" "$INSTALL_APP"
 
-echo "==> Clearing stale copied helper"
+echo "==> Clearing stale legacy copied helper"
 rm -f "$SUPPORT_HOOK"
 
 echo "==> Launching installed ${APP_NAME}"
@@ -44,4 +43,4 @@ open "$INSTALL_APP"
 
 echo ""
 echo "✓ Installed ${INSTALL_APP}"
-echo "  The app will copy its bundled KookyHook into ${SUPPORT_DIR}/bin on launch."
+echo "  Hook calls now use ${INSTALL_APP}/Contents/MacOS/${APP_NAME}; no separate KookyHook binary is installed."

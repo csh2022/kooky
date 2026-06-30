@@ -14,21 +14,12 @@ let package = Package(
         // tests can `@testable import` it (SPM doesn't allow importing executables).
         .executableTarget(
             name: "Kooky",
-            dependencies: ["KookyKit"],
+            dependencies: ["KookyKit", "KookyHookKit"],
             path: "Sources/Kooky"
-        ),
-        // Tiny stand-alone CLI invoked from Claude Code / Codex hooks. Reads
-        // $KOOKY_SURFACE_ID from env, opens the unix socket the running app
-        // owns, writes one JSON line, exits. Doesn't link KookyKit on purpose
-        // — keeps the binary fast and dependency-free.
-        .executableTarget(
-            name: "KookyHook",
-            dependencies: ["KookyHookKit"],
-            path: "Sources/KookyHook"
         ),
         // Payload builders + stdin parsing extracted out of `main.swift` so
         // they're unit-testable without spawning a subprocess. Foundation /
-        // Darwin only — must not depend on KookyKit (would bloat the CLI).
+        // Darwin only — must not depend on KookyKit.
         .target(
             name: "KookyHookKit",
             path: "Sources/KookyHookKit"

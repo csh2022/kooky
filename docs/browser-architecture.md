@@ -92,6 +92,9 @@ Kooky-owned process context, not by editing the user's global agent
 configuration.
 
 - Every Kooky session gets `KOOKY_BROWSER=1` and `KOOKY_HOOK_BIN`.
+  `KOOKY_HOOK_BIN` points at the main `Kooky` executable. The same binary
+  launches the GUI when run normally and acts as the short-lived hook CLI when
+  invoked as `Kooky browser ...`, `Kooky env ...`, or `Kooky <agent> <event>`.
 - The `codex` wrapper passes a per-invocation
   `-c developer_instructions=...` override only for interactive Codex
   processes running inside Kooky. Background pipe-driven Codex calls still pass
@@ -115,6 +118,13 @@ configuration.
   used Kooky's browser path.
 - Codex still reads the user's real `CODEX_HOME`, `config.toml`, and
   `AGENTS.md`. Kooky does not rewrite or shadow global Codex configuration.
+
+## Hook Binary Shape
+
+There is no separate `KookyHook` executable. Keeping hook mode inside the main
+`Kooky` binary avoids app/helper version skew: the installed app, the hook CLI
+entry point, and the bundled browser command surface are always built from the
+same source revision.
 
 ## Persistence
 

@@ -1,51 +1,51 @@
 import Darwin
 import Foundation
 
-/// Pure helpers for `KookyHook` CLI: builds the JSON payloads it ships to
+/// Pure helpers for Kooky's hook CLI mode: builds the JSON payloads it ships to
 /// `HookServer` and writes them across the unix socket the running app owns.
 /// Lives in its own library target so unit tests can verify parsing logic
 /// (malformed JSON, missing fields, wrong types, future PreToolUse /
 /// PostToolUse payloads) without spawning a subprocess. Stays off
-/// `KookyKit` on purpose — the CLI binary must remain dependency-free.
+/// `KookyKit` on purpose so the hook payload layer stays small and reusable.
 public enum KookyHookKit {
     public static let browserHelpText = """
     Kooky built-in browser commands:
 
-      KookyHook browser help
+      Kooky browser help
           Show this help. Agents should run this before browser-page tasks to discover current capabilities.
 
-      KookyHook browser open <url-or-query>
+      Kooky browser open <url-or-query>
           Open or reuse this agent's browser split and navigate to a URL or search query.
           Examples:
-            KookyHook browser open https://example.com
-            KookyHook browser open localhost:3000
-            KookyHook browser open "weather shanghai"
+            Kooky browser open https://example.com
+            Kooky browser open localhost:3000
+            Kooky browser open "weather shanghai"
 
-      KookyHook browser state
+      Kooky browser state
           Print the current built-in browser title, URL, and loading state.
 
-      KookyHook browser click <visible-text>
+      Kooky browser click <visible-text>
           Click the first visible link, button, or clickable element whose text contains <visible-text>.
 
-      KookyHook browser fill <field-label-or-placeholder> <text>
+      Kooky browser fill <field-label-or-placeholder> <text>
           Focus and replace the value of a visible input/textarea/contenteditable field.
 
-      KookyHook browser type <text>
+      Kooky browser type <text>
           Type text into the currently focused page element.
 
-      KookyHook browser press <key>
+      Kooky browser press <key>
           Press a page key such as Enter, Escape, Tab, Backspace, ArrowDown, or ArrowUp.
 
-      KookyHook browser scroll <up|down|left|right> [amount]
+      Kooky browser scroll <up|down|left|right> [amount]
           Scroll the page. Amount is optional pixels; default is about one viewport.
 
-      KookyHook browser back
-      KookyHook browser forward
-      KookyHook browser reload
-      KookyHook browser stop
+      Kooky browser back
+      Kooky browser forward
+      Kooky browser reload
+      Kooky browser stop
           Browser navigation controls.
 
-      KookyHook browser close
+      Kooky browser close
           Close this agent's browser split if it is still auto-owned by the agent.
 
     Notes:
@@ -256,7 +256,7 @@ public enum KookyHookKit {
     }
 
     /// Maximum bytes / characters carried by the cross-boundary `identifier`
-    /// field. Per `/plan-eng-review` D2 — KookyHook truncates at source so
+    /// field. Per `/plan-eng-review` D2 — the hook CLI truncates at source so
     /// large `tool_input` payloads (Edit / Write file content) never reach
     /// the 4 KiB HookServer buffer. Counted in `Character`s, not UTF-8
     /// bytes — CJK identifiers stay readable instead of mid-codepoint cut.
@@ -336,7 +336,7 @@ public enum KookyHookKit {
     /// `HookServer` → `WorkspaceStore.applyToolCallEvent` → the status-bar
     /// pill. Single source for the wire shape so it can't drift between the
     /// two producers: `parseToolEventPayload` (Claude — extracts these
-    /// fields from hook stdin JSON) and KookyHook's `tool` argv branch (Pi —
+    /// fields from hook stdin JSON) and the hook CLI's `tool` argv branch (Pi —
     /// the extension hands the fields straight from `tool_execution_*`
     /// events). `identifier` is control-stripped + truncated here, the one
     /// place it happens; `toolUseId` is emitted only when non-empty (Pi's

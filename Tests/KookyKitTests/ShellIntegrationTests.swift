@@ -18,7 +18,7 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(env["KOOKY_BROWSER_HELP"]?.contains("built-in browser commands") == true)
     }
 
-    private static let stubHook = "/usr/local/bin/KookyHook"
+    private static let stubHook = "/Applications/Kooky.app/Contents/MacOS/Kooky"
 
     func testGeminiDefaultsExposesAllFourLifecycleEvents() throws {
         let object = KookyShellIntegration.geminiDefaultsObject(hookCmd: Self.stubHook)
@@ -100,7 +100,7 @@ final class ShellIntegrationTests: XCTestCase {
         // A background / programmatic caller (a broker spawning the agent to
         // speak JSON-RPC over piped stdin+stdout) is not a session a human is
         // watching. The shared preamble must exec the real binary before any
-        // instrumentation runs, so the wrapper never pings KookyHook.
+        // instrumentation runs, so the wrapper never pings Kooky's hook CLI.
         let script = KookyShellIntegration.bracketWrapperScript(slug: "amp")
         XCTAssertTrue(script.contains("if [[ ! -t 0 && ! -t 1 ]]; then"),
                       "preamble must pass through when both stdin and stdout are non-terminals")
@@ -109,7 +109,7 @@ final class ShellIntegrationTests: XCTestCase {
     func testCodexWrapperGuardsBackgroundCallBeforeInstrumenting() {
         // The reported hang: a broker spawns `codex app-server` (JSON-RPC over
         // piped stdin+stdout) and `codex:review` freezes. The guard must run
-        // before the KookyHook ping and before the `-c notify` injection (which
+        // before the hook CLI ping and before the `-c notify` injection (which
         // would alter the codex the broker spawned).
         let script = KookyShellIntegration.codexWrapperScript
         let guardLine = "if [[ ! -t 0 && ! -t 1 ]]; then"
@@ -118,7 +118,7 @@ final class ShellIntegrationTests: XCTestCase {
         let guardIdx = script.range(of: guardLine)!.lowerBound
         let pingIdx = script.range(of: "\"$KOOKY_HOOK_BIN\" codex running")!.lowerBound
         let notifyIdx = script.range(of: "notify=")!.lowerBound
-        XCTAssertLessThan(guardIdx, pingIdx, "tty guard must precede the KookyHook running ping")
+        XCTAssertLessThan(guardIdx, pingIdx, "tty guard must precede the hook CLI running ping")
         XCTAssertLessThan(guardIdx, notifyIdx, "tty guard must precede the -c notify injection")
     }
 
@@ -259,7 +259,7 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(body.contains("session.idle"), "plugin must subscribe to turn-end event")
         XCTAssertTrue(body.contains(#"ping("running")"#))
         XCTAssertTrue(body.contains(#"ping("attention")"#))
-        XCTAssertTrue(body.contains("opencode"), "plugin must pass agent slug to KookyHook")
+        XCTAssertTrue(body.contains("opencode"), "plugin must pass agent slug to the hook CLI")
         XCTAssertTrue(body.contains("KOOKY_SURFACE_ID"))
         XCTAssertTrue(body.contains("kooky-managed-do-not-edit"), "plugin must carry the upgrade-safety marker")
     }
@@ -268,7 +268,7 @@ final class ShellIntegrationTests: XCTestCase {
         let body = KookyShellIntegration.piExtensionScript
 
         // Subscribes to pi's session / turn lifecycle and maps each to a
-        // KookyHook state — running while a turn runs, attention when it ends.
+        // Kooky state — running while a turn runs, attention when it ends.
         XCTAssertTrue(body.contains("session_start"))
         XCTAssertTrue(body.contains("turn_start"))
         XCTAssertTrue(body.contains("turn_end"))
@@ -276,7 +276,7 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(body.contains(#"ping("running")"#))
         XCTAssertTrue(body.contains(#"ping("attention")"#))
         XCTAssertTrue(body.contains(#"ping("ended")"#))
-        XCTAssertTrue(body.contains(#"pi.exec(hookBin, ["pi""#), "must ping KookyHook with the pi slug")
+        XCTAssertTrue(body.contains(#"pi.exec(hookBin, ["pi""#), "must ping the hook CLI with the pi slug")
         // Reports the session id so kooky can resume (`pi --session <id>`).
         XCTAssertTrue(body.contains("getSessionFile"), "must read pi's current session file")
         XCTAssertTrue(body.contains(#"["pi", "conversation", id]"#), "must report the session id for resume")
@@ -287,7 +287,7 @@ final class ShellIntegrationTests: XCTestCase {
 
     func testPiExtensionReportsToolCallsForActivityPill() {
         let body = KookyShellIntegration.piExtensionScript
-        // Subscribes to pi's tool lifecycle and relays each to KookyHook's
+        // Subscribes to pi's tool lifecycle and relays each to Kooky's
         // `tool` argv branch (pre carries the identifier, post the ok/fail).
         XCTAssertTrue(body.contains("tool_execution_start"))
         XCTAssertTrue(body.contains("tool_execution_end"))

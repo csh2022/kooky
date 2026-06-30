@@ -4,7 +4,7 @@
 # What this does:
 #   1. swift build -c release
 #   2. Assemble dist/Kooky.app/Contents/{MacOS,Resources,Info.plist,PkgInfo}
-#   3. Copy Kooky + KookyHook binaries + the SPM resource bundle into MacOS/
+#   3. Copy Kooky binary + the SPM resource bundle into MacOS/
 #      (Bundle.module looks next to the executable, which is why fonts +
 #      icons live alongside the binary, not under Resources/)
 #   4. Generate Info.plist with CFBundleShortVersionString sourced from
@@ -35,10 +35,9 @@ APP="dist/${APP_NAME}.app"
 
 echo "==> Building release config"
 swift build -c release --product Kooky
-swift build -c release --product KookyHook
 
 echo "==> Verifying build artifacts"
-for f in .build/release/Kooky .build/release/KookyHook; do
+for f in .build/release/Kooky; do
     [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }
 done
 [ -d ".build/release/Kooky_KookyKit.bundle" ] || {
@@ -52,7 +51,6 @@ mkdir -p "${APP}/Contents/MacOS"
 mkdir -p "${APP}/Contents/Resources"
 
 cp .build/release/Kooky "${APP}/Contents/MacOS/${APP_NAME}"
-cp .build/release/KookyHook "${APP}/Contents/MacOS/KookyHook"
 # Bundle.module's first lookup candidate is `Bundle.main.resourceURL`
 # (= Contents/Resources/), so the resource bundle has to live there or
 # the running .app will silently fall back to .build/release/ on disk.
@@ -182,7 +180,6 @@ echo "==> Adhoc codesign (skips Gatekeeper kill on first launch)"
 # itself.
 codesign --force --sign - "${APP}/Contents/Resources/Kooky_KookyKit.bundle"
 codesign --force --sign - "${APP}/Contents/MacOS/${APP_NAME}"
-codesign --force --sign - "${APP}/Contents/MacOS/KookyHook"
 codesign --force --sign - "${APP}" 2>&1 | tail -3
 
 echo ""
