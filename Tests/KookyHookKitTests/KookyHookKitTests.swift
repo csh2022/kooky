@@ -639,4 +639,21 @@ final class KookyHookKitTests: XCTestCase {
         XCTAssertFalse(p["identifier"]?.contains("\n") ?? true)
         XCTAssertTrue(p["identifier"]?.hasPrefix("line1 line2") ?? false)
     }
+
+    func testSurfaceIdReadsTrimmedEnvironmentValue() {
+        XCTAssertEqual(
+            KookyHookKit.surfaceId(from: [KookyHookKit.surfaceIdEnvironmentKey: "  surface-123  "]),
+            "surface-123"
+        )
+    }
+
+    func testSurfaceIdRejectsMissingOrBlankEnvironmentValue() {
+        XCTAssertNil(KookyHookKit.surfaceId(from: [:]))
+        XCTAssertNil(KookyHookKit.surfaceId(from: [KookyHookKit.surfaceIdEnvironmentKey: "   "]))
+    }
+
+    func testMissingSurfaceDiagnosticExplainsRoutingRequirement() {
+        XCTAssertTrue(KookyHookKit.missingSurfaceDiagnostic.contains("KOOKY_SURFACE_ID"))
+        XCTAssertTrue(KookyHookKit.missingSurfaceDiagnostic.contains("calling split"))
+    }
 }

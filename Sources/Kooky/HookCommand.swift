@@ -28,8 +28,14 @@ enum KookyHookCommand {
             }
         }
 
-        let surface = ProcessInfo.processInfo.environment["KOOKY_SURFACE_ID"] ?? ""
-        guard !surface.isEmpty else { return 0 }
+        let isUserFacingCommand = arguments.count >= 2 && (arguments[1] == "browser" || arguments[1] == "env")
+        guard let surface = KookyHookKit.surfaceId() else {
+            if isUserFacingCommand {
+                fputs(KookyHookKit.missingSurfaceDiagnostic + "\n", stderr)
+                return 1
+            }
+            return 0
+        }
 
         let socketPath = KookyHookKit.socketPath
         let agentArg = arguments.count >= 2 ? arguments[1] : ""

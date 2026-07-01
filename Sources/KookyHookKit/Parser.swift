@@ -103,7 +103,19 @@ public enum KookyHookKit {
       - Future commands will be listed here as they are added.
     """
 
+    public static let surfaceIdEnvironmentKey = "KOOKY_SURFACE_ID"
     public static let socketPathEnvironmentKey = "KOOKY_HOOK_SOCKET"
+
+    public static let missingSurfaceDiagnostic = """
+    Kooky built-in browser is unavailable because KOOKY_SURFACE_ID is not set. \
+    Start this command from a Kooky session or open a new Kooky tab so browser commands can route to the calling split.
+    """
+
+    public static func surfaceId(from environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+        let value = environment[surfaceIdEnvironmentKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
+    }
 
     public static var legacySocketPath: String {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
