@@ -73,10 +73,11 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         return result == "true" ? "ok clicked at: \(x),\(y)\n" : "click target not found at: \(x),\(y)\n"
     }
 
-    func fill(field: String, text: String) {
+    func fill(field: String, text: String) async -> String {
         let trimmed = field.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        evaluate(Self.fillJavaScript(field: trimmed, text: text))
+        guard !trimmed.isEmpty else { return "field not found\n" }
+        let result = await evaluateString(Self.fillJavaScript(field: trimmed, text: text))
+        return result == "true" ? "ok filled field: \(trimmed)\n" : "field not found: \(trimmed)\n"
     }
 
     func fillElement(id: String, text: String) async -> String {
@@ -99,10 +100,20 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         evaluate(Self.typeJavaScript(text: text))
     }
 
-    func press(key: String) {
+    func press(key: String) async -> String {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        evaluate(Self.pressJavaScript(key: trimmed))
+        guard !trimmed.isEmpty else { return "key press failed\n" }
+        let result = await evaluateString(Self.pressJavaScript(key: trimmed))
+        switch result {
+        case "submitted":
+            return "ok pressed key: \(trimmed)\nsubmitted: true\n"
+        case "clicked-submit":
+            return "ok pressed key: \(trimmed)\nclickedSubmit: true\n"
+        case "pressed":
+            return "ok pressed key: \(trimmed)\n"
+        default:
+            return "key press failed: \(trimmed)\n"
+        }
     }
 
     func hotkey(_ combo: String) {
@@ -111,8 +122,9 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         evaluate(Self.hotkeyJavaScript(combo: trimmed))
     }
 
-    func scroll(direction: String, amount: Double?) {
-        evaluate(Self.scrollJavaScript(direction: direction, amount: amount))
+    func scroll(direction: String, amount: Double?) async -> String {
+        let result = await evaluateString(Self.scrollJavaScript(direction: direction, amount: amount))
+        return result.isEmpty ? "scroll failed\n" : result.ensuringTrailingNewline()
     }
 
     func hover(id: String) async -> String {
@@ -121,16 +133,34 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
     }
 
     func waitForText(_ text: String, timeoutMilliseconds: Int) async -> String {
-        let deadline = Date().addingTimeInterval(TimeInterval(max(timeoutMilliseconds, 0)) / 1000.0)
-        repeat {
-            let body = await pageText()
-            if body.localizedCaseInsensitiveContains(text) {
-                return browserStateText(prefix: "ok found text: \(text)")
-            }
-            if Date() >= deadline { break }
-            try? await Task.sleep(nanoseconds: 200_000_000)
-        } while true
-        return "timed out waiting for text: \(text)\n"
+        await waitForCondition(
+            label: "text",
+            text: text,
+            timeoutMilliseconds: timeoutMilliseconds
+        ) { [weak self] in
+            guard let self else { return "" }
+            return await self.pageText()
+        }
+    }
+
+    func waitForURL(_ text: String, timeoutMilliseconds: Int) async -> String {
+        await waitForCondition(
+            label: "url",
+            text: text,
+            timeoutMilliseconds: timeoutMilliseconds
+        ) { [weak self] in
+            self?.snapshot.urlString ?? ""
+        }
+    }
+
+    func waitForTitle(_ text: String, timeoutMilliseconds: Int) async -> String {
+        await waitForCondition(
+            label: "title",
+            text: text,
+            timeoutMilliseconds: timeoutMilliseconds
+        ) { [weak self] in
+            self?.snapshot.title ?? ""
+        }
     }
 
     func pageText() async -> String {
@@ -187,6 +217,24 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         } catch {
             return "screenshot failed: \(error.localizedDescription)\n"
         }
+    }
+
+    private func waitForCondition(
+        label: String,
+        text: String,
+        timeoutMilliseconds: Int,
+        value: () async -> String
+    ) async -> String {
+        let deadline = Date().addingTimeInterval(TimeInterval(max(timeoutMilliseconds, 0)) / 1000.0)
+        repeat {
+            let current = await value()
+            if current.localizedCaseInsensitiveContains(text) {
+                return browserStateText(prefix: "ok found \(label): \(text)", condition: label)
+            }
+            if Date() >= deadline { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        } while true
+        return browserStateText(prefix: "timed out waiting for \(label): \(text)", condition: label)
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -273,11 +321,12 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         }
     }
 
-    private func browserStateText(prefix: String) -> String {
+    private func browserStateText(prefix: String, condition: String? = nil) -> String {
         let snapshot = self.snapshot
+        let conditionLine = condition.map { "condition: \($0)\n" } ?? ""
         return """
         \(prefix)
-        title: \(snapshot.title)
+        \(conditionLine)title: \(snapshot.title)
         url: \(snapshot.urlString)
         loading: \(snapshot.isLoading)
 
@@ -417,14 +466,34 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           const partial = fields.find((el) => textFor(el).includes(needle));
           const target = exact || partial;
           if (!target) return false;
+          const dispatchInput = (el, inputType, data) => {
+            try {
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data }));
+            } catch {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          };
+          const setNativeValue = (el, next) => {
+            if (el.isContentEditable) {
+              el.textContent = next;
+              return true;
+            }
+            if (!('value' in el)) return false;
+            const proto = el instanceof HTMLTextAreaElement
+              ? HTMLTextAreaElement.prototype
+              : (el instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
+            const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+            if (descriptor && descriptor.set) {
+              descriptor.set.call(el, next);
+            } else {
+              el.value = next;
+            }
+            return true;
+          };
           target.scrollIntoView({ block: 'center', inline: 'center' });
           target.focus();
-          if (target.isContentEditable) {
-            target.textContent = value;
-          } else {
-            target.value = value;
-          }
-          target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+          if (!setNativeValue(target, value)) return false;
+          dispatchInput(target, 'insertText', value);
           target.dispatchEvent(new Event('change', { bubbles: true }));
           return true;
         })();
@@ -439,16 +508,34 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           const target = window.__kookyElementById && window.__kookyElementById(\(id));
           const value = \(value);
           if (!target) return false;
+          const dispatchInput = (el, inputType, data) => {
+            try {
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data }));
+            } catch {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          };
+          const setNativeValue = (el, next) => {
+            if (el.isContentEditable) {
+              el.textContent = next;
+              return true;
+            }
+            if (!('value' in el)) return false;
+            const proto = el instanceof HTMLTextAreaElement
+              ? HTMLTextAreaElement.prototype
+              : (el instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
+            const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+            if (descriptor && descriptor.set) {
+              descriptor.set.call(el, next);
+            } else {
+              el.value = next;
+            }
+            return true;
+          };
           target.scrollIntoView({ block: 'center', inline: 'center' });
           target.focus && target.focus();
-          if (target.isContentEditable) {
-            target.textContent = value;
-          } else if ('value' in target) {
-            target.value = value;
-          } else {
-            return false;
-          }
-          target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+          if (!setNativeValue(target, value)) return false;
+          dispatchInput(target, 'insertText', value);
           target.dispatchEvent(new Event('change', { bubbles: true }));
           return true;
         })();
@@ -523,8 +610,24 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         (() => {
           const key = \(key);
           const target = document.activeElement || document.body;
+          if (!target) return 'failed';
           const eventInit = { key, code: key, bubbles: true, cancelable: true };
-          target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+          const submitControlSelector = [
+            'button[type="submit"]',
+            'input[type="submit"]',
+            'button:not([type])'
+          ].join(',');
+          const visible = (el) => {
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          };
+          const dispatchKey = (type) => target.dispatchEvent(new KeyboardEvent(type, eventInit));
+          dispatchKey('keydown');
+          if (key.length === 1) dispatchKey('keypress');
+          let result = 'pressed';
           if ('value' in target) {
             const value = target.value ?? '';
             const start = target.selectionStart ?? value.length;
@@ -534,8 +637,23 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
               target.setSelectionRange && target.setSelectionRange(start - 1, start - 1);
               target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
             } else if (key === 'Enter') {
-              const form = target.form;
-              if (form && form.requestSubmit) form.requestSubmit();
+              const form = target.form || (target.closest && target.closest('form'));
+              if (form) {
+                const submitter = Array.from(form.querySelectorAll(submitControlSelector)).find(visible) || null;
+                if (form.requestSubmit) {
+                  form.requestSubmit(submitter || undefined);
+                } else {
+                  const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+                  if (form.dispatchEvent(submitEvent) && form.submit) form.submit();
+                }
+                result = 'submitted';
+              } else {
+                const submitter = Array.from(document.querySelectorAll(submitControlSelector)).find(visible);
+                if (submitter) {
+                  submitter.click();
+                  result = 'clicked-submit';
+                }
+              }
             } else if (key === 'Tab') {
               const focusables = Array.from(document.querySelectorAll('a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])'))
                 .filter((el) => !el.disabled && el.offsetParent !== null);
@@ -544,8 +662,8 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
               if (next) next.focus();
             }
           }
-          target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
-          return true;
+          dispatchKey('keyup');
+          return result;
         })();
         """
     }
@@ -602,8 +720,35 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         }
         return """
         (() => {
-          window.scrollBy({ left: \(dx), top: \(dy), behavior: 'smooth' });
-          return true;
+          window.scrollBy({ left: \(dx), top: \(dy), behavior: 'auto' });
+          const root = document.scrollingElement || document.documentElement || document.body;
+          const x = Math.round(window.scrollX || root.scrollLeft || 0);
+          const y = Math.round(window.scrollY || root.scrollTop || 0);
+          const viewportWidth = Math.round(window.innerWidth || document.documentElement.clientWidth || 0);
+          const viewportHeight = Math.round(window.innerHeight || document.documentElement.clientHeight || 0);
+          const scrollWidth = Math.round(root.scrollWidth || document.documentElement.scrollWidth || 0);
+          const scrollHeight = Math.round(root.scrollHeight || document.documentElement.scrollHeight || 0);
+          const maxX = Math.max(0, scrollWidth - viewportWidth);
+          const maxY = Math.max(0, scrollHeight - viewportHeight);
+          const atLeft = x <= 1;
+          const atRight = x >= maxX - 1;
+          const atTop = y <= 1;
+          const atBottom = y >= maxY - 1;
+          return [
+            'ok scrolled \(normalized)',
+            'x: ' + x,
+            'y: ' + y,
+            'maxX: ' + maxX,
+            'maxY: ' + maxY,
+            'viewportWidth: ' + viewportWidth,
+            'viewportHeight: ' + viewportHeight,
+            'scrollWidth: ' + scrollWidth,
+            'scrollHeight: ' + scrollHeight,
+            'atLeft: ' + atLeft,
+            'atRight: ' + atRight,
+            'atTop: ' + atTop,
+            'atBottom: ' + atBottom
+          ].join('\\n');
         })();
         """
     }

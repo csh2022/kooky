@@ -1380,8 +1380,7 @@ final class WorkspaceStore {
             return await browser.surface.engine.clickAt(x: x, y: y)
         case .fill(let field, let text):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
-            browser.surface.engine.fill(field: field, text: text)
-            return "ok filled field: \(field)\n"
+            return await browser.surface.engine.fill(field: field, text: text)
         case .fillId(let id, let text):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             return await browser.surface.engine.fillElement(id: id, text: text)
@@ -1398,22 +1397,26 @@ final class WorkspaceStore {
             return "ok pasted \(text.count) characters\n"
         case .press(let key):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
-            browser.surface.engine.press(key: key)
-            return "ok pressed key: \(key)\n"
+            return await browser.surface.engine.press(key: key)
         case .hotkey(let combo):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.hotkey(combo)
             return "ok hotkey: \(combo)\n"
         case .scroll(let direction, let amount):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
-            browser.surface.engine.scroll(direction: direction, amount: amount)
-            return "ok scrolled \(direction)\n"
+            return await browser.surface.engine.scroll(direction: direction, amount: amount)
         case .hover(let id):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             return await browser.surface.engine.hover(id: id)
         case .wait(let text, let timeoutMilliseconds):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             return await browser.surface.engine.waitForText(text, timeoutMilliseconds: timeoutMilliseconds)
+        case .waitURL(let text, let timeoutMilliseconds):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.waitForURL(text, timeoutMilliseconds: timeoutMilliseconds)
+        case .waitTitle(let text, let timeoutMilliseconds):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.waitForTitle(text, timeoutMilliseconds: timeoutMilliseconds)
         case .back:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.goBack()

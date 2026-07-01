@@ -52,6 +52,8 @@ enum HookBrowserCommand: Equatable {
     case scroll(direction: String, amount: Double?)
     case hover(id: String)
     case wait(text: String, timeoutMilliseconds: Int)
+    case waitURL(text: String, timeoutMilliseconds: Int)
+    case waitTitle(text: String, timeoutMilliseconds: Int)
     case back
     case forward
     case reload
@@ -308,6 +310,16 @@ final class HookServer {
                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
                 let timeout = (dict["timeout"] as? String).flatMap(Int.init) ?? 5_000
                 return .browser(command: .wait(text: text, timeoutMilliseconds: timeout), sessionId: id)
+            case "wait-url":
+                guard let text = dict["text"] as? String,
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                let timeout = (dict["timeout"] as? String).flatMap(Int.init) ?? 5_000
+                return .browser(command: .waitURL(text: text, timeoutMilliseconds: timeout), sessionId: id)
+            case "wait-title":
+                guard let text = dict["text"] as? String,
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                let timeout = (dict["timeout"] as? String).flatMap(Int.init) ?? 5_000
+                return .browser(command: .waitTitle(text: text, timeoutMilliseconds: timeout), sessionId: id)
             case "back":
                 return .browser(command: .back, sessionId: id)
             case "forward":

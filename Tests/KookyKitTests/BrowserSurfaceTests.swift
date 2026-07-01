@@ -52,16 +52,18 @@ private final class TestBrowserEngine: BrowserEngine {
     func click(text: String) {}
     func clickElement(id: String, double: Bool) async -> String { "" }
     func clickAt(x: Double, y: Double) async -> String { "" }
-    func fill(field: String, text: String) {}
+    func fill(field: String, text: String) async -> String { "" }
     func fillElement(id: String, text: String) async -> String { "" }
     func clear(field: String?) async -> String { "" }
     func type(text: String) {}
     func paste(text: String) {}
-    func press(key: String) {}
+    func press(key: String) async -> String { "" }
     func hotkey(_ combo: String) {}
-    func scroll(direction: String, amount: Double?) {}
+    func scroll(direction: String, amount: Double?) async -> String { "" }
     func hover(id: String) async -> String { "" }
     func waitForText(_ text: String, timeoutMilliseconds: Int) async -> String { "" }
+    func waitForURL(_ text: String, timeoutMilliseconds: Int) async -> String { "" }
+    func waitForTitle(_ text: String, timeoutMilliseconds: Int) async -> String { "" }
     func pageText() async -> String { "" }
     func pageHTML() async -> String { "" }
     func linksJSONLines() async -> String { "" }

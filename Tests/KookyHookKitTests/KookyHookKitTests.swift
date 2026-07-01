@@ -196,6 +196,8 @@ final class KookyHookKitTests: XCTestCase {
         XCTAssertTrue(help.contains("browser scroll <up|down|left|right> [amount]"))
         XCTAssertTrue(help.contains("browser hover <element-id>"))
         XCTAssertTrue(help.contains("browser wait <text> [timeout-ms]"))
+        XCTAssertTrue(help.contains("browser wait-url <url-substring> [timeout-ms]"))
+        XCTAssertTrue(help.contains("browser wait-title <title-substring> [timeout-ms]"))
         XCTAssertTrue(help.contains("browser back"))
         XCTAssertTrue(help.contains("browser close"))
         XCTAssertTrue(help.contains("Future commands will be listed here"))
@@ -235,6 +237,8 @@ final class KookyHookKitTests: XCTestCase {
         XCTAssertEqual(KookyHookKit.buildBrowserScrollPayload(surface: "abc", direction: "down", amount: "600")["amount"], "600")
         XCTAssertEqual(KookyHookKit.buildBrowserHoverPayload(surface: "abc", id: "e3-a")["id"], "e3-a")
         XCTAssertEqual(KookyHookKit.buildBrowserWaitPayload(surface: "abc", text: "Ready", timeout: "1000")["timeout"], "1000")
+        XCTAssertEqual(KookyHookKit.buildBrowserWaitURLPayload(surface: "abc", text: "q=ready", timeout: "1000")["command"], "wait-url")
+        XCTAssertEqual(KookyHookKit.buildBrowserWaitTitlePayload(surface: "abc", text: "Ready", timeout: "1000")["command"], "wait-title")
         XCTAssertEqual(KookyHookKit.buildBrowserSimplePayload(surface: "abc", command: "reload")["command"], "reload")
     }
 
