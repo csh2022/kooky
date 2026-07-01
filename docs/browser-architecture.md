@@ -20,21 +20,29 @@ the product must keep a clean path to a Chromium-backed engine later.
   open/reuse an agent-owned browser split, navigate it, and close it only when
   it is still auto-owned.
 - Make WebKit an implementation detail of `WebKitBrowserEngine`.
+- Expose page-level automation primitives through `Kooky browser ...` so agents
+  can inspect and operate the embedded page without falling back to the user's
+  desktop browser.
 
 ## Non-goals
 
 - Do not embed the user's existing Google Chrome window.
 - Do not promise Google account sign-in inside the embedded browser. Google can
   block OAuth flows in embedded user agents.
-- Do not add full browser automation commands in this pass. Click/type/DOM/CDP
-  tools should layer on top of the store/browser-engine boundary.
+- Do not implement system-level macOS automation under `browser`. Window,
+  menu-bar, Dock, Space, native dialog, and external-app operations are outside
+  the embedded browser boundary.
+- Do not emulate Chrome DevTools-only diagnostics until WebKit has a real
+  backing implementation. Console, network, trace, upload-file, and browser
+  dialog APIs should be added behind `BrowserEngine` methods rather than stubbed
+  as fake success.
 
 ## Module Boundary
 
 Browser code lives under `Sources/KookyKit/Browser/`.
 
 - `BrowserEngine`: protocol owned by Kooky, not WebKit. UI uses this protocol
-  for actions and state.
+  for actions, inspection, screenshots, and state.
 - `BrowserEngineSnapshot`: renderer-agnostic state for title, URL, loading,
   history availability, and transient error display.
 - `BrowserLoadRequest`: normalizes address-bar text into a URL. This is pure
@@ -106,18 +114,55 @@ configuration.
 - Current command surface:
   - `browser open <url-or-query>`
   - `browser state`
+  - `browser snapshot [path]`
+  - `browser elements`
+  - `browser text`
+  - `browser html [path]`
+  - `browser links`
+  - `browser screenshot [path]`
   - `browser click <visible-text>`
+  - `browser click-id <element-id>`
+  - `browser click-at <x> <y>`
   - `browser fill <field-label-or-placeholder> <text>`
+  - `browser fill-id <element-id> <text>`
+  - `browser clear [field-label-or-placeholder]`
   - `browser type <text>`
+  - `browser paste <text>`
   - `browser press <key>`
+  - `browser hotkey <combo>`
   - `browser scroll <up|down|left|right> [amount]`
+  - `browser hover <element-id>`
+  - `browser wait <text> [timeout-ms]`
   - `browser back`, `browser forward`, `browser reload`, `browser stop`
   - `browser close`
 - Browser commands can return a short response over the hook socket. Navigation
-  and interaction commands return `ok` or state text so agents can confirm they
-  used Kooky's browser path.
+  and interaction commands return `ok`, state text, page text, JSON-lines
+  element data, or a written file path so agents can confirm they used Kooky's
+  browser path.
 - Codex still reads the user's real `CODEX_HOME`, `config.toml`, and
   `AGENTS.md`. Kooky does not rewrite or shadow global Codex configuration.
+
+## Peekaboo Capability Mapping
+
+Peekaboo's browser tool is Chrome DevTools-backed and covers page status,
+navigation, snapshots, element ids, click/fill/type, key presses, screenshots,
+console, network, and performance traces. Kooky maps the page-level subset to
+WKWebView:
+
+- `snapshot`, `elements`, `links`, and `text` provide the perceive step. Element
+  ids are stable enough for the current page DOM and can be used by `click-id`,
+  `fill-id`, and `hover`.
+- `screenshot` uses `WKWebView.takeSnapshot` and writes a PNG viewport capture.
+- `click`, `click-id`, `click-at`, `fill`, `fill-id`, `clear`, `type`,
+  `paste`, `press`, `hotkey`, `scroll`, `hover`, and `wait` cover the common
+  interaction loop.
+- `console`, `network`, `performance_trace`, `upload_file`, and dialog handling
+  remain explicit follow-up work because they need WebKit delegate-backed
+  collection or file-input handling.
+
+Peekaboo's desktop tools such as app/window/menu/dock/space/dialog control are
+not browser commands in Kooky. If Kooky needs those later, they should live in a
+separate app-control surface, not in `BrowserEngine`.
 
 ## Hook Binary Shape
 

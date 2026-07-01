@@ -63,13 +63,38 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         evaluate(Self.clickJavaScript(text: trimmed))
     }
 
+    func clickElement(id: String, double: Bool) async -> String {
+        let result = await evaluateString(Self.clickElementJavaScript(id: id, double: double))
+        return result == "true" ? "ok clicked id: \(id)\n" : "element not found: \(id)\n"
+    }
+
+    func clickAt(x: Double, y: Double) async -> String {
+        let result = await evaluateString(Self.clickAtJavaScript(x: x, y: y))
+        return result == "true" ? "ok clicked at: \(x),\(y)\n" : "click target not found at: \(x),\(y)\n"
+    }
+
     func fill(field: String, text: String) {
         let trimmed = field.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         evaluate(Self.fillJavaScript(field: trimmed, text: text))
     }
 
+    func fillElement(id: String, text: String) async -> String {
+        let result = await evaluateString(Self.fillElementJavaScript(id: id, text: text))
+        return result == "true" ? "ok filled id: \(id)\n" : "element not found or not fillable: \(id)\n"
+    }
+
+    func clear(field: String?) async -> String {
+        let result = await evaluateString(Self.clearJavaScript(field: field ?? ""))
+        return result == "true" ? "ok cleared\n" : "field not found\n"
+    }
+
     func type(text: String) {
+        guard !text.isEmpty else { return }
+        evaluate(Self.typeJavaScript(text: text))
+    }
+
+    func paste(text: String) {
         guard !text.isEmpty else { return }
         evaluate(Self.typeJavaScript(text: text))
     }
@@ -80,8 +105,88 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         evaluate(Self.pressJavaScript(key: trimmed))
     }
 
+    func hotkey(_ combo: String) {
+        let trimmed = combo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        evaluate(Self.hotkeyJavaScript(combo: trimmed))
+    }
+
     func scroll(direction: String, amount: Double?) {
         evaluate(Self.scrollJavaScript(direction: direction, amount: amount))
+    }
+
+    func hover(id: String) async -> String {
+        let result = await evaluateString(Self.hoverJavaScript(id: id))
+        return result == "true" ? "ok hovered id: \(id)\n" : "element not found: \(id)\n"
+    }
+
+    func waitForText(_ text: String, timeoutMilliseconds: Int) async -> String {
+        let deadline = Date().addingTimeInterval(TimeInterval(max(timeoutMilliseconds, 0)) / 1000.0)
+        repeat {
+            let body = await pageText()
+            if body.localizedCaseInsensitiveContains(text) {
+                return browserStateText(prefix: "ok found text: \(text)")
+            }
+            if Date() >= deadline { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        } while true
+        return "timed out waiting for text: \(text)\n"
+    }
+
+    func pageText() async -> String {
+        await evaluateString(Self.pageTextJavaScript()).trimmedForCLI()
+    }
+
+    func pageHTML() async -> String {
+        await evaluateString("document.documentElement ? document.documentElement.outerHTML : ''").trimmedForCLI()
+    }
+
+    func linksJSONLines() async -> String {
+        await evaluateString(Self.linksJavaScript()).ensuringTrailingNewline()
+    }
+
+    func elementsJSONLines() async -> String {
+        await evaluateString(Self.elementsJavaScript()).ensuringTrailingNewline()
+    }
+
+    func pageSnapshot() async -> String {
+        let state = browserStateText(prefix: "Kooky browser snapshot")
+        let elements = await elementsJSONLines()
+        let text = await pageText()
+        return """
+        \(state)
+        Elements:
+        \(elements)
+        Text:
+        \(text)
+        """.ensuringTrailingNewline()
+    }
+
+    func saveScreenshot(to path: String?) async -> String {
+        let resolved = screenshotPath(path)
+        let config = WKSnapshotConfiguration()
+        if webView.bounds.width > 0, webView.bounds.height > 0 {
+            config.rect = webView.bounds
+        } else {
+            config.rect = NSRect(x: 0, y: 0, width: 1280, height: 800)
+        }
+        guard let image = await takeSnapshot(configuration: config),
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let data = rep.representation(using: .png, properties: [:])
+        else {
+            return "screenshot failed\n"
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: resolved.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: resolved, options: .atomic)
+            return resolved.path + "\n"
+        } catch {
+            return "screenshot failed: \(error.localizedDescription)\n"
+        }
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -135,6 +240,68 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         }
     }
 
+    private func evaluateString(_ script: String) async -> String {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(script) { [weak self] result, error in
+                if let error {
+                    Task { @MainActor in self?.publishSnapshot(errorMessage: error.localizedDescription) }
+                    continuation.resume(returning: "")
+                    return
+                }
+                if let string = result as? String {
+                    continuation.resume(returning: string)
+                } else if let bool = result as? Bool {
+                    continuation.resume(returning: bool ? "true" : "false")
+                } else if let number = result as? NSNumber {
+                    continuation.resume(returning: number.stringValue)
+                } else {
+                    continuation.resume(returning: "")
+                }
+            }
+        }
+    }
+
+    private func takeSnapshot(configuration: WKSnapshotConfiguration) async -> NSImage? {
+        await withCheckedContinuation { continuation in
+            webView.takeSnapshot(with: configuration) { image, error in
+                if error != nil {
+                    continuation.resume(returning: nil)
+                } else {
+                    continuation.resume(returning: image)
+                }
+            }
+        }
+    }
+
+    private func browserStateText(prefix: String) -> String {
+        let snapshot = self.snapshot
+        return """
+        \(prefix)
+        title: \(snapshot.title)
+        url: \(snapshot.urlString)
+        loading: \(snapshot.isLoading)
+
+        """
+    }
+
+    private func screenshotPath(_ path: String?) -> URL {
+        if let path, !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let expanded = (path as NSString).expandingTildeInPath
+            return URL(fileURLWithPath: expanded)
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kooky-browser", isDirectory: true)
+        let stamp = Self.screenshotTimestamp.string(from: Date())
+        return dir.appendingPathComponent("screenshot-\(stamp).png")
+    }
+
+    private static let screenshotTimestamp: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = .current
+        return fmt
+    }()
+
     private static func clickJavaScript(text: String) -> String {
         let needle = javaScriptStringLiteral(text)
         return """
@@ -174,6 +341,42 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           if (!target) return false;
           target.scrollIntoView({ block: 'center', inline: 'center' });
           target.click();
+          return true;
+        })();
+        """
+    }
+
+    private static func clickElementJavaScript(id: String, double: Bool) -> String {
+        let id = javaScriptStringLiteral(id)
+        let event = double ? "dblclick" : "click"
+        return """
+        (() => {
+          const target = window.__kookyElementById && window.__kookyElementById(\(id));
+          if (!target) return false;
+          target.scrollIntoView({ block: 'center', inline: 'center' });
+          target.focus && target.focus();
+          target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+          target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+          target.dispatchEvent(new MouseEvent('\(event)', { bubbles: true, cancelable: true, view: window }));
+          if ('\(event)' === 'click') target.click && target.click();
+          return true;
+        })();
+        """
+    }
+
+    private static func clickAtJavaScript(x: Double, y: Double) -> String {
+        """
+        (() => {
+          const x = \(x);
+          const y = \(y);
+          const target = document.elementFromPoint(x, y);
+          if (!target) return false;
+          target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }));
+          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }));
+          target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }));
+          target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }));
+          target.click && target.click();
           return true;
         })();
         """
@@ -222,6 +425,66 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             target.value = value;
           }
           target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })();
+        """
+    }
+
+    private static func fillElementJavaScript(id: String, text: String) -> String {
+        let id = javaScriptStringLiteral(id)
+        let value = javaScriptStringLiteral(text)
+        return """
+        (() => {
+          const target = window.__kookyElementById && window.__kookyElementById(\(id));
+          const value = \(value);
+          if (!target) return false;
+          target.scrollIntoView({ block: 'center', inline: 'center' });
+          target.focus && target.focus();
+          if (target.isContentEditable) {
+            target.textContent = value;
+          } else if ('value' in target) {
+            target.value = value;
+          } else {
+            return false;
+          }
+          target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })();
+        """
+    }
+
+    private static func clearJavaScript(field: String) -> String {
+        let field = javaScriptStringLiteral(field)
+        return """
+        (() => {
+          const needle = \(field).trim().toLowerCase();
+          let target = null;
+          if (!needle) {
+            target = document.activeElement;
+          } else {
+            const fields = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea, [contenteditable="true"], [role="textbox"]'));
+            const textFor = (el) => [
+              el.getAttribute && el.getAttribute('aria-label'),
+              el.getAttribute && el.getAttribute('placeholder'),
+              el.getAttribute && el.getAttribute('name'),
+              el.getAttribute && el.getAttribute('title'),
+              el.innerText,
+              el.textContent
+            ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+            target = fields.find((el) => textFor(el) === needle) || fields.find((el) => textFor(el).includes(needle));
+          }
+          if (!target || target === document.body || target === document.documentElement) return false;
+          target.focus && target.focus();
+          if (target.isContentEditable) {
+            target.textContent = '';
+          } else if ('value' in target) {
+            target.value = '';
+          } else {
+            return false;
+          }
+          target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContent' }));
           target.dispatchEvent(new Event('change', { bubbles: true }));
           return true;
         })();
@@ -287,6 +550,36 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
+    private static func hotkeyJavaScript(combo: String) -> String {
+        let combo = javaScriptStringLiteral(combo)
+        return """
+        (() => {
+          const raw = \(combo);
+          const parts = raw.split(/[+\\s,]+/).filter(Boolean);
+          const key = parts.pop() || '';
+          const lower = parts.map((p) => p.toLowerCase());
+          const init = {
+            key,
+            code: key,
+            bubbles: true,
+            cancelable: true,
+            metaKey: lower.includes('meta') || lower.includes('cmd') || lower.includes('command'),
+            ctrlKey: lower.includes('ctrl') || lower.includes('control'),
+            altKey: lower.includes('alt') || lower.includes('option'),
+            shiftKey: lower.includes('shift')
+          };
+          const target = document.activeElement || document.body;
+          target.dispatchEvent(new KeyboardEvent('keydown', init));
+          target.dispatchEvent(new KeyboardEvent('keyup', init));
+          if (init.metaKey && key.toLowerCase() === 'r') location.reload();
+          if (init.metaKey && key.toLowerCase() === 'l') {
+            window.__kookyAddressRequested = true;
+          }
+          return true;
+        })();
+        """
+    }
+
     private static func scrollJavaScript(direction: String, amount: Double?) -> String {
         let normalized = direction.lowercased()
         let distance = amount ?? 0
@@ -315,6 +608,127 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
+    private static func hoverJavaScript(id: String) -> String {
+        let id = javaScriptStringLiteral(id)
+        return """
+        (() => {
+          const target = window.__kookyElementById && window.__kookyElementById(\(id));
+          if (!target) return false;
+          target.scrollIntoView({ block: 'center', inline: 'center' });
+          target.focus && target.focus();
+          target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+          target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
+          return true;
+        })();
+        """
+    }
+
+    private static func pageTextJavaScript() -> String {
+        """
+        (() => {
+          const text = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+          return text.replace(/[ \\t]+\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
+        })();
+        """
+    }
+
+    private static func linksJavaScript() -> String {
+        """
+        (() => {
+          \(domUtilityJavaScript())
+          return window.__kookyVisibleElements('a[href]').map((el) => JSON.stringify({
+            id: window.__kookyElementId(el),
+            text: window.__kookyElementText(el),
+            href: el.href,
+            rect: window.__kookyRect(el)
+          })).join('\\n');
+        })();
+        """
+    }
+
+    private static func elementsJavaScript() -> String {
+        """
+        (() => {
+          \(domUtilityJavaScript())
+          const selectors = [
+            'a[href]', 'button', '[role="button"]', '[role="link"]',
+            'input:not([type="hidden"])', 'textarea', 'select',
+            '[contenteditable="true"]', '[role="textbox"]', 'summary', '[onclick]'
+          ].join(',');
+          return window.__kookyVisibleElements(selectors).slice(0, 300).map((el) => JSON.stringify({
+            id: window.__kookyElementId(el),
+            role: window.__kookyRole(el),
+            text: window.__kookyElementText(el),
+            value: 'value' in el ? String(el.value || '') : '',
+            href: el.href || '',
+            placeholder: el.getAttribute && (el.getAttribute('placeholder') || ''),
+            rect: window.__kookyRect(el)
+          })).join('\\n');
+        })();
+        """
+    }
+
+    private static func domUtilityJavaScript() -> String {
+        """
+        window.__kookyElementId = window.__kookyElementId || ((el) => {
+          if (el.getAttribute && el.getAttribute('data-kooky-id')) return el.getAttribute('data-kooky-id');
+          const all = Array.from(document.querySelectorAll('*'));
+          const tag = (el.tagName || 'el').toLowerCase();
+          const id = 'e' + (all.indexOf(el) + 1) + '-' + tag;
+          try { el.setAttribute('data-kooky-id', id); } catch {}
+          return id;
+        });
+        window.__kookyElementById = window.__kookyElementById || ((id) => {
+          if (!id) return null;
+          const direct = document.querySelector(`[data-kooky-id="${CSS.escape(id)}"]`);
+          if (direct) return direct;
+          const match = /^e(\\d+)-/.exec(id);
+          if (!match) return null;
+          return Array.from(document.querySelectorAll('*'))[Number(match[1]) - 1] || null;
+        });
+        window.__kookyRect = window.__kookyRect || ((el) => {
+          const r = el.getBoundingClientRect();
+          return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
+        });
+        window.__kookyVisible = window.__kookyVisible || ((el) => {
+          const style = window.getComputedStyle(el);
+          if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return false;
+          const r = el.getBoundingClientRect();
+          const vw = window.innerWidth || document.documentElement.clientWidth || 100000;
+          const vh = window.innerHeight || document.documentElement.clientHeight || 100000;
+          return r.width > 0 && r.height > 0 && r.bottom >= 0 && r.right >= 0 &&
+            r.top <= vh && r.left <= vw;
+        });
+        window.__kookyElementText = window.__kookyElementText || ((el) => [
+          el.innerText,
+          el.textContent,
+          el.getAttribute && el.getAttribute('aria-label'),
+          el.getAttribute && el.getAttribute('title'),
+          el.getAttribute && el.getAttribute('name')
+        ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 240));
+        window.__kookyRole = window.__kookyRole || ((el) => {
+          if (el.getAttribute && el.getAttribute('role')) return el.getAttribute('role');
+          const tag = (el.tagName || '').toLowerCase();
+          if (tag === 'a') return 'link';
+          if (tag === 'button') return 'button';
+          if (tag === 'textarea') return 'textarea';
+          if (tag === 'select') return 'select';
+          if (tag === 'input') return el.getAttribute('type') || 'input';
+          if (el.isContentEditable) return 'textbox';
+          return tag;
+        });
+        window.__kookyVisibleElements = window.__kookyVisibleElements || ((selector) => {
+          const seen = new Set();
+          return Array.from(document.querySelectorAll(selector)).filter((el) => {
+            if (seen.has(el) || !window.__kookyVisible(el)) return false;
+            seen.add(el);
+            window.__kookyElementId(el);
+            return true;
+          });
+        });
+        """
+    }
+
     private static func javaScriptStringLiteral(_ value: String) -> String {
         guard
             let data = try? JSONSerialization.data(withJSONObject: [value]),
@@ -322,5 +736,15 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             encoded.count >= 2
         else { return "\"\"" }
         return String(encoded.dropFirst().dropLast())
+    }
+}
+
+private extension String {
+    func ensuringTrailingNewline() -> String {
+        hasSuffix("\n") ? self : self + "\n"
+    }
+
+    func trimmedForCLI() -> String {
+        trimmingCharacters(in: .whitespacesAndNewlines).ensuringTrailingNewline()
     }
 }

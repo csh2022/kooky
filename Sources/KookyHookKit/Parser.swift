@@ -24,20 +24,63 @@ public enum KookyHookKit {
       Kooky browser state
           Print the current built-in browser title, URL, and loading state.
 
+      Kooky browser snapshot [path]
+          Print a structured page snapshot with stable element ids, visible text, and links.
+          If path is provided, write the snapshot text to that file and print the path.
+
+      Kooky browser elements
+          Print visible clickable/form elements as JSON lines. Use element ids with click-id/fill-id/hover.
+
+      Kooky browser text
+          Print the current page's readable text.
+
+      Kooky browser html [path]
+          Print the current page HTML. If path is provided, write it to path and print the path.
+
+      Kooky browser links
+          Print visible links as JSON lines with text, href, and element id.
+
+      Kooky browser screenshot [path]
+          Save a PNG screenshot of the visible browser viewport. Prints the saved path.
+
       Kooky browser click <visible-text>
           Click the first visible link, button, or clickable element whose text contains <visible-text>.
+
+      Kooky browser click-id <element-id>
+          Click an element id returned by snapshot/elements/links.
+
+      Kooky browser click-at <x> <y>
+          Click viewport coordinates inside the browser page.
 
       Kooky browser fill <field-label-or-placeholder> <text>
           Focus and replace the value of a visible input/textarea/contenteditable field.
 
+      Kooky browser fill-id <element-id> <text>
+          Replace the value of an input/textarea/contenteditable element id from snapshot/elements.
+
+      Kooky browser clear [field-label-or-placeholder]
+          Clear the focused field, or the matching field when a label/placeholder is provided.
+
       Kooky browser type <text>
           Type text into the currently focused page element.
+
+      Kooky browser paste <text>
+          Paste text into the focused page element.
 
       Kooky browser press <key>
           Press a page key such as Enter, Escape, Tab, Backspace, ArrowDown, or ArrowUp.
 
+      Kooky browser hotkey <combo>
+          Press a browser/page shortcut such as Meta+L, Meta+R, Meta+F, Escape, or Enter.
+
       Kooky browser scroll <up|down|left|right> [amount]
           Scroll the page. Amount is optional pixels; default is about one viewport.
+
+      Kooky browser hover <element-id>
+          Move hover/focus state to an element id returned by snapshot/elements.
+
+      Kooky browser wait <text> [timeout-ms]
+          Wait until page text contains <text>, then print state.
 
       Kooky browser back
       Kooky browser forward
@@ -97,11 +140,12 @@ public enum KookyHookKit {
 
         var response = [UInt8]()
         var buffer = [UInt8](repeating: 0, count: 4096)
+        let maxResponseBytes = 2 * 1024 * 1024
         while true {
             let count = buffer.withUnsafeMutableBufferPointer { read(fd, $0.baseAddress, $0.count) }
             if count > 0 {
                 response.append(contentsOf: buffer.prefix(count))
-                if response.count >= 16_384 { break }
+                if response.count >= maxResponseBytes { break }
             } else {
                 break
             }
@@ -200,12 +244,44 @@ public enum KookyHookKit {
         ]
     }
 
+    public static func buildBrowserOutputPayload(surface: String, command: String, path: String = "") -> [String: String] {
+        var payload = [
+            "kind": "browser",
+            "surface": surface,
+            "command": command,
+        ]
+        if !path.isEmpty {
+            payload["path"] = path
+        }
+        return payload
+    }
+
     public static func buildBrowserClickPayload(surface: String, text: String) -> [String: String] {
         [
             "kind": "browser",
             "surface": surface,
             "command": "click",
             "text": text,
+        ]
+    }
+
+    public static func buildBrowserClickIdPayload(surface: String, id: String, double: Bool = false) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "click-id",
+            "id": id,
+            "double": double ? "true" : "false",
+        ]
+    }
+
+    public static func buildBrowserClickAtPayload(surface: String, x: String, y: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "click-at",
+            "x": x,
+            "y": y,
         ]
     }
 
@@ -219,11 +295,39 @@ public enum KookyHookKit {
         ]
     }
 
+    public static func buildBrowserFillIdPayload(surface: String, id: String, text: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "fill-id",
+            "id": id,
+            "text": text,
+        ]
+    }
+
+    public static func buildBrowserClearPayload(surface: String, field: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "clear",
+            "field": field,
+        ]
+    }
+
     public static func buildBrowserTypePayload(surface: String, text: String) -> [String: String] {
         [
             "kind": "browser",
             "surface": surface,
             "command": "type",
+            "text": text,
+        ]
+    }
+
+    public static func buildBrowserPastePayload(surface: String, text: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "paste",
             "text": text,
         ]
     }
@@ -237,6 +341,15 @@ public enum KookyHookKit {
         ]
     }
 
+    public static func buildBrowserHotkeyPayload(surface: String, combo: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "hotkey",
+            "key": combo,
+        ]
+    }
+
     public static func buildBrowserScrollPayload(surface: String, direction: String, amount: String) -> [String: String] {
         [
             "kind": "browser",
@@ -244,6 +357,25 @@ public enum KookyHookKit {
             "command": "scroll",
             "direction": direction,
             "amount": amount,
+        ]
+    }
+
+    public static func buildBrowserHoverPayload(surface: String, id: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "hover",
+            "id": id,
+        ]
+    }
+
+    public static func buildBrowserWaitPayload(surface: String, text: String, timeout: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "wait",
+            "text": text,
+            "timeout": timeout,
         ]
     }
 

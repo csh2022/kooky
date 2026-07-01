@@ -1334,7 +1334,7 @@ final class WorkspaceStore {
     }
 
     @discardableResult
-    func applyBrowserCommand(_ command: HookBrowserCommand, sessionId: UUID) -> String? {
+    func applyBrowserCommand(_ command: HookBrowserCommand, sessionId: UUID) async -> String? {
         let owner = BrowserPaneOwner.agent(sessionId)
         guard location(ofSessionId: sessionId) != nil || reusableBrowser(owner: owner) != nil else {
             return nil
@@ -1348,26 +1348,72 @@ final class WorkspaceStore {
         case .state:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             return browserStateDescription(browser)
+        case .snapshot(let path):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            let snapshot = await browser.surface.engine.pageSnapshot()
+            return writeBrowserOutput(snapshot, to: path)
+        case .elements:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.elementsJSONLines()
+        case .text:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.pageText()
+        case .html(let path):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            let html = await browser.surface.engine.pageHTML()
+            return writeBrowserOutput(html, to: path)
+        case .links:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.linksJSONLines()
+        case .screenshot(let path):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.saveScreenshot(to: path)
         case .click(let text):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.click(text: text)
             return "ok clicked text: \(text)\n"
+        case .clickId(let id, let double):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.clickElement(id: id, double: double)
+        case .clickAt(let x, let y):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.clickAt(x: x, y: y)
         case .fill(let field, let text):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.fill(field: field, text: text)
             return "ok filled field: \(field)\n"
+        case .fillId(let id, let text):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.fillElement(id: id, text: text)
+        case .clear(let field):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.clear(field: field)
         case .type(let text):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.type(text: text)
             return "ok typed \(text.count) characters\n"
+        case .paste(let text):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.paste(text: text)
+            return "ok pasted \(text.count) characters\n"
         case .press(let key):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.press(key: key)
             return "ok pressed key: \(key)\n"
+        case .hotkey(let combo):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            browser.surface.engine.hotkey(combo)
+            return "ok hotkey: \(combo)\n"
         case .scroll(let direction, let amount):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.scroll(direction: direction, amount: amount)
             return "ok scrolled \(direction)\n"
+        case .hover(let id):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.hover(id: id)
+        case .wait(let text, let timeoutMilliseconds):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            return await browser.surface.engine.waitForText(text, timeoutMilliseconds: timeoutMilliseconds)
         case .back:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.goBack()
@@ -1386,6 +1432,23 @@ final class WorkspaceStore {
             return "ok stop\n"
         case .close:
             return closeBrowserIfAutoOwned(owner: owner) ? "ok closed\n" : "browser not closed\n"
+        }
+    }
+
+    private func writeBrowserOutput(_ content: String, to path: String?) -> String {
+        guard let path, !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return content.hasSuffix("\n") ? content : content + "\n"
+        }
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            return url.path + "\n"
+        } catch {
+            return "write failed: \(error.localizedDescription)\n"
         }
     }
 

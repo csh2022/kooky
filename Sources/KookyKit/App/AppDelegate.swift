@@ -53,7 +53,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             case .conversationId(let conversationId, let sessionId):
                 store.applyConversationId(conversationId: conversationId, sessionId: sessionId)
             case .browser(let command, let sessionId):
-                response = response ?? store.applyBrowserCommand(command, sessionId: sessionId)
+                if response == nil {
+                    response = await store.applyBrowserCommand(command, sessionId: sessionId)
+                }
             case .toolCall(let agent, let toolName, let identifier, let event, let success, let toolUseId, let sessionId):
                 store.applyToolCallEvent(
                     agent: agent,

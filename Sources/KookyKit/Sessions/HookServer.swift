@@ -33,11 +33,25 @@ enum HookToolEvent: String {
 enum HookBrowserCommand: Equatable {
     case open(address: String)
     case state
+    case snapshot(path: String?)
+    case elements
+    case text
+    case html(path: String?)
+    case links
+    case screenshot(path: String?)
     case click(text: String)
+    case clickId(id: String, double: Bool)
+    case clickAt(x: Double, y: Double)
     case fill(field: String, text: String)
+    case fillId(id: String, text: String)
+    case clear(field: String?)
     case type(text: String)
+    case paste(text: String)
     case press(key: String)
+    case hotkey(combo: String)
     case scroll(direction: String, amount: Double?)
+    case hover(id: String)
+    case wait(text: String, timeoutMilliseconds: Int)
     case back
     case forward
     case reload
@@ -76,7 +90,7 @@ enum HookMessage {
 
 @MainActor
 final class HookServer {
-    typealias Handler = (_ message: HookMessage) -> String?
+    typealias Handler = @MainActor (_ message: HookMessage) async -> String?
 
     private let handler: Handler
     private var listenFd: Int32 = -1
@@ -160,18 +174,28 @@ final class HookServer {
     private func acceptOne() {
         let clientFd = accept(listenFd, nil, nil)
         guard clientFd >= 0 else { return }
-        defer { close(clientFd) }
 
         // Single read up to 4 KiB. Hook payloads are < 200 B and unix
         // SOCK_STREAM kernel-buffers small writes whole, so partial reads
         // aren't a practical concern at our message size.
         var buffer = [UInt8](repeating: 0, count: 4096)
         let n = buffer.withUnsafeMutableBufferPointer { read(clientFd, $0.baseAddress, $0.count) }
-        guard n > 0 else { return }
+        guard n > 0 else {
+            close(clientFd)
+            return
+        }
         let data = Data(bytes: buffer, count: n)
-        guard let message = Self.parseMessage(data) else { return }
-        if let response = handler(message), !response.isEmpty {
-            _ = response.withCString { write(clientFd, $0, strlen($0)) }
+        guard let message = Self.parseMessage(data) else {
+            close(clientFd)
+            return
+        }
+        Task { @MainActor [handler] in
+            if let response = await handler(message), !response.isEmpty {
+                response.withCString { pointer in
+                    _ = write(clientFd, pointer, strlen(pointer))
+                }
+            }
+            close(clientFd)
         }
     }
 
@@ -180,6 +204,12 @@ final class HookServer {
         "NVM_BIN", "NVM_DIR", "KOOKY_NODE_VERSION",
         "https_proxy", "http_proxy", "all_proxy",
     ]
+
+    private static func optionalString(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : string
+    }
 
     static func parseMessage(_ data: Data) -> HookMessage? {
         guard
@@ -210,26 +240,74 @@ final class HookServer {
                 return .browser(command: .open(address: address), sessionId: id)
             case "state":
                 return .browser(command: .state, sessionId: id)
+            case "snapshot":
+                return .browser(command: .snapshot(path: optionalString(dict["path"])), sessionId: id)
+            case "elements":
+                return .browser(command: .elements, sessionId: id)
+            case "text":
+                return .browser(command: .text, sessionId: id)
+            case "html":
+                return .browser(command: .html(path: optionalString(dict["path"])), sessionId: id)
+            case "links":
+                return .browser(command: .links, sessionId: id)
+            case "screenshot":
+                return .browser(command: .screenshot(path: optionalString(dict["path"])), sessionId: id)
             case "click":
                 guard let text = dict["text"] as? String,
                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
                 return .browser(command: .click(text: text), sessionId: id)
+            case "click-id":
+                guard let elementId = dict["id"] as? String,
+                      !elementId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return .browser(
+                    command: .clickId(id: elementId, double: dict["double"] as? String == "true"),
+                    sessionId: id
+                )
+            case "click-at":
+                guard let xString = dict["x"] as? String,
+                      let yString = dict["y"] as? String,
+                      let x = Double(xString),
+                      let y = Double(yString) else { return nil }
+                return .browser(command: .clickAt(x: x, y: y), sessionId: id)
             case "fill":
                 guard let field = dict["field"] as? String,
                       !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       let text = dict["text"] as? String else { return nil }
                 return .browser(command: .fill(field: field, text: text), sessionId: id)
+            case "fill-id":
+                guard let elementId = dict["id"] as? String,
+                      !elementId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let text = dict["text"] as? String else { return nil }
+                return .browser(command: .fillId(id: elementId, text: text), sessionId: id)
+            case "clear":
+                return .browser(command: .clear(field: optionalString(dict["field"])), sessionId: id)
             case "type":
                 guard let text = dict["text"] as? String, !text.isEmpty else { return nil }
                 return .browser(command: .type(text: text), sessionId: id)
+            case "paste":
+                guard let text = dict["text"] as? String, !text.isEmpty else { return nil }
+                return .browser(command: .paste(text: text), sessionId: id)
             case "press":
                 guard let key = dict["key"] as? String,
                       !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
                 return .browser(command: .press(key: key), sessionId: id)
+            case "hotkey":
+                guard let key = dict["key"] as? String,
+                      !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return .browser(command: .hotkey(combo: key), sessionId: id)
             case "scroll":
                 let direction = dict["direction"] as? String ?? "down"
                 let amount = (dict["amount"] as? String).flatMap(Double.init)
                 return .browser(command: .scroll(direction: direction, amount: amount), sessionId: id)
+            case "hover":
+                guard let elementId = dict["id"] as? String,
+                      !elementId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return .browser(command: .hover(id: elementId), sessionId: id)
+            case "wait":
+                guard let text = dict["text"] as? String,
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                let timeout = (dict["timeout"] as? String).flatMap(Int.init) ?? 5_000
+                return .browser(command: .wait(text: text, timeoutMilliseconds: timeout), sessionId: id)
             case "back":
                 return .browser(command: .back, sessionId: id)
             case "forward":

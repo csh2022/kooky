@@ -47,12 +47,23 @@ enum KookyHookCommand {
                 let address = arguments.dropFirst(3).joined(separator: " ")
                 guard !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
                 payloadObject = KookyHookKit.buildBrowserOpenPayload(surface: surface, address: address)
-            } else if command == "state" {
-                payloadObject = KookyHookKit.buildBrowserStatePayload(surface: surface)
+            } else if ["state", "elements", "text", "links"].contains(command) {
+                payloadObject = KookyHookKit.buildBrowserOutputPayload(surface: surface, command: command)
+            } else if command == "snapshot" || command == "html" || command == "screenshot" {
+                let path = arguments.dropFirst(3).joined(separator: " ")
+                payloadObject = KookyHookKit.buildBrowserOutputPayload(surface: surface, command: command, path: path)
             } else if command == "click" {
                 let text = arguments.dropFirst(3).joined(separator: " ")
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
                 payloadObject = KookyHookKit.buildBrowserClickPayload(surface: surface, text: text)
+            } else if command == "click-id" {
+                let id = arguments.count >= 4 ? arguments[3] : ""
+                guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+                let isDouble = arguments.dropFirst(4).contains("--double")
+                payloadObject = KookyHookKit.buildBrowserClickIdPayload(surface: surface, id: id, double: isDouble)
+            } else if command == "click-at" {
+                guard arguments.count >= 5 else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserClickAtPayload(surface: surface, x: arguments[3], y: arguments[4])
             } else if command == "fill" {
                 let args = Array(arguments.dropFirst(3))
                 guard args.count >= 2 else { return 0 }
@@ -60,18 +71,54 @@ enum KookyHookCommand {
                 let text = args.dropFirst().joined(separator: " ")
                 guard !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
                 payloadObject = KookyHookKit.buildBrowserFillPayload(surface: surface, field: field, text: text)
+            } else if command == "fill-id" {
+                let args = Array(arguments.dropFirst(3))
+                guard args.count >= 2 else { return 0 }
+                let id = args[0]
+                let text = args.dropFirst().joined(separator: " ")
+                guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserFillIdPayload(surface: surface, id: id, text: text)
+            } else if command == "clear" {
+                let field = arguments.dropFirst(3).joined(separator: " ")
+                payloadObject = KookyHookKit.buildBrowserClearPayload(surface: surface, field: field)
             } else if command == "type" {
                 let text = arguments.dropFirst(3).joined(separator: " ")
                 guard !text.isEmpty else { return 0 }
                 payloadObject = KookyHookKit.buildBrowserTypePayload(surface: surface, text: text)
+            } else if command == "paste" {
+                let text = arguments.dropFirst(3).joined(separator: " ")
+                guard !text.isEmpty else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserPastePayload(surface: surface, text: text)
             } else if command == "press" {
                 let key = arguments.dropFirst(3).joined(separator: " ")
                 guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
                 payloadObject = KookyHookKit.buildBrowserPressPayload(surface: surface, key: key)
+            } else if command == "hotkey" {
+                let combo = arguments.dropFirst(3).joined(separator: " ")
+                guard !combo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserHotkeyPayload(surface: surface, combo: combo)
             } else if command == "scroll" {
                 let direction = arguments.count >= 4 ? arguments[3] : "down"
                 let amount = arguments.count >= 5 ? arguments[4] : ""
                 payloadObject = KookyHookKit.buildBrowserScrollPayload(surface: surface, direction: direction, amount: amount)
+            } else if command == "hover" {
+                let id = arguments.count >= 4 ? arguments[3] : ""
+                guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserHoverPayload(surface: surface, id: id)
+            } else if command == "wait" {
+                let args = Array(arguments.dropFirst(3))
+                guard !args.isEmpty else { return 0 }
+                let timeout: String
+                let text: String
+                if args.count >= 2, let last = args.last, Double(last) != nil {
+                    timeout = last
+                    text = args.dropLast().joined(separator: " ")
+                } else {
+                    timeout = ""
+                    text = args.joined(separator: " ")
+                }
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserWaitPayload(surface: surface, text: text, timeout: timeout)
             } else if ["back", "forward", "reload", "stop"].contains(command) {
                 payloadObject = KookyHookKit.buildBrowserSimplePayload(surface: surface, command: command)
             } else if command == "close" {

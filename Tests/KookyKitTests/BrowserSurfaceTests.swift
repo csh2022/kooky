@@ -50,10 +50,24 @@ private final class TestBrowserEngine: BrowserEngine {
     func goBack() {}
     func goForward() {}
     func click(text: String) {}
+    func clickElement(id: String, double: Bool) async -> String { "" }
+    func clickAt(x: Double, y: Double) async -> String { "" }
     func fill(field: String, text: String) {}
+    func fillElement(id: String, text: String) async -> String { "" }
+    func clear(field: String?) async -> String { "" }
     func type(text: String) {}
+    func paste(text: String) {}
     func press(key: String) {}
+    func hotkey(_ combo: String) {}
     func scroll(direction: String, amount: Double?) {}
+    func hover(id: String) async -> String { "" }
+    func waitForText(_ text: String, timeoutMilliseconds: Int) async -> String { "" }
+    func pageText() async -> String { "" }
+    func pageHTML() async -> String { "" }
+    func linksJSONLines() async -> String { "" }
+    func elementsJSONLines() async -> String { "" }
+    func pageSnapshot() async -> String { "" }
+    func saveScreenshot(to path: String?) async -> String { "" }
 
     func publish(_ snapshot: BrowserEngineSnapshot) {
         self.snapshot = snapshot
