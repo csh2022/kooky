@@ -16,6 +16,8 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertEqual(env["KOOKY_BROWSER_POLICY"], "prefer_kooky_browser_over_external_chrome")
         XCTAssertTrue(env["KOOKY_BROWSER_HELP"]?.contains("browser help") == true)
         XCTAssertTrue(env["KOOKY_BROWSER_HELP"]?.contains("built-in browser commands") == true)
+        XCTAssertFalse(env["KOOKY_BIN", default: ""].isEmpty)
+        XCTAssertEqual(env["KOOKY_HOOK_BIN"], env["KOOKY_BIN"])
         XCTAssertEqual(env["KOOKY_HOOK_SOCKET"], HookServer.socketPath)
         XCTAssertTrue(env["KOOKY_HOOK_SOCKET"]?.contains("/kooky/sockets/s-") == true)
     }
@@ -88,8 +90,8 @@ final class ShellIntegrationTests: XCTestCase {
         let script = KookyShellIntegration.bracketWrapperScript(slug: "amp")
 
         XCTAssertTrue(script.contains("self_dir"), "must skip own dir on PATH walk")
-        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" amp running"))
-        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" amp ended"))
+        XCTAssertTrue(script.contains("\"$KOOKY_BIN\" amp running"))
+        XCTAssertTrue(script.contains("\"$KOOKY_BIN\" amp ended"))
         XCTAssertTrue(script.contains("kooky-agent:amp:running"))
         XCTAssertTrue(script.contains("kooky-agent:amp:ended"))
         XCTAssertTrue(script.contains("KOOKY_AGENT_MARKERS"))
@@ -118,7 +120,7 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains(guardLine), "codex wrapper must pass through a pipe-driven background call")
 
         let guardIdx = script.range(of: guardLine)!.lowerBound
-        let pingIdx = script.range(of: "\"$KOOKY_HOOK_BIN\" codex running")!.lowerBound
+        let pingIdx = script.range(of: "\"$KOOKY_BIN\" codex running")!.lowerBound
         let notifyIdx = script.range(of: "notify=")!.lowerBound
         XCTAssertLessThan(guardIdx, pingIdx, "tty guard must precede the hook CLI running ping")
         XCTAssertLessThan(guardIdx, notifyIdx, "tty guard must precede the -c notify injection")
@@ -143,9 +145,9 @@ final class ShellIntegrationTests: XCTestCase {
 
         XCTAssertTrue(argument.hasPrefix("developer_instructions=\""))
         XCTAssertTrue(argument.contains("\\n"))
-        XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser help"))
-        XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser open"))
-        XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser close"))
+        XCTAssertTrue(argument.contains("\\\"$KOOKY_BIN\\\" browser help"))
+        XCTAssertTrue(argument.contains("\\\"$KOOKY_BIN\\\" browser open"))
+        XCTAssertTrue(argument.contains("\\\"$KOOKY_BIN\\\" browser close"))
         XCTAssertFalse(argument.contains("\n"), "config override must stay one argv token")
     }
 
@@ -183,8 +185,8 @@ final class ShellIntegrationTests: XCTestCase {
         // file. Regression guard for the v0.20.0 wiring.
         let script = KookyShellIntegration.bracketWrapperScript(slug: "kimi")
 
-        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" kimi running"))
-        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" kimi ended"))
+        XCTAssertTrue(script.contains("\"$KOOKY_BIN\" kimi running"))
+        XCTAssertTrue(script.contains("\"$KOOKY_BIN\" kimi ended"))
         XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
     }
 
@@ -244,14 +246,14 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(script.contains("readlink \"$real\""), "must resolve symlink one hop")
         XCTAssertTrue(script.contains("*/Antigravity.app/*"), "must match IDE launcher resolved path")
         XCTAssertTrue(script.contains("antigravity.google/cli/install.sh"), "must surface CLI install command")
-        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" agy ended"), "must revert tab icon on shim-detection bail")
+        XCTAssertTrue(script.contains("\"$KOOKY_BIN\" agy ended"), "must revert tab icon on shim-detection bail")
         XCTAssertTrue(script.contains("exit 127"), "must mirror preamble's not-installed exit code")
     }
 
     func testAntigravityWrapperBracketsRunningAndEndedForRealCLI() {
         let script = KookyShellIntegration.antigravityWrapperScript
 
-        XCTAssertTrue(script.contains("\"$KOOKY_HOOK_BIN\" agy running"))
+        XCTAssertTrue(script.contains("\"$KOOKY_BIN\" agy running"))
         XCTAssertTrue(script.contains("exec \"$real\" \"$@\""), "must passthrough when KOOKY_SURFACE_ID is unset")
     }
 
@@ -284,7 +286,7 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(body.contains("getSessionFile"), "must read pi's current session file")
         XCTAssertTrue(body.contains(#"["pi", "conversation", id]"#), "must report the session id for resume")
         XCTAssertTrue(body.contains("KOOKY_SURFACE_ID"))
-        XCTAssertTrue(body.contains("KOOKY_HOOK_BIN"))
+        XCTAssertTrue(body.contains("KOOKY_BIN"))
         XCTAssertTrue(body.contains("kooky-managed-do-not-edit"), "must carry the upgrade-safety marker")
     }
 
@@ -313,7 +315,7 @@ final class ShellIntegrationTests: XCTestCase {
         // wrapper so its own `ended` ping never fires.
         XCTAssertTrue(block.contains("eval \"$_kooky_cmd\""))
         XCTAssertTrue(block.contains(#"_kooky_agent_bin="${_kooky_cmd%% *}""#), "must derive the agent binary for the revert ping")
-        XCTAssertTrue(block.contains(#""$KOOKY_HOOK_BIN" "$_kooky_agent_bin" ended"#), "must ping ended after the agent returns")
+        XCTAssertTrue(block.contains(#""$KOOKY_BIN" "$_kooky_agent_bin" ended"#), "must ping ended after the agent returns")
         // The revert ping must not clobber the agent's exit code — capture it
         // before, restore it after, so the first prompt's `$?` is the agent's.
         XCTAssertTrue(block.contains("_kooky_status=$?"), "must capture the agent exit status before the revert ping")
@@ -323,14 +325,14 @@ final class ShellIntegrationTests: XCTestCase {
     func testEnvStatusBlockReportsLiveShellEnvironment() {
         let body = KookyShellIntegration.envStatusBlock
 
-        XCTAssertTrue(body.contains("\"$KOOKY_HOOK_BIN\" env"))
+        XCTAssertTrue(body.contains("\"$KOOKY_BIN\" env"))
         XCTAssertTrue(body.contains(#""${VIRTUAL_ENV:-}""#))
         XCTAssertTrue(body.contains(#""${CONDA_DEFAULT_ENV:-}""#))
         XCTAssertTrue(body.contains(#""${NVM_BIN:-}""#))
         XCTAssertTrue(body.contains(#""${NVM_DIR:-}""#))
         XCTAssertTrue(body.contains("--version"), "must invoke node --version")
         XCTAssertTrue(body.contains("_KOOKY_NODE_KEY_LAST"), "must memoize node version against path+NVM_BIN")
-        XCTAssertTrue(body.contains("_KOOKY_ENV_LAST"), "must skip the kooky-hook IPC when env unchanged")
+        XCTAssertTrue(body.contains("_KOOKY_ENV_LAST"), "must skip Kooky IPC when env unchanged")
     }
 
     @MainActor

@@ -19,8 +19,12 @@ struct PaneTreeView: View {
                 isFocused: workspace.activePaneId == pane.id
             )
         case .browser(let browser):
-            BrowserPaneView(browser: browser) {
-                store.closeBrowserPane(browser, in: workspace)
+            if browser.isVisible(activeSessionId: workspace.activeSession?.id) {
+                BrowserPaneView(browser: browser) {
+                    store.closeBrowserPane(browser, in: workspace)
+                }
+            } else {
+                Color.clear
             }
         case .split:
             SplitContainer(node: node, workspace: workspace, store: store)
@@ -1711,9 +1715,11 @@ private struct SplitContainer: View {
     let store: WorkspaceStore
 
     @State private var dragStartFraction: Double?
+    @State private var isHandleHovered = false
+    @State private var isHandleDragging = false
 
     private static let dividerThickness: CGFloat = 1
-    private static let handleHitSize: CGFloat = 6
+    private static let handleHitSize: CGFloat = 14
     private static let minFraction: Double = 0.1
     private static let maxFraction: Double = 0.9
 
@@ -1730,6 +1736,18 @@ private struct SplitContainer: View {
         let firstContainsZoom = workspace.zoomedPaneId.map { first.contains(paneId: $0) } ?? false
         let secondContainsZoom = !firstContainsZoom
             && (workspace.zoomedPaneId.map { second.contains(paneId: $0) } ?? false)
+        let activeSessionId = workspace.activeSession?.id
+        let firstVisible = first.hasVisibleContent(activeSessionId: activeSessionId)
+        let secondVisible = second.hasVisibleContent(activeSessionId: activeSessionId)
+        if firstVisible != secondVisible {
+            return AnyView(
+                PaneTreeView(node: firstVisible ? first : second, workspace: workspace, store: store)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+        }
+        if !firstVisible && !secondVisible {
+            return AnyView(Color.clear)
+        }
         let fraction: Double = {
             if firstContainsZoom { return 1.0 }
             if secondContainsZoom { return 0.0 }
@@ -1776,8 +1794,14 @@ private struct SplitContainer: View {
                                 .offset(x: secondPushX, y: secondPushY)
                                 .clipped()
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        DividerHandle(orientation: .horizontal)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        DividerHandle(
+                            orientation: .horizontal,
+                            isActive: isHandleHovered || isHandleDragging,
+                            isDragging: isHandleDragging
+                        ) { hovered in
+                            isHandleHovered = hovered
+                        }
                             .frame(width: Self.handleHitSize, height: geo.size.height)
                             .offset(x: handleOffset, y: 0)
                             .opacity(chromeVisible)
@@ -1799,8 +1823,14 @@ private struct SplitContainer: View {
                                 .offset(x: secondPushX, y: secondPushY)
                                 .clipped()
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        DividerHandle(orientation: .vertical)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        DividerHandle(
+                            orientation: .vertical,
+                            isActive: isHandleHovered || isHandleDragging,
+                            isDragging: isHandleDragging
+                        ) { hovered in
+                            isHandleHovered = hovered
+                        }
                             .frame(width: geo.size.width, height: Self.handleHitSize)
                             .offset(x: 0, y: handleOffset)
                             .opacity(chromeVisible)
@@ -1809,7 +1839,7 @@ private struct SplitContainer: View {
                     }
                 }
                 .clipped()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: geo.size.width, height: geo.size.height)
                 // Animation now driven by `withAnimation(Theme.chromeTransition)`
                 // at the toggle call sites — that propagates to the outer
                 // PaneStatusBar visibility too, so the chrome row that
@@ -1823,7 +1853,10 @@ private struct SplitContainer: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 guard case .split(let orient, let f, let s, let current) = node.content else { return }
-                if dragStartFraction == nil { dragStartFraction = current }
+                if dragStartFraction == nil {
+                    dragStartFraction = current
+                    isHandleDragging = true
+                }
                 let translation = orientation == .horizontal ? value.translation.width : value.translation.height
                 let delta = total > 0 ? Double(translation) / Double(total) : 0
                 let proposed = (dragStartFraction ?? current) + delta
@@ -1833,6 +1866,7 @@ private struct SplitContainer: View {
             }
             .onEnded { _ in
                 dragStartFraction = nil
+                isHandleDragging = false
                 store.flushPersistence()
             }
     }
@@ -1840,21 +1874,45 @@ private struct SplitContainer: View {
 
 private struct DividerHandle: View {
     let orientation: SplitOrientation
+    let isActive: Bool
+    let isDragging: Bool
+    let onHoverChanged: (Bool) -> Void
 
     var body: some View {
-        Rectangle()
-            .fill(Color.white.opacity(0.001))
-            .contentShape(Rectangle())
-            .onHover { isHovered in
-                if isHovered {
-                    if orientation == .horizontal {
-                        NSCursor.resizeLeftRight.push()
-                    } else {
-                        NSCursor.resizeUpDown.push()
-                    }
+        ZStack {
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+            dividerAffordance
+        }
+        .contentShape(Rectangle())
+        .animation(.easeOut(duration: 0.12), value: isActive)
+        .animation(.easeOut(duration: 0.12), value: isDragging)
+        .onHover { isHovered in
+            onHoverChanged(isHovered)
+            if isHovered {
+                if orientation == .horizontal {
+                    NSCursor.resizeLeftRight.push()
                 } else {
-                    NSCursor.pop()
+                    NSCursor.resizeUpDown.push()
                 }
+            } else {
+                NSCursor.pop()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var dividerAffordance: some View {
+        let thickness: CGFloat = isDragging ? 3 : 2
+        let opacity = isActive ? (isDragging ? 0.8 : 0.42) : 0.0
+        if orientation == .horizontal {
+            Rectangle()
+                .fill(Theme.chromeForeground.opacity(opacity))
+                .frame(width: thickness)
+        } else {
+            Rectangle()
+                .fill(Theme.chromeForeground.opacity(opacity))
+                .frame(height: thickness)
+        }
     }
 }

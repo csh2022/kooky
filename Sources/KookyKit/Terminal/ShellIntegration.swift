@@ -269,7 +269,7 @@ enum KookyShellIntegration {
     /// `Kooky browser ...`, `Kooky env ...`, or `Kooky <agent> <event>` run the
     /// short-lived IPC client path and exit. Keeping one executable prevents
     /// the app/helper version skew that can happen with separate SPM products.
-    static let kookyHookBinaryPath: String = {
+    static let kookyBinaryPath: String = {
         Bundle.main.executablePath ?? ""
     }()
 
@@ -277,12 +277,12 @@ enum KookyShellIntegration {
     Kooky provides a built-in browser for this session.
 
     For browser-page tasks, use the built-in browser before any external browser path:
-    - First run: "$KOOKY_HOOK_BIN" browser help
-    - Open or search with: "$KOOKY_HOOK_BIN" browser open <url-or-query>
+    - First run: "$KOOKY_BIN" browser help
+    - Open or search with: "$KOOKY_BIN" browser open <url-or-query>
     - Interact with the page using the browser commands listed by help, such as click, fill, type, press, scroll, back, forward, reload, stop, state, and close.
 
     Read the help output before choosing browser commands so newly added Kooky browser capabilities are discovered automatically. Do not launch or automate an external browser, Peekaboo, or host UI automation for browser-page tasks unless the user explicitly asks for an external browser session or the Kooky browser help does not provide the needed capability.
-    If you opened the built-in browser for the task, close it with "$KOOKY_HOOK_BIN" browser close before finishing.
+    If you opened the built-in browser for the task, close it with "$KOOKY_BIN" browser close before finishing.
     """
 
     static let codexBrowserDeveloperConfigArgument: String = {
@@ -306,10 +306,12 @@ enum KookyShellIntegration {
             "KOOKY_HOOK_SOCKET": HookServer.socketPath,
             "KOOKY_HOOKS_PATH": hooksPath,
             "KOOKY_BIN_DIR": kookyBinDirectory,
-            "KOOKY_HOOK_BIN": kookyHookBinaryPath,
+            "KOOKY_BIN": kookyBinaryPath,
+            // Legacy alias for sessions or generated config from older builds.
+            "KOOKY_HOOK_BIN": kookyBinaryPath,
             "KOOKY_BROWSER": "1",
             "KOOKY_BROWSER_POLICY": "prefer_kooky_browser_over_external_chrome",
-            "KOOKY_BROWSER_HELP": "Run \"$KOOKY_HOOK_BIN\" browser help before browser-page tasks, then use the listed Kooky built-in browser commands for navigation and page interaction.",
+            "KOOKY_BROWSER_HELP": "Run \"$KOOKY_BIN\" browser help before browser-page tasks, then use the listed Kooky built-in browser commands for navigation and page interaction.",
             // KOOKY_AGENT_MARKERS is deliberately NOT set locally: the
             // The hook socket is the local status channel. OSC-title markers
             // are the ssh-remote fallback (the remote bootstrap exports the
@@ -356,7 +358,7 @@ enum KookyShellIntegration {
         writeWrapper(name: "kiro-cli", script: bracketWrapperScript(slug: "kiro-cli"))
         refreshSshRemoteAgentDetection(enabled: sshRemoteAgentDetection)
 
-        let hookCmd = kookyHookBinaryPath
+        let hookCmd = kookyBinaryPath
         writeJSON(at: claudeHooksPath, object: claudeHooksObject(hookCmd: hookCmd))
         writeJSON(at: geminiDefaultsPath, object: geminiDefaultsObject(hookCmd: hookCmd))
         installCopilotHooksIfPresent(hookCmd: hookCmd)
@@ -431,7 +433,7 @@ enum KookyShellIntegration {
     /// Subscribes to pi's lifecycle events and pings Kooky's hook CLI so the sidebar
     /// dot tracks per-session activity — running while a turn executes,
     /// attention when the turn ends and pi waits on the user. Mirrors the
-    /// OpenCode plugin: gated on `KOOKY_SURFACE_ID`, reads `KOOKY_HOOK_BIN`
+    /// OpenCode plugin: gated on `KOOKY_SURFACE_ID`, reads `KOOKY_BIN`
     /// from the env kooky injects, and carries the managed marker so a user
     /// edit isn't clobbered. Pi runs extensions under Node, so `process.env`
     /// and `pi.exec` are available.
@@ -445,7 +447,7 @@ enum KookyShellIntegration {
     // is regenerated next time kooky launches.
     export default function (pi) {
       const surface = process.env.KOOKY_SURFACE_ID
-      const hookBin = process.env.KOOKY_HOOK_BIN
+      const hookBin = process.env.KOOKY_BIN
       if (!surface || !hookBin) return
 
       const ping = async (state) => {
@@ -561,7 +563,7 @@ enum KookyShellIntegration {
     /// Called at launch and after every Settings save, so the on-disk files
     /// always track the current custom-agent set.
     static func refreshClaudeCustomSettings(customAgents: [CustomAgentData]) {
-        let hookCmd = kookyHookBinaryPath
+        let hookCmd = kookyBinaryPath
         var liveFiles: Set<String> = []
         for agent in customAgents where agent.baseAgentId == AgentTemplate.claudeCodeID {
             let env = AgentTemplate.parseEnv(agent.env)
@@ -625,10 +627,10 @@ enum KookyShellIntegration {
     /// `HookEvent` cases through `.rawValue` keeps the wrapper-emitted strings
     /// in sync with the receiver in `HookServer`.
     /// Builds a Claude / Gemini-style hooks JSON object. `events` maps hook
-    /// names → lifecycle state (running / attention / idle / ended); kooky-hook
+    /// names → lifecycle state (running / attention / idle / ended); Kooky
     /// is invoked with the state's rawValue as `argv[2]`. `passthroughEvents`
     /// is for events whose handler needs the raw event name preserved (e.g.
-    /// Claude's `PreToolUse` / `PostToolUse` — kooky-hook reads stdin for
+    /// Claude's `PreToolUse` / `PostToolUse` — the Kooky CLI reads stdin for
     /// those and dispatches via `parseToolEventPayload`, so the raw name is
     /// what main.swift gates on, not a HookEvent rawValue).
     private static func hooksObject(
@@ -767,8 +769,8 @@ enum KookyShellIntegration {
             if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
                 \(agentMarkerCommand(slug: binary, event: .ended))
             fi
-            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-                "$KOOKY_HOOK_BIN" \(binary) ended 2>/dev/null
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" ]]; then
+                "$KOOKY_BIN" \(binary) ended 2>/dev/null
             fi
             exit 127
         fi
@@ -831,15 +833,15 @@ enum KookyShellIntegration {
         # then `ended` after exit (revert to terminal). Mid-run state
         # transitions still come from Codex's `notify` config below.
         \(agentMarkerCommand(slug: "codex", event: .running))
-        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-            "$KOOKY_HOOK_BIN" codex running 2>/dev/null
-            "$real" -c \(quote(codexBrowserDeveloperConfigArgument)) -c "notify=[\\"$KOOKY_HOOK_BIN\\",\\"codex\\",\\"attention\\"]" "$@"
+        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" ]]; then
+            "$KOOKY_BIN" codex running 2>/dev/null
+            "$real" -c \(quote(codexBrowserDeveloperConfigArgument)) -c "notify=[\\"$KOOKY_BIN\\",\\"codex\\",\\"attention\\"]" "$@"
         else
             "$real" "$@"
         fi
         status=$?
-        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-            "$KOOKY_HOOK_BIN" codex ended 2>/dev/null
+        if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" ]]; then
+            "$KOOKY_BIN" codex ended 2>/dev/null
         fi
         \(agentMarkerCommand(slug: "codex", event: .ended))
         exit $status
@@ -1057,8 +1059,8 @@ enum KookyShellIntegration {
             if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
                 \(agentMarkerCommand(slug: "agy", event: .ended))
             fi
-            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-                "$KOOKY_HOOK_BIN" agy ended 2>/dev/null
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" ]]; then
+                "$KOOKY_BIN" agy ended 2>/dev/null
             fi
             exit 127
             ;;
@@ -1091,13 +1093,13 @@ enum KookyShellIntegration {
 
         if [[ -n "$KOOKY_SURFACE_ID" || -n "$KOOKY_AGENT_MARKERS" ]]; then
             \(agentMarkerCommand(slug: slug, event: .running))
-            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-                "$KOOKY_HOOK_BIN" \(slug) running 2>/dev/null
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" ]]; then
+                "$KOOKY_BIN" \(slug) running 2>/dev/null
             fi
             "$real" "$@"
             status=$?
-            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-                "$KOOKY_HOOK_BIN" \(slug) ended 2>/dev/null
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" ]]; then
+                "$KOOKY_BIN" \(slug) ended 2>/dev/null
             fi
             \(agentMarkerCommand(slug: slug, event: .ended))
             exit $status
@@ -1109,7 +1111,7 @@ enum KookyShellIntegration {
     /// OpenCode auto-loads any `.ts`/`.js` file in
     /// `$XDG_CONFIG_HOME/opencode/plugin/` (or `~/.config/opencode/plugin/`)
     /// at startup. The plugin runs in opencode's own Bun runtime, inherits
-    /// KOOKY_SURFACE_ID + KOOKY_HOOK_BIN from the shell, and shells out to
+    /// KOOKY_SURFACE_ID + KOOKY_BIN from the shell, and shells out to
     /// Kooky's hook CLI on each lifecycle event. The first-line marker
     /// (`managedFileMarker`) lets `writeManagedFile` recognise the file as
     /// kooky-generated on upgrade — a user's own `kooky.ts` plugin would
@@ -1120,7 +1122,7 @@ enum KookyShellIntegration {
     // be regenerated next time kooky launches.
     export const KookyPlugin = async ({ $ }) => {
       const surface = process.env.KOOKY_SURFACE_ID
-      const hookBin = process.env.KOOKY_HOOK_BIN
+      const hookBin = process.env.KOOKY_BIN
       if (!surface || !hookBin) return {}
 
       const ping = async (state) => {
@@ -1331,8 +1333,8 @@ enum KookyShellIntegration {
             # the eagerly-promoted tab icon on the agent. Revert to a plain
             # shell. Idempotent — a wrapper that already pinged `ended` makes
             # this a no-op (`applyHookEvent` dedups same-value writes).
-            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" ]]; then
-                "$KOOKY_HOOK_BIN" "$_kooky_agent_bin" ended 2>/dev/null
+            if [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" ]]; then
+                "$KOOKY_BIN" "$_kooky_agent_bin" ended 2>/dev/null
             fi
             # Restore the agent's exit code — the revert ping clobbered `$?`,
             # but the first prompt (and theme hooks / `_kooky_title_pwd` that
@@ -1346,12 +1348,12 @@ enum KookyShellIntegration {
     ///     on every prompt). We cache its result against the resolved `node`
     ///     binary path + NVM_BIN — if neither changed, the cached version is
     ///     still valid.
-    /// (b) the `kooky-hook env` IPC fork is skipped entirely when no env key
+    /// (b) the `Kooky env` IPC fork is skipped entirely when no env key
     ///     differs from the previous send. Most prompts have steady env, so
     ///     this turns the hook into a no-op the vast majority of the time.
     static let envStatusBlock = """
         _kooky_env_status() {
-            [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_HOOK_BIN" && -x "$KOOKY_HOOK_BIN" ]] || return 0
+            [[ -n "$KOOKY_SURFACE_ID" && -n "$KOOKY_BIN" && -x "$KOOKY_BIN" ]] || return 0
             local _kooky_node_path=""
             command -v node >/dev/null 2>&1 && _kooky_node_path="$(command -v node)"
             local _kooky_node_key="${_kooky_node_path}|${NVM_BIN:-}"
@@ -1369,10 +1371,10 @@ enum KookyShellIntegration {
             local _kooky_env_now="${VIRTUAL_ENV:-}|${CONDA_DEFAULT_ENV:-}|${NVM_BIN:-}|${NVM_DIR:-}|$_KOOKY_NODE_VERSION_LAST|$_kooky_https_proxy|$_kooky_http_proxy|$_kooky_all_proxy"
             [[ "$_kooky_env_now" == "$_KOOKY_ENV_LAST" ]] && return 0
             # Only advance the dedup cache when the IPC actually succeeded —
-            # if kooky-hook returns non-zero (kooky restarting, socket gone
+            # if the Kooky CLI returns non-zero (kooky restarting, socket gone
             # before the hook server bound), the next prompt will retry
             # instead of staying frozen at the unsent value.
-            "$KOOKY_HOOK_BIN" env "${VIRTUAL_ENV:-}" "${CONDA_DEFAULT_ENV:-}" "${NVM_BIN:-}" "${NVM_DIR:-}" "$_KOOKY_NODE_VERSION_LAST" "$_kooky_https_proxy" "$_kooky_http_proxy" "$_kooky_all_proxy" 2>/dev/null \
+            "$KOOKY_BIN" env "${VIRTUAL_ENV:-}" "${CONDA_DEFAULT_ENV:-}" "${NVM_BIN:-}" "${NVM_DIR:-}" "$_KOOKY_NODE_VERSION_LAST" "$_kooky_https_proxy" "$_kooky_http_proxy" "$_kooky_all_proxy" 2>/dev/null \
                 && _KOOKY_ENV_LAST="$_kooky_env_now"
             # Mask our internal IPC status so user precmd hooks downstream in
             # zsh's precmd_functions chain don't see `$?=1` and bleed it into

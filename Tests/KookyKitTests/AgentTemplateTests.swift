@@ -255,7 +255,7 @@ final class AgentTemplateTests: XCTestCase {
 
     func testMakeSessionConfigInjectsResumeForPi() {
         // Pi takes a launch-time `--session <id>`; the extension captures the
-        // session id and reports it via `kooky-hook pi conversation <id>`.
+        // session id and reports it via `Kooky pi conversation <id>`.
         let config = AgentTemplate.pi.makeSessionConfig(resumeId: "abc-123")
         XCTAssertEqual(config.environment["KOOKY_AGENT"], "pi --session abc-123")
     }

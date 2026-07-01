@@ -397,7 +397,7 @@ extension AgentTemplate {
     /// so "Ask Pi" single-shots rather than seeding a live session. Resume IS
     /// wired: pi takes a launch-time `--session <id>` (`resumeFlag`), and the
     /// extension hands kooky the current session id via
-    /// `kooky-hook pi conversation <id>` — that reuses the generic
+    /// `Kooky pi conversation <id>` — that reuses the generic
     /// `conversationId` path (persist on `Session` → prepend `--session <id>`
     /// next launch, gated by `agents.resumeConversations`), so the end result
     /// matches Claude's `--resume` without any Claude-specific JSON parsing.

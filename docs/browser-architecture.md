@@ -99,11 +99,13 @@ Agents launched from Kooky learn about the built-in browser through
 Kooky-owned process context, not by editing the user's global agent
 configuration.
 
-- Every Kooky session gets `KOOKY_BROWSER=1`, `KOOKY_HOOK_BIN`, and
+- Every Kooky session gets `KOOKY_BROWSER=1`, `KOOKY_BIN`, and
   `KOOKY_HOOK_SOCKET`.
-  `KOOKY_HOOK_BIN` points at the main `Kooky` executable. The same binary
+  `KOOKY_BIN` points at the main `Kooky` executable. The same binary
   launches the GUI when run normally and acts as the short-lived hook CLI when
   invoked as `Kooky browser ...`, `Kooky env ...`, or `Kooky <agent> <event>`.
+  `KOOKY_HOOK_BIN` is still exported as a compatibility alias for older
+  generated config, but new instructions and wrappers should use `KOOKY_BIN`.
 - `KOOKY_HOOK_SOCKET` points at the current Kooky process's per-instance Unix
   socket under `~/Library/Application Support/kooky/sockets/`. The hook CLI uses
   this env var first so multiple Kooky instances do not steal each other's
@@ -115,11 +117,11 @@ configuration.
   processes running inside Kooky. Background pipe-driven Codex calls still pass
   through untouched.
 - The injected instruction tells agents to run
-  `"$KOOKY_HOOK_BIN" browser help` before browser-page tasks. Browser commands
+  `"$KOOKY_BIN" browser help` before browser-page tasks. Browser commands
   should be discoverable through that help text so future capabilities do not
   require hard-coding every command into agent instructions. If an agent opens
   the built-in browser for a task, the instruction also tells it to close the
-  browser with `"$KOOKY_HOOK_BIN" browser close` before finishing.
+  browser with `"$KOOKY_BIN" browser close` before finishing.
 - Current command surface:
   - `browser open <url-or-query>`
   - `browser state`
@@ -178,7 +180,7 @@ Peekaboo's desktop tools such as app/window/menu/dock/space/dialog control are
 not browser commands in Kooky. If Kooky needs those later, they should live in a
 separate app-control surface, not in `BrowserEngine`.
 
-## Hook Binary Shape
+## Single Binary Shape
 
 There is no separate `KookyHook` executable. Keeping hook mode inside the main
 `Kooky` binary avoids app/helper version skew: the installed app, the hook CLI

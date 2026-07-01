@@ -32,5 +32,14 @@ final class BrowserPane: Identifiable {
         guard case .agent = owner else { return false }
         return !isPinned && !isUserTouched
     }
-}
 
+    func isVisible(activeSessionId: UUID?) -> Bool {
+        if isPinned { return true }
+        switch owner {
+        case .user:
+            return true
+        case .agent(let sessionId):
+            return sessionId == activeSessionId
+        }
+    }
+}

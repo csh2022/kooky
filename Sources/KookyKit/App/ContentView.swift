@@ -40,7 +40,9 @@ struct ContentView: View {
                     Rectangle().fill(Theme.chromeHairline).frame(width: 1)
                 }
                 mainPane
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                    .clipped()
                 if store.rightSidebarMode != .hidden {
                     Rectangle().fill(Theme.chromeHairline).frame(width: 1)
                     AgentOverviewSidebar(mode: store.rightSidebarMode)

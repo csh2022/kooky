@@ -191,4 +191,16 @@ extension PaneNode {
         }
         return first.parentInfo(forBrowser: browserId) ?? second.parentInfo(forBrowser: browserId)
     }
+
+    func hasVisibleContent(activeSessionId: UUID?) -> Bool {
+        switch content {
+        case .pane:
+            return true
+        case .browser(let browser):
+            return browser.isVisible(activeSessionId: activeSessionId)
+        case .split(_, let first, let second, _):
+            return first.hasVisibleContent(activeSessionId: activeSessionId)
+                || second.hasVisibleContent(activeSessionId: activeSessionId)
+        }
+    }
 }

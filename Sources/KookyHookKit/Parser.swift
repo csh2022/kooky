@@ -181,7 +181,7 @@ public enum KookyHookKit {
     }
 
     /// Env-snapshot payload from positional args. Order follows the
-    /// `kooky-hook env ...` calling convention in `ShellIntegration.swift`'s
+    /// `Kooky env ...` calling convention in `ShellIntegration.swift`'s
     /// precmd hook: VIRTUAL_ENV, CONDA_DEFAULT_ENV, NVM_BIN, NVM_DIR,
     /// KOOKY_NODE_VERSION, https_proxy, http_proxy, all_proxy.
     public static func buildEnvPayload(surface: String, args: [String]) -> [String: String] {

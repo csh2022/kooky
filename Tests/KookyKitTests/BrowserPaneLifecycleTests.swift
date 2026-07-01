@@ -54,6 +54,36 @@ final class BrowserPaneLifecycleTests: XCTestCase {
         )
     }
 
+    func testAgentBrowserVisibilityFollowsOwningSessionUnlessPinned() {
+        let store = makeStore()
+        let workspace = try! XCTUnwrap(store.active)
+        let pane = try! XCTUnwrap(workspace.root.firstPane)
+        let firstSession = try! XCTUnwrap(pane.activeTab)
+        let secondSession = store.addTab(in: workspace, pane: pane)
+        store.activateTab(firstSession, in: workspace)
+
+        let browser = try! XCTUnwrap(
+            store.openBrowserSplit(address: "example.com", owner: .agent(firstSession.id), in: workspace)
+        )
+
+        XCTAssertTrue(browser.isVisible(activeSessionId: firstSession.id))
+        XCTAssertFalse(browser.isVisible(activeSessionId: secondSession.id))
+        guard case .split(.horizontal, _, let browserNode, _) = workspace.root.content else {
+            return XCTFail("expected browser split")
+        }
+        XCTAssertFalse(browserNode.hasVisibleContent(activeSessionId: secondSession.id))
+
+        browser.isPinned = true
+        XCTAssertTrue(browser.isVisible(activeSessionId: secondSession.id))
+        XCTAssertTrue(browserNode.hasVisibleContent(activeSessionId: secondSession.id))
+
+        let userBrowser = BrowserPane(
+            surface: BrowserSurface(engine: TestBrowserEngineForPane()),
+            owner: .user
+        )
+        XCTAssertTrue(userBrowser.isVisible(activeSessionId: secondSession.id))
+    }
+
     func testAgentBrowserSplitsNextToCallingSessionNotActivePane() {
         let store = makeStore()
         let workspace = try! XCTUnwrap(store.active)
