@@ -143,6 +143,7 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertTrue(argument.contains("\\n"))
         XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser help"))
         XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser open"))
+        XCTAssertTrue(argument.contains("\\\"$KOOKY_HOOK_BIN\\\" browser close"))
         XCTAssertFalse(argument.contains("\n"), "config override must stay one argv token")
     }
 
