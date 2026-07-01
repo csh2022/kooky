@@ -74,13 +74,19 @@ public enum KookyHookKit {
           Press a browser/page shortcut such as Meta+L, Meta+R, Meta+F, Escape, or Enter.
 
       Kooky browser scroll <up|down|left|right> [amount]
-          Scroll the page. Amount is optional pixels; default is about one viewport.
+          Scroll the page and print viewport position. Amount is optional pixels; default is about one viewport.
 
       Kooky browser hover <element-id>
           Move hover/focus state to an element id returned by snapshot/elements.
 
       Kooky browser wait <text> [timeout-ms]
           Wait until page text contains <text>, then print state.
+
+      Kooky browser wait-url <url-substring> [timeout-ms]
+          Wait until the current page URL contains <url-substring>, then print state.
+
+      Kooky browser wait-title <title-substring> [timeout-ms]
+          Wait until the current page title contains <title-substring>, then print state.
 
       Kooky browser back
       Kooky browser forward
@@ -374,6 +380,26 @@ public enum KookyHookKit {
             "kind": "browser",
             "surface": surface,
             "command": "wait",
+            "text": text,
+            "timeout": timeout,
+        ]
+    }
+
+    public static func buildBrowserWaitURLPayload(surface: String, text: String, timeout: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "wait-url",
+            "text": text,
+            "timeout": timeout,
+        ]
+    }
+
+    public static func buildBrowserWaitTitlePayload(surface: String, text: String, timeout: String) -> [String: String] {
+        [
+            "kind": "browser",
+            "surface": surface,
+            "command": "wait-title",
             "text": text,
             "timeout": timeout,
         ]

@@ -133,6 +133,8 @@ configuration.
   - `browser scroll <up|down|left|right> [amount]`
   - `browser hover <element-id>`
   - `browser wait <text> [timeout-ms]`
+  - `browser wait-url <url-substring> [timeout-ms]`
+  - `browser wait-title <title-substring> [timeout-ms]`
   - `browser back`, `browser forward`, `browser reload`, `browser stop`
   - `browser close`
 - Browser commands can return a short response over the hook socket. Navigation

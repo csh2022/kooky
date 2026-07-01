@@ -88,6 +88,8 @@ final class HookServerTests: XCTestCase {
             (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"scroll","direction":"down","amount":"600"}"#, .scroll(direction: "down", amount: 600)),
             (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"hover","id":"e3-a"}"#, .hover(id: "e3-a")),
             (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"wait","text":"Ready","timeout":"2500"}"#, .wait(text: "Ready", timeoutMilliseconds: 2500)),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"wait-url","text":"q=Ready","timeout":"2500"}"#, .waitURL(text: "q=Ready", timeoutMilliseconds: 2500)),
+            (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"wait-title","text":"Ready","timeout":"2500"}"#, .waitTitle(text: "Ready", timeoutMilliseconds: 2500)),
             (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"back"}"#, .back),
             (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"forward"}"#, .forward),
             (#"{"surface":"\#(Self.surfaceUUID.uuidString)","kind":"browser","command":"reload"}"#, .reload),

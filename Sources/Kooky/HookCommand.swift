@@ -107,18 +107,19 @@ enum KookyHookCommand {
                 payloadObject = KookyHookKit.buildBrowserHoverPayload(surface: surface, id: id)
             } else if command == "wait" {
                 let args = Array(arguments.dropFirst(3))
-                guard !args.isEmpty else { return 0 }
-                let timeout: String
-                let text: String
-                if args.count >= 2, let last = args.last, Double(last) != nil {
-                    timeout = last
-                    text = args.dropLast().joined(separator: " ")
-                } else {
-                    timeout = ""
-                    text = args.joined(separator: " ")
-                }
+                guard let (text, timeout) = parseBrowserWaitArguments(args) else { return 0 }
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
                 payloadObject = KookyHookKit.buildBrowserWaitPayload(surface: surface, text: text, timeout: timeout)
+            } else if command == "wait-url" {
+                let args = Array(arguments.dropFirst(3))
+                guard let (text, timeout) = parseBrowserWaitArguments(args) else { return 0 }
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserWaitURLPayload(surface: surface, text: text, timeout: timeout)
+            } else if command == "wait-title" {
+                let args = Array(arguments.dropFirst(3))
+                guard let (text, timeout) = parseBrowserWaitArguments(args) else { return 0 }
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
+                payloadObject = KookyHookKit.buildBrowserWaitTitlePayload(surface: surface, text: text, timeout: timeout)
             } else if ["back", "forward", "reload", "stop"].contains(command) {
                 payloadObject = KookyHookKit.buildBrowserSimplePayload(surface: surface, command: command)
             } else if command == "close" {
@@ -214,5 +215,13 @@ enum KookyHookCommand {
     private static func normalizedArguments(_ arguments: [String]) -> [String] {
         guard arguments.count >= 2, arguments[1] == "hook" else { return arguments }
         return [arguments[0]] + arguments.dropFirst(2)
+    }
+
+    private static func parseBrowserWaitArguments(_ args: [String]) -> (text: String, timeout: String)? {
+        guard !args.isEmpty else { return nil }
+        if args.count >= 2, let last = args.last, Double(last) != nil {
+            return (args.dropLast().joined(separator: " "), last)
+        }
+        return (args.joined(separator: " "), "")
     }
 }

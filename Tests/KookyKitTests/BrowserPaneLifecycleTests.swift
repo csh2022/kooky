@@ -116,6 +116,8 @@ final class BrowserPaneLifecycleTests: XCTestCase {
         await store.applyBrowserCommand(.scroll(direction: "down", amount: 500), sessionId: agentId)
         await store.applyBrowserCommand(.hover(id: "e3-a"), sessionId: agentId)
         await store.applyBrowserCommand(.wait(text: "Loaded", timeoutMilliseconds: 10), sessionId: agentId)
+        await store.applyBrowserCommand(.waitURL(text: "q=Loaded", timeoutMilliseconds: 10), sessionId: agentId)
+        await store.applyBrowserCommand(.waitTitle(text: "Loaded - Search", timeoutMilliseconds: 10), sessionId: agentId)
         await store.applyBrowserCommand(.back, sessionId: agentId)
         await store.applyBrowserCommand(.forward, sessionId: agentId)
         await store.applyBrowserCommand(.reload, sessionId: agentId)
@@ -138,7 +140,7 @@ final class BrowserPaneLifecycleTests: XCTestCase {
         XCTAssertEqual(engine.scrolls.map(\.direction), ["down"])
         XCTAssertEqual(engine.scrolls.map(\.amount), [500])
         XCTAssertEqual(engine.hoveredIds, ["e3-a"])
-        XCTAssertEqual(engine.waits.map(\.text), ["Loaded"])
+        XCTAssertEqual(engine.waits.map(\.text), ["Loaded", "q=Loaded", "Loaded - Search"])
         XCTAssertEqual(engine.goBackCount, 1)
         XCTAssertEqual(engine.goForwardCount, 1)
         XCTAssertEqual(engine.reloadCount, 1)
@@ -240,7 +242,10 @@ private final class TestBrowserEngineForPane: BrowserEngine {
         clickPoints.append((x, y))
         return "ok clicked at: \(x),\(y)\n"
     }
-    func fill(field: String, text: String) { fills.append((field, text)) }
+    func fill(field: String, text: String) async -> String {
+        fills.append((field, text))
+        return "ok filled field: \(field)\n"
+    }
     func fillElement(id: String, text: String) async -> String {
         fillIds.append((id, text))
         return "ok filled id: \(id)\n"
@@ -251,9 +256,15 @@ private final class TestBrowserEngineForPane: BrowserEngine {
     }
     func type(text: String) { typedTexts.append(text) }
     func paste(text: String) { pastedTexts.append(text) }
-    func press(key: String) { pressedKeys.append(key) }
+    func press(key: String) async -> String {
+        pressedKeys.append(key)
+        return "ok pressed key: \(key)\n"
+    }
     func hotkey(_ combo: String) { hotkeys.append(combo) }
-    func scroll(direction: String, amount: Double?) { scrolls.append((direction, amount)) }
+    func scroll(direction: String, amount: Double?) async -> String {
+        scrolls.append((direction, amount))
+        return "ok scrolled \(direction)\n"
+    }
     func hover(id: String) async -> String {
         hoveredIds.append(id)
         return "ok hovered id: \(id)\n"
@@ -261,6 +272,14 @@ private final class TestBrowserEngineForPane: BrowserEngine {
     func waitForText(_ text: String, timeoutMilliseconds: Int) async -> String {
         waits.append((text, timeoutMilliseconds))
         return "ok found text: \(text)\n"
+    }
+    func waitForURL(_ text: String, timeoutMilliseconds: Int) async -> String {
+        waits.append((text, timeoutMilliseconds))
+        return "ok found url: \(text)\n"
+    }
+    func waitForTitle(_ text: String, timeoutMilliseconds: Int) async -> String {
+        waits.append((text, timeoutMilliseconds))
+        return "ok found title: \(text)\n"
     }
     func pageText() async -> String { "page text\n" }
     func pageHTML() async -> String { "<html></html>\n" }
