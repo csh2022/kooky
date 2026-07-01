@@ -110,7 +110,9 @@ configuration.
 - The injected instruction tells agents to run
   `"$KOOKY_HOOK_BIN" browser help` before browser-page tasks. Browser commands
   should be discoverable through that help text so future capabilities do not
-  require hard-coding every command into agent instructions.
+  require hard-coding every command into agent instructions. If an agent opens
+  the built-in browser for a task, the instruction also tells it to close the
+  browser with `"$KOOKY_HOOK_BIN" browser close` before finishing.
 - Current command surface:
   - `browser open <url-or-query>`
   - `browser state`

@@ -282,6 +282,7 @@ enum KookyShellIntegration {
     - Interact with the page using the browser commands listed by help, such as click, fill, type, press, scroll, back, forward, reload, stop, state, and close.
 
     Read the help output before choosing browser commands so newly added Kooky browser capabilities are discovered automatically. Do not launch or automate an external browser, Peekaboo, or host UI automation for browser-page tasks unless the user explicitly asks for an external browser session or the Kooky browser help does not provide the needed capability.
+    If you opened the built-in browser for the task, close it with "$KOOKY_HOOK_BIN" browser close before finishing.
     """
 
     static let codexBrowserDeveloperConfigArgument: String = {
