@@ -1,8 +1,29 @@
+import Darwin
 import XCTest
 @testable import KookyHookKit
 
 final class KookyHookKitTests: XCTestCase {
     private let codexSessionId = "019eef55-2456-78f2-9368-7f321e6126bd"
+
+    // MARK: socket path
+
+    func testSocketPathFallsBackToLegacyPathWhenEnvMissing() {
+        withHookSocketEnv(nil) {
+            XCTAssertEqual(KookyHookKit.socketPath, KookyHookKit.legacySocketPath)
+        }
+    }
+
+    func testSocketPathUsesEnvironmentOverride() {
+        withHookSocketEnv("/tmp/kooky-test.sock") {
+            XCTAssertEqual(KookyHookKit.socketPath, "/tmp/kooky-test.sock")
+        }
+    }
+
+    func testSocketPathIgnoresBlankEnvironmentOverride() {
+        withHookSocketEnv("   ") {
+            XCTAssertEqual(KookyHookKit.socketPath, KookyHookKit.legacySocketPath)
+        }
+    }
 
     // MARK: env payload
 
@@ -30,6 +51,24 @@ final class KookyHookKitTests: XCTestCase {
         XCTAssertEqual(payload["https_proxy"], "http://proxy:8080")
         XCTAssertEqual(payload["http_proxy"], "http://proxy:8080")
         XCTAssertEqual(payload["all_proxy"], "socks5://proxy")
+    }
+
+    private func withHookSocketEnv(_ value: String?, _ body: () -> Void) {
+        let key = KookyHookKit.socketPathEnvironmentKey
+        let previous = getenv(key).map { String(cString: $0) }
+        if let value {
+            setenv(key, value, 1)
+        } else {
+            unsetenv(key)
+        }
+        defer {
+            if let previous {
+                setenv(key, previous, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+        body()
     }
 
     func testBuildEnvPayloadShortArgsFillsBlanks() {

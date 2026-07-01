@@ -95,24 +95,28 @@ final class HookServer {
     typealias Handler = @MainActor (_ message: HookMessage) async -> String?
 
     private let handler: Handler
+    let socketPath: String
     private var listenFd: Int32 = -1
     private var source: DispatchSourceRead?
 
-    init(handler: @escaping Handler) { self.handler = handler }
+    init(socketPath: String = HookServer.socketPath, handler: @escaping Handler) {
+        self.socketPath = socketPath
+        self.handler = handler
+    }
 
-    /// Path agents and the CLI both target. Public so the CLI doesn't have to
-    /// hardcode the same string in two places — but agents run in their own
-    /// processes and read it via Kooky's hook CLI reaching into `Application
-    /// Support`, not via this property.
-    static let socketPath: String = {
+    /// Per-process path that prevents multiple Kooky instances from stealing
+    /// each other's hook/browser traffic. Sessions receive this path in
+    /// `KOOKY_HOOK_SOCKET`; older sessions without that env fall back to the
+    /// legacy shared path in `KookyHookKit`.
+    nonisolated static let socketPath: String = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = support.appendingPathComponent("kooky", isDirectory: true)
+        let dir = support.appendingPathComponent("kooky/sockets", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("socket").path
+        return dir.appendingPathComponent("s-\(getpid())").path
     }()
 
     func start() {
-        let path = Self.socketPath
+        let path = socketPath
         try? FileManager.default.removeItem(atPath: path)
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -166,11 +170,7 @@ final class HookServer {
             close(listenFd)
             listenFd = -1
         }
-        // Do not unlink `socketPath` on shutdown. Kooky supports temporary
-        // dev instances alongside an installed app; if an older instance exits
-        // after a newer instance has rebound the shared path, unconditional
-        // removal here unlinks the live socket and future hook CLI clients
-        // fail to connect. `start()` already removes stale paths before bind.
+        try? FileManager.default.removeItem(atPath: socketPath)
     }
 
     private func acceptOne() {

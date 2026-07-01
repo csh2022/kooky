@@ -755,11 +755,9 @@ struct KookySettingsView: View {
 
     private func restartApp() {
         // Naively `openApplication` + `terminate` races: the new instance
-        // boots while the old one still holds `~/Library/Application
-        // Support/kooky/socket` and the persisted workspace file. The new
-        // instance reads stale state and binds to the socket that the old
-        // `applicationWillTerminate` is about to delete, leaving hook CLI
-        // unable to reach anyone.
+        // boots while the old one still owns live sessions and the persisted
+        // workspace file. The new instance can read stale state before the old
+        // process finishes writing its shutdown snapshot.
         //
         // Fix: sync-flush settings, detach a bash helper that waits for the
         // current PID to fully exit, then `open` a fresh instance. The

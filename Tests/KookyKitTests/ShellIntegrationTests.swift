@@ -16,6 +16,8 @@ final class ShellIntegrationTests: XCTestCase {
         XCTAssertEqual(env["KOOKY_BROWSER_POLICY"], "prefer_kooky_browser_over_external_chrome")
         XCTAssertTrue(env["KOOKY_BROWSER_HELP"]?.contains("browser help") == true)
         XCTAssertTrue(env["KOOKY_BROWSER_HELP"]?.contains("built-in browser commands") == true)
+        XCTAssertEqual(env["KOOKY_HOOK_SOCKET"], HookServer.socketPath)
+        XCTAssertTrue(env["KOOKY_HOOK_SOCKET"]?.contains("/kooky/sockets/s-") == true)
     }
 
     private static let stubHook = "/Applications/Kooky.app/Contents/MacOS/Kooky"

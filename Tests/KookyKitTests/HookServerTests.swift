@@ -1,17 +1,27 @@
 import XCTest
 @testable import KookyKit
 
-/// Tests for `HookServer.parseMessage` — the wire-payload decoder that
-/// turns one JSON line off the unix socket into a typed `HookMessage`.
-/// Direct in-process parse tests (no subprocess / no socket) so each
-/// edge case (malformed JSON, wrong types, missing fields, tool-event
-/// variants) is fast + deterministic. `@MainActor` because `HookServer`
-/// is `@MainActor` and `parseMessage` inherits the isolation.
+/// Tests for HookServer's socket identity and `parseMessage` wire-payload
+/// decoder. These are direct in-process tests so malformed payload edge cases
+/// stay fast and deterministic. `@MainActor` because `HookServer` is
+/// `@MainActor` and `parseMessage` inherits the isolation.
 @MainActor
 final class HookServerTests: XCTestCase {
     private static let surfaceUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     private func data(_ json: String) -> Data { Data(json.utf8) }
+
+    // MARK: Socket paths
+
+    func testDefaultSocketPathIsPerProcess() {
+        XCTAssertTrue(HookServer.socketPath.contains("/kooky/sockets/s-"))
+        XCTAssertFalse(HookServer.socketPath.hasSuffix("/kooky/socket"))
+    }
+
+    func testHookServerAcceptsSocketPathOverride() {
+        let server = HookServer(socketPath: "/tmp/kooky-test.sock") { _ in nil }
+        XCTAssertEqual(server.socketPath, "/tmp/kooky-test.sock")
+    }
 
     // MARK: Regression — existing message kinds keep working
 

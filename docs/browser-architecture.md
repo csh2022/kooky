@@ -99,10 +99,17 @@ Agents launched from Kooky learn about the built-in browser through
 Kooky-owned process context, not by editing the user's global agent
 configuration.
 
-- Every Kooky session gets `KOOKY_BROWSER=1` and `KOOKY_HOOK_BIN`.
+- Every Kooky session gets `KOOKY_BROWSER=1`, `KOOKY_HOOK_BIN`, and
+  `KOOKY_HOOK_SOCKET`.
   `KOOKY_HOOK_BIN` points at the main `Kooky` executable. The same binary
   launches the GUI when run normally and acts as the short-lived hook CLI when
   invoked as `Kooky browser ...`, `Kooky env ...`, or `Kooky <agent> <event>`.
+- `KOOKY_HOOK_SOCKET` points at the current Kooky process's per-instance Unix
+  socket under `~/Library/Application Support/kooky/sockets/`. The hook CLI uses
+  this env var first so multiple Kooky instances do not steal each other's
+  browser or lifecycle events. If the env var is absent, the CLI falls back to
+  the old shared `~/Library/Application Support/kooky/socket` path for
+  compatibility with older running sessions.
 - The `codex` wrapper passes a per-invocation
   `-c developer_instructions=...` override only for interactive Codex
   processes running inside Kooky. Background pipe-driven Codex calls still pass

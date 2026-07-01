@@ -303,6 +303,7 @@ enum KookyShellIntegration {
         let hooksPath = claudeCustomSettingsAgentId.map(claudeCustomSettingsPath(agentId:)) ?? claudeHooksPath
         var env: [String: String] = [
             "KOOKY_SURFACE_ID": sessionId.uuidString,
+            "KOOKY_HOOK_SOCKET": HookServer.socketPath,
             "KOOKY_HOOKS_PATH": hooksPath,
             "KOOKY_BIN_DIR": kookyBinDirectory,
             "KOOKY_HOOK_BIN": kookyHookBinaryPath,
