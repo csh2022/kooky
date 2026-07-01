@@ -103,9 +103,17 @@ public enum KookyHookKit {
       - Future commands will be listed here as they are added.
     """
 
-    public static var socketPath: String {
+    public static let socketPathEnvironmentKey = "KOOKY_HOOK_SOCKET"
+
+    public static var legacySocketPath: String {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return support.appendingPathComponent("kooky/socket").path
+    }
+
+    public static var socketPath: String {
+        let env = ProcessInfo.processInfo.environment[socketPathEnvironmentKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return env.isEmpty ? legacySocketPath : env
     }
 
     /// One-shot socket write. Returns true on success. `HookServer` accepts
