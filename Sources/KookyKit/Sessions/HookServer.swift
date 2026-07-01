@@ -39,6 +39,9 @@ enum HookBrowserCommand: Equatable {
     case html(path: String?)
     case links
     case screenshot(path: String?)
+    case credentials
+    case saveCredential
+    case fillCredential(account: String?)
     case click(text: String)
     case clickId(id: String, double: Bool)
     case clickAt(x: Double, y: Double)
@@ -254,6 +257,12 @@ final class HookServer {
                 return .browser(command: .links, sessionId: id)
             case "screenshot":
                 return .browser(command: .screenshot(path: optionalString(dict["path"])), sessionId: id)
+            case "credentials":
+                return .browser(command: .credentials, sessionId: id)
+            case "save-credential":
+                return .browser(command: .saveCredential, sessionId: id)
+            case "fill-credential":
+                return .browser(command: .fillCredential(account: optionalString(dict["account"])), sessionId: id)
             case "click":
                 guard let text = dict["text"] as? String,
                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }

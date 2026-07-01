@@ -317,4 +317,6 @@ private final class TestBrowserEngineForPane: BrowserEngine {
     func elementsJSONLines() async -> String { #"{"id":"e2-button","role":"button","text":"Go"}"# + "\n" }
     func pageSnapshot() async -> String { "snapshot\n" }
     func saveScreenshot(to path: String?) async -> String { (path ?? "/tmp/kooky-browser-test.png") + "\n" }
+    func credentialForm() async -> BrowserCredentialForm? { nil }
+    func fillCredential(_ credential: BrowserCredential) async -> String { "ok filled credential: \(credential.account)\n" }
 }

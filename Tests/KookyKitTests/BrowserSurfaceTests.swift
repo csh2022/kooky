@@ -70,6 +70,8 @@ private final class TestBrowserEngine: BrowserEngine {
     func elementsJSONLines() async -> String { "" }
     func pageSnapshot() async -> String { "" }
     func saveScreenshot(to path: String?) async -> String { "" }
+    func credentialForm() async -> BrowserCredentialForm? { nil }
+    func fillCredential(_ credential: BrowserCredential) async -> String { "" }
 
     func publish(_ snapshot: BrowserEngineSnapshot) {
         self.snapshot = snapshot

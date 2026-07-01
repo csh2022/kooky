@@ -55,6 +55,11 @@ enum KookyHookCommand {
                 payloadObject = KookyHookKit.buildBrowserOpenPayload(surface: surface, address: address)
             } else if ["state", "elements", "text", "links"].contains(command) {
                 payloadObject = KookyHookKit.buildBrowserOutputPayload(surface: surface, command: command)
+            } else if ["credentials", "save-credential"].contains(command) {
+                payloadObject = KookyHookKit.buildBrowserCredentialPayload(surface: surface, command: command)
+            } else if command == "fill-credential" {
+                let account = arguments.dropFirst(3).joined(separator: " ")
+                payloadObject = KookyHookKit.buildBrowserCredentialPayload(surface: surface, command: command, account: account)
             } else if command == "snapshot" || command == "html" || command == "screenshot" {
                 let path = arguments.dropFirst(3).joined(separator: " ")
                 payloadObject = KookyHookKit.buildBrowserOutputPayload(surface: surface, command: command, path: path)

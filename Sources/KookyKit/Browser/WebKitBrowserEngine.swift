@@ -219,6 +219,28 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         }
     }
 
+    func credentialForm() async -> BrowserCredentialForm? {
+        let json = await evaluateString(Self.credentialFormJavaScript())
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let site = object["site"] as? String,
+              let account = object["account"] as? String,
+              let password = object["password"] as? String
+        else { return nil }
+        return BrowserCredentialForm(site: site, account: account, password: password)
+    }
+
+    func fillCredential(_ credential: BrowserCredential) async -> String {
+        guard !credential.account.isEmpty, !credential.password.isEmpty else {
+            return "credential is empty\n"
+        }
+        let result = await evaluateString(Self.fillCredentialJavaScript(
+            account: credential.account,
+            password: credential.password
+        ))
+        return result == "true" ? "ok filled credential: \(credential.account)\n" : "credential form not found\n"
+    }
+
     private func waitForCondition(
         label: String,
         text: String,
@@ -537,6 +559,118 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           if (!setNativeValue(target, value)) return false;
           dispatchInput(target, 'insertText', value);
           target.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })();
+        """
+    }
+
+    private static func credentialFormJavaScript() -> String {
+        """
+        (() => {
+          const visible = (el) => {
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          };
+          const inputs = Array.from(document.querySelectorAll('input')).filter(visible);
+          const password = inputs.find((el) => (el.type || '').toLowerCase() === 'password');
+          if (!password) return '';
+          const usable = (el) => {
+            const type = (el.type || 'text').toLowerCase();
+            return ['text', 'email', 'tel', 'url', 'search', ''].includes(type);
+          };
+          const score = (el) => {
+            const fields = [
+              el.autocomplete,
+              el.name,
+              el.id,
+              el.placeholder,
+              el.getAttribute('aria-label')
+            ].filter(Boolean).join(' ').toLowerCase();
+            if (/user|login|email|account|mail|name|phone|identifier/.test(fields)) return 3;
+            return 1;
+          };
+          const prior = inputs
+            .filter((el) => usable(el))
+            .filter((el) => {
+              const a = el.compareDocumentPosition(password);
+              return Boolean(a & Node.DOCUMENT_POSITION_FOLLOWING);
+            })
+            .sort((a, b) => score(b) - score(a));
+          const account = prior[0] || inputs.find((el) => usable(el));
+          if (!account) return '';
+          return JSON.stringify({
+            site: location.origin || '',
+            account: account.value || '',
+            password: password.value || ''
+          });
+        })();
+        """
+    }
+
+    private static func fillCredentialJavaScript(account: String, password: String) -> String {
+        let account = javaScriptStringLiteral(account)
+        let password = javaScriptStringLiteral(password)
+        return """
+        (() => {
+          const accountValue = \(account);
+          const passwordValue = \(password);
+          const visible = (el) => {
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          };
+          const setNativeValue = (el, next) => {
+            if (!('value' in el)) return false;
+            const proto = el instanceof HTMLTextAreaElement
+              ? HTMLTextAreaElement.prototype
+              : (el instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
+            const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+            if (descriptor && descriptor.set) {
+              descriptor.set.call(el, next);
+            } else {
+              el.value = next;
+            }
+            try {
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: next }));
+            } catch {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          };
+          const inputs = Array.from(document.querySelectorAll('input')).filter(visible);
+          const passwordInput = inputs.find((el) => (el.type || '').toLowerCase() === 'password');
+          if (!passwordInput) return false;
+          const usable = (el) => {
+            const type = (el.type || 'text').toLowerCase();
+            return ['text', 'email', 'tel', 'url', 'search', ''].includes(type);
+          };
+          const score = (el) => {
+            const fields = [
+              el.autocomplete,
+              el.name,
+              el.id,
+              el.placeholder,
+              el.getAttribute('aria-label')
+            ].filter(Boolean).join(' ').toLowerCase();
+            if (/user|login|email|account|mail|name|phone|identifier/.test(fields)) return 3;
+            return 1;
+          };
+          const prior = inputs
+            .filter((el) => usable(el))
+            .filter((el) => Boolean(el.compareDocumentPosition(passwordInput) & Node.DOCUMENT_POSITION_FOLLOWING))
+            .sort((a, b) => score(b) - score(a));
+          const accountInput = prior[0] || inputs.find((el) => usable(el));
+          if (!accountInput) return false;
+          accountInput.scrollIntoView({ block: 'center', inline: 'center' });
+          setNativeValue(accountInput, accountValue);
+          setNativeValue(passwordInput, passwordValue);
+          passwordInput.focus();
           return true;
         })();
         """

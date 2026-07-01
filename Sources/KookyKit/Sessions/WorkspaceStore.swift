@@ -1368,6 +1368,39 @@ final class WorkspaceStore {
         case .screenshot(let path):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             return await browser.surface.engine.saveScreenshot(to: path)
+        case .credentials:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            let site = await browserCredentialSite(for: browser)
+            guard !site.isEmpty else { return "credential site not found\n" }
+            let accounts = KeychainBrowserCredentialVault.shared.accounts(for: site)
+            if accounts.isEmpty { return "no saved credentials for \(site)\n" }
+            return accounts.map { "\(site)\t\($0)" }.joined(separator: "\n") + "\n"
+        case .saveCredential:
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            guard let form = await browser.surface.engine.credentialForm(), form.canSave else {
+                return "credential form not filled\n"
+            }
+            do {
+                try KeychainBrowserCredentialVault.shared.save(BrowserCredential(
+                    site: form.site,
+                    account: form.account,
+                    password: form.password
+                ))
+                return "ok saved credential: \(form.site)\t\(form.account)\n"
+            } catch {
+                return "credential save failed: \(error.localizedDescription)\n"
+            }
+        case .fillCredential(let account):
+            guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            let site = await browserCredentialSite(for: browser)
+            guard !site.isEmpty else { return "credential site not found\n" }
+            let accounts = KeychainBrowserCredentialVault.shared.accounts(for: site)
+            let trimmedAccount = account?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let resolvedAccount = trimmedAccount.isEmpty ? accounts.first : trimmedAccount
+            guard let resolvedAccount,
+                  let credential = KeychainBrowserCredentialVault.shared.credential(site: site, account: resolvedAccount)
+            else { return "credential not found for \(site)\n" }
+            return await browser.surface.engine.fillCredential(credential)
         case .click(let text):
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.click(text: text)
@@ -1453,6 +1486,21 @@ final class WorkspaceStore {
         } catch {
             return "write failed: \(error.localizedDescription)\n"
         }
+    }
+
+    private func browserCredentialSite(for browser: BrowserPane) async -> String {
+        if let form = await browser.surface.engine.credentialForm(), !form.site.isEmpty {
+            return form.site
+        }
+        guard let url = URL(string: browser.surface.snapshot.urlString),
+              let scheme = url.scheme,
+              let host = url.host
+        else { return "" }
+        var site = "\(scheme)://\(host)"
+        if let port = url.port {
+            site += ":\(port)"
+        }
+        return site
     }
 
     @discardableResult

@@ -43,6 +43,15 @@ public enum KookyHookKit {
       Kooky browser screenshot [path]
           Save a PNG screenshot of the visible browser viewport. Prints the saved path.
 
+      Kooky browser credentials
+          List saved accounts for the current page origin. Does not print passwords.
+
+      Kooky browser save-credential
+          Save the current page's filled username/password form to macOS Keychain.
+
+      Kooky browser fill-credential [account]
+          Fill a saved username/password for the current page origin. If account is omitted, uses the first saved account.
+
       Kooky browser click <visible-text>
           Click the first visible link, button, or clickable element whose text contains <visible-text>.
 
@@ -278,6 +287,18 @@ public enum KookyHookKit {
         ]
         if !path.isEmpty {
             payload["path"] = path
+        }
+        return payload
+    }
+
+    public static func buildBrowserCredentialPayload(surface: String, command: String, account: String = "") -> [String: String] {
+        var payload = [
+            "kind": "browser",
+            "surface": surface,
+            "command": command,
+        ]
+        if !account.isEmpty {
+            payload["account"] = account
         }
         return payload
     }
