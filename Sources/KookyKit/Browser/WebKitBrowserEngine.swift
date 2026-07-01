@@ -720,34 +720,129 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         }
         return """
         (() => {
-          window.scrollBy({ left: \(dx), top: \(dy), behavior: 'auto' });
-          const root = document.scrollingElement || document.documentElement || document.body;
-          const x = Math.round(window.scrollX || root.scrollLeft || 0);
-          const y = Math.round(window.scrollY || root.scrollTop || 0);
+          const dx = \(dx);
+          const dy = \(dy);
+          const axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+          const delta = axis === 'x' ? dx : dy;
           const viewportWidth = Math.round(window.innerWidth || document.documentElement.clientWidth || 0);
           const viewportHeight = Math.round(window.innerHeight || document.documentElement.clientHeight || 0);
-          const scrollWidth = Math.round(root.scrollWidth || document.documentElement.scrollWidth || 0);
-          const scrollHeight = Math.round(root.scrollHeight || document.documentElement.scrollHeight || 0);
-          const maxX = Math.max(0, scrollWidth - viewportWidth);
-          const maxY = Math.max(0, scrollHeight - viewportHeight);
-          const atLeft = x <= 1;
-          const atRight = x >= maxX - 1;
-          const atTop = y <= 1;
-          const atBottom = y >= maxY - 1;
+          const root = document.scrollingElement || document.documentElement || document.body;
+          const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+          const visibleArea = (el) => {
+            const r = el.getBoundingClientRect();
+            const w = Math.max(0, Math.min(r.right, viewportWidth) - Math.max(r.left, 0));
+            const h = Math.max(0, Math.min(r.bottom, viewportHeight) - Math.max(r.top, 0));
+            return w * h;
+          };
+          const metrics = (el) => {
+            if (el === root || el === document.documentElement || el === document.body) {
+              const scrollWidth = Math.round(root.scrollWidth || document.documentElement.scrollWidth || 0);
+              const scrollHeight = Math.round(root.scrollHeight || document.documentElement.scrollHeight || 0);
+              return {
+                x: Math.round(window.scrollX || root.scrollLeft || 0),
+                y: Math.round(window.scrollY || root.scrollTop || 0),
+                maxX: Math.max(0, scrollWidth - viewportWidth),
+                maxY: Math.max(0, scrollHeight - viewportHeight),
+                viewportWidth,
+                viewportHeight,
+                scrollWidth,
+                scrollHeight
+              };
+            }
+            return {
+              x: Math.round(el.scrollLeft || 0),
+              y: Math.round(el.scrollTop || 0),
+              maxX: Math.max(0, Math.round((el.scrollWidth || 0) - (el.clientWidth || 0))),
+              maxY: Math.max(0, Math.round((el.scrollHeight || 0) - (el.clientHeight || 0))),
+              viewportWidth: Math.round(el.clientWidth || 0),
+              viewportHeight: Math.round(el.clientHeight || 0),
+              scrollWidth: Math.round(el.scrollWidth || 0),
+              scrollHeight: Math.round(el.scrollHeight || 0)
+            };
+          };
+          const canScrollAxis = (el) => {
+            if (!el) return false;
+            const m = metrics(el);
+            return axis === 'x' ? m.maxX > 1 : m.maxY > 1;
+          };
+          const canMoveAxis = (el) => {
+            const m = metrics(el);
+            const current = axis === 'x' ? m.x : m.y;
+            const max = axis === 'x' ? m.maxX : m.maxY;
+            return delta > 0 ? current < max - 1 : current > 1;
+          };
+          const descriptor = (el) => {
+            if (el === root || el === document.documentElement || el === document.body) return 'window';
+            const tag = (el.tagName || 'element').toLowerCase();
+            const id = el.id ? '#' + el.id : '';
+            const classes = typeof el.className === 'string'
+              ? '.' + el.className.trim().split(/\\s+/).filter(Boolean).slice(0, 3).join('.')
+              : '';
+            return (tag + id + classes).slice(0, 160);
+          };
+          const addCandidate = (list, seen, el) => {
+            for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+              if (seen.has(node)) continue;
+              seen.add(node);
+              if (node === document.documentElement || node === document.body) continue;
+              if (visibleArea(node) <= 0) continue;
+              if (canScrollAxis(node)) list.push(node);
+            }
+          };
+          const seen = new Set();
+          const priority = [];
+          addCandidate(priority, seen, document.activeElement);
+          const points = [
+            [viewportWidth * 0.50, viewportHeight * 0.50],
+            [viewportWidth * 0.75, viewportHeight * 0.50],
+            [viewportWidth * 0.50, viewportHeight * 0.70],
+            [viewportWidth * 0.25, viewportHeight * 0.70],
+            [viewportWidth * 0.90, viewportHeight * 0.50]
+          ];
+          for (const [x, y] of points) {
+            for (const el of (document.elementsFromPoint ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)])) {
+              addCandidate(priority, seen, el);
+            }
+          }
+          const allScrollable = Array.from(document.querySelectorAll('*'))
+            .filter((el) => !seen.has(el) && visibleArea(el) > 0 && canScrollAxis(el))
+            .sort((a, b) => {
+              const ma = metrics(a);
+              const mb = metrics(b);
+              const rangeA = axis === 'x' ? ma.maxX : ma.maxY;
+              const rangeB = axis === 'x' ? mb.maxX : mb.maxY;
+              return (rangeB - rangeA) || (visibleArea(b) - visibleArea(a));
+            });
+          const candidates = priority.concat(allScrollable);
+          const movable = candidates.find(canMoveAxis);
+          const target = movable || candidates[0] || root;
+          const before = metrics(target);
+          if (target === root || target === document.documentElement || target === document.body) {
+            window.scrollBy({ left: dx, top: dy, behavior: 'auto' });
+          } else {
+            target.scrollLeft = clamp((target.scrollLeft || 0) + dx, 0, before.maxX);
+            target.scrollTop = clamp((target.scrollTop || 0) + dy, 0, before.maxY);
+          }
+          const after = metrics(target);
+          const movedX = after.x - before.x;
+          const movedY = after.y - before.y;
           return [
             'ok scrolled \(normalized)',
-            'x: ' + x,
-            'y: ' + y,
-            'maxX: ' + maxX,
-            'maxY: ' + maxY,
-            'viewportWidth: ' + viewportWidth,
-            'viewportHeight: ' + viewportHeight,
-            'scrollWidth: ' + scrollWidth,
-            'scrollHeight: ' + scrollHeight,
-            'atLeft: ' + atLeft,
-            'atRight: ' + atRight,
-            'atTop: ' + atTop,
-            'atBottom: ' + atBottom
+            'target: ' + descriptor(target),
+            'movedX: ' + movedX,
+            'movedY: ' + movedY,
+            'x: ' + after.x,
+            'y: ' + after.y,
+            'maxX: ' + after.maxX,
+            'maxY: ' + after.maxY,
+            'viewportWidth: ' + after.viewportWidth,
+            'viewportHeight: ' + after.viewportHeight,
+            'scrollWidth: ' + after.scrollWidth,
+            'scrollHeight: ' + after.scrollHeight,
+            'atLeft: ' + (after.x <= 1),
+            'atRight: ' + (after.x >= after.maxX - 1),
+            'atTop: ' + (after.y <= 1),
+            'atBottom: ' + (after.y >= after.maxY - 1)
           ].join('\\n');
         })();
         """

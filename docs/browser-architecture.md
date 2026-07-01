@@ -158,6 +158,9 @@ WKWebView:
 - `click`, `click-id`, `click-at`, `fill`, `fill-id`, `clear`, `type`,
   `paste`, `press`, `hotkey`, `scroll`, `hover`, and `wait` cover the common
   interaction loop.
+- `scroll` first targets a visible internal scroll container that can move in
+  the requested direction, then falls back to the page viewport. Its CLI output
+  reports the actual target and scroll position.
 - `console`, `network`, `performance_trace`, `upload_file`, and dialog handling
   remain explicit follow-up work because they need WebKit delegate-backed
   collection or file-input handling.

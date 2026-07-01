@@ -74,7 +74,7 @@ public enum KookyHookKit {
           Press a browser/page shortcut such as Meta+L, Meta+R, Meta+F, Escape, or Enter.
 
       Kooky browser scroll <up|down|left|right> [amount]
-          Scroll the page and print viewport position. Amount is optional pixels; default is about one viewport.
+          Scroll the nearest page or internal scroll container and print its position. Amount is optional pixels; default is about one viewport.
 
       Kooky browser hover <element-id>
           Move hover/focus state to an element id returned by snapshot/elements.
