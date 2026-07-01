@@ -194,6 +194,7 @@ final class KookyHookKitTests: XCTestCase {
         XCTAssertTrue(help.contains("browser press <key>"))
         XCTAssertTrue(help.contains("browser hotkey <combo>"))
         XCTAssertTrue(help.contains("browser scroll <up|down|left|right> [amount]"))
+        XCTAssertTrue(help.contains("nearest page or internal scroll container"))
         XCTAssertTrue(help.contains("browser hover <element-id>"))
         XCTAssertTrue(help.contains("browser wait <text> [timeout-ms]"))
         XCTAssertTrue(help.contains("browser wait-url <url-substring> [timeout-ms]"))
