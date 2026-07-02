@@ -1719,7 +1719,7 @@ private struct SplitContainer: View {
     @State private var isHandleDragging = false
 
     private static let dividerThickness: CGFloat = 1
-    private static let handleHitSize: CGFloat = 14
+    private static let handleHitSize: CGFloat = 28
     private static let minFraction: Double = 0.1
     private static let maxFraction: Double = 0.9
 
@@ -1801,12 +1801,18 @@ private struct SplitContainer: View {
                             isDragging: isHandleDragging
                         ) { hovered in
                             isHandleHovered = hovered
+                        } onDragStarted: {
+                            beginResizeDrag()
+                        } onDragChanged: { translation in
+                            updateResizeDrag(orientation: orientation, total: total, translation: translation)
+                        } onDragEnded: {
+                            endResizeDrag()
                         }
                             .frame(width: Self.handleHitSize, height: geo.size.height)
                             .offset(x: handleOffset, y: 0)
                             .opacity(chromeVisible)
                             .allowsHitTesting(!isZoomedAcrossThisSplit)
-                            .gesture(dragGesture(orientation: orientation, total: total))
+                            .zIndex(10)
                     } else {
                         VStack(spacing: 0) {
                             PaneTreeView(node: first, workspace: workspace, store: store)
@@ -1830,12 +1836,18 @@ private struct SplitContainer: View {
                             isDragging: isHandleDragging
                         ) { hovered in
                             isHandleHovered = hovered
+                        } onDragStarted: {
+                            beginResizeDrag()
+                        } onDragChanged: { translation in
+                            updateResizeDrag(orientation: orientation, total: total, translation: translation)
+                        } onDragEnded: {
+                            endResizeDrag()
                         }
                             .frame(width: geo.size.width, height: Self.handleHitSize)
                             .offset(x: 0, y: handleOffset)
                             .opacity(chromeVisible)
                             .allowsHitTesting(!isZoomedAcrossThisSplit)
-                            .gesture(dragGesture(orientation: orientation, total: total))
+                            .zIndex(10)
                     }
                 }
                 .clipped()
@@ -1849,26 +1861,26 @@ private struct SplitContainer: View {
         )
     }
 
-    private func dragGesture(orientation: SplitOrientation, total: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                guard case .split(let orient, let f, let s, let current) = node.content else { return }
-                if dragStartFraction == nil {
-                    dragStartFraction = current
-                    isHandleDragging = true
-                }
-                let translation = orientation == .horizontal ? value.translation.width : value.translation.height
-                let delta = total > 0 ? Double(translation) / Double(total) : 0
-                let proposed = (dragStartFraction ?? current) + delta
-                let clamped = min(max(proposed, Self.minFraction), Self.maxFraction)
-                guard abs(clamped - current) > .ulpOfOne else { return }
-                node.content = .split(orientation: orient, first: f, second: s, fraction: clamped)
-            }
-            .onEnded { _ in
-                dragStartFraction = nil
-                isHandleDragging = false
-                store.flushPersistence()
-            }
+    private func beginResizeDrag() {
+        guard case .split(_, _, _, let current) = node.content else { return }
+        dragStartFraction = current
+        isHandleDragging = true
+    }
+
+    private func updateResizeDrag(orientation: SplitOrientation, total: CGFloat, translation: CGFloat) {
+        guard case .split(let orient, let f, let s, let current) = node.content else { return }
+        if dragStartFraction == nil { beginResizeDrag() }
+        let delta = total > 0 ? Double(translation) / Double(total) : 0
+        let proposed = (dragStartFraction ?? current) + delta
+        let clamped = min(max(proposed, Self.minFraction), Self.maxFraction)
+        guard abs(clamped - current) > .ulpOfOne else { return }
+        node.content = .split(orientation: orient, first: f, second: s, fraction: clamped)
+    }
+
+    private func endResizeDrag() {
+        dragStartFraction = nil
+        isHandleDragging = false
+        store.flushPersistence()
     }
 }
 
@@ -1877,28 +1889,25 @@ private struct DividerHandle: View {
     let isActive: Bool
     let isDragging: Bool
     let onHoverChanged: (Bool) -> Void
+    let onDragStarted: () -> Void
+    let onDragChanged: (CGFloat) -> Void
+    let onDragEnded: () -> Void
 
     var body: some View {
         ZStack {
-            Rectangle()
-                .fill(Color.white.opacity(0.001))
+            DividerHitTarget(
+                orientation: orientation,
+                onHoverChanged: onHoverChanged,
+                onDragStarted: onDragStarted,
+                onDragChanged: onDragChanged,
+                onDragEnded: onDragEnded
+            )
             dividerAffordance
+                .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
         .animation(.easeOut(duration: 0.12), value: isActive)
         .animation(.easeOut(duration: 0.12), value: isDragging)
-        .onHover { isHovered in
-            onHoverChanged(isHovered)
-            if isHovered {
-                if orientation == .horizontal {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.resizeUpDown.push()
-                }
-            } else {
-                NSCursor.pop()
-            }
-        }
     }
 
     @ViewBuilder
@@ -1913,6 +1922,151 @@ private struct DividerHandle: View {
             Rectangle()
                 .fill(Theme.chromeForeground.opacity(opacity))
                 .frame(height: thickness)
+        }
+    }
+}
+
+private struct DividerHitTarget: NSViewRepresentable {
+    let orientation: SplitOrientation
+    let onHoverChanged: (Bool) -> Void
+    let onDragStarted: () -> Void
+    let onDragChanged: (CGFloat) -> Void
+    let onDragEnded: () -> Void
+
+    func makeNSView(context: Context) -> DividerHitTargetView {
+        let view = DividerHitTargetView()
+        updateNSView(view, context: context)
+        return view
+    }
+
+    func updateNSView(_ nsView: DividerHitTargetView, context: Context) {
+        nsView.orientation = orientation
+        nsView.onHoverChanged = onHoverChanged
+        nsView.onDragStarted = onDragStarted
+        nsView.onDragChanged = onDragChanged
+        nsView.onDragEnded = onDragEnded
+    }
+}
+
+@MainActor
+private final class DividerHitTargetView: NSView {
+    var orientation: SplitOrientation = .horizontal {
+        didSet {
+            guard orientation != oldValue else { return }
+            window?.invalidateCursorRects(for: self)
+            if isHovering || dragStartLocationInWindow != nil {
+                applyResizeCursor()
+            }
+        }
+    }
+    var onHoverChanged: ((Bool) -> Void)?
+    var onDragStarted: (() -> Void)?
+    var onDragChanged: ((CGFloat) -> Void)?
+    var onDragEnded: (() -> Void)?
+
+    private var dragStartLocationInWindow: NSPoint?
+    private var isHovering = false {
+        didSet {
+            guard isHovering != oldValue else { return }
+            onHoverChanged?(isHovering)
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        let options: NSTrackingArea.Options = [
+            .activeAlways,
+            .mouseEnteredAndExited,
+            .mouseMoved,
+            .cursorUpdate,
+            .inVisibleRect,
+        ]
+        addTrackingArea(NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil))
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: resizeCursor)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point), shouldCaptureEvent(NSApp.currentEvent?.type) else { return nil }
+        return self
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        applyResizeCursor()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        applyResizeCursor()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        applyResizeCursor()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if dragStartLocationInWindow == nil {
+            isHovering = false
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        dragStartLocationInWindow = event.locationInWindow
+        isHovering = true
+        applyResizeCursor()
+        onDragStarted?()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = dragStartLocationInWindow else { return }
+        let current = event.locationInWindow
+        let translation = orientation == .horizontal ? current.x - start.x : start.y - current.y
+        applyResizeCursor()
+        onDragChanged?(translation)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragStartLocationInWindow = nil
+        isHovering = bounds.contains(convert(event.locationInWindow, from: nil))
+        if isHovering {
+            applyResizeCursor()
+        }
+        onDragEnded?()
+    }
+
+    private var resizeCursor: NSCursor {
+        orientation == .horizontal ? .resizeLeftRight : .resizeUpDown
+    }
+
+    private func applyResizeCursor() {
+        resizeCursor.set()
+    }
+
+    private func shouldCaptureEvent(_ eventType: NSEvent.EventType?) -> Bool {
+        switch eventType {
+        case .scrollWheel, .rightMouseDown, .rightMouseDragged, .rightMouseUp:
+            return false
+        default:
+            return true
         }
     }
 }
