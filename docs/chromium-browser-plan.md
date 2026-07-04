@@ -37,8 +37,9 @@ inside the existing pane model.
 
 ## Product Behavior
 
-- Default engine remains WebKit.
-- `KOOKY_BROWSER_ENGINE=chromium` selects the Chromium path.
+- Default engine is Chromium.
+- Chromium is the default built-in browser engine.
+- `KOOKY_BROWSER_ENGINE=webkit` selects the legacy WebKit path.
 - Until CEF is bundled, selecting Chromium shows an explicit unavailable engine
   instead of falling back silently.
 - When CEF is ready, Chromium uses a Kooky-owned persistent profile directory.
@@ -50,7 +51,7 @@ inside the existing pane model.
 ### Stage 1: Engine Selection Scaffold
 
 - Add `BrowserEngineProvider`.
-- Keep WebKit as the default.
+- Make Chromium the default while keeping WebKit selectable as a fallback.
 - Add an explicit unavailable Chromium engine for builds without CEF.
 - Add unit tests for engine selection.
 
@@ -95,7 +96,7 @@ inside the existing pane model.
 
 - Run unit tests.
 - Build the app bundle.
-- Launch Kooky with WebKit default and Chromium selected.
+- Launch Kooky with Chromium default and WebKit selected.
 - Verify a real page renders, snapshot/text/elements/screenshot work, and the
   app exits cleanly.
 - Verify Google Search behavior, including whether result count appears for an

@@ -3,10 +3,10 @@ import XCTest
 
 @MainActor
 final class BrowserEngineProviderTests: XCTestCase {
-    func testDefaultProviderUsesWebKitWhenEnvironmentIsUnset() {
+    func testDefaultProviderUsesChromiumWhenEnvironmentIsUnset() {
         let provider = BrowserEngineProvider.defaultProvider(environment: [:])
 
-        XCTAssertEqual(provider.kind, .webKit)
+        XCTAssertEqual(provider.kind, .chromium)
     }
 
     func testDefaultProviderAcceptsChromiumAndCefAliases() {
@@ -20,10 +20,10 @@ final class BrowserEngineProviderTests: XCTestCase {
         )
     }
 
-    func testDefaultProviderFallsBackToWebKitForUnknownValues() {
+    func testDefaultProviderFallsBackToChromiumForUnknownValues() {
         let provider = BrowserEngineProvider.defaultProvider(environment: ["KOOKY_BROWSER_ENGINE": "unknown"])
 
-        XCTAssertEqual(provider.kind, .webKit)
+        XCTAssertEqual(provider.kind, .chromium)
     }
 
     func testChromiumSelectionCreatesExplicitUnavailableEngineUntilCefIsBundled() {

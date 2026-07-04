@@ -22,7 +22,7 @@ struct BrowserEngineProvider: Equatable {
 
     static func defaultProvider(environment: [String: String] = ProcessInfo.processInfo.environment) -> BrowserEngineProvider {
         let rawKind = environment["KOOKY_BROWSER_ENGINE"] ?? ""
-        return BrowserEngineProvider(kind: BrowserEngineKind(rawValue: rawKind) ?? .webKit)
+        return BrowserEngineProvider(kind: BrowserEngineKind(rawValue: rawKind) ?? .chromium)
     }
 
     @MainActor
