@@ -277,7 +277,11 @@ void OnAddressChange(
     cef_frame_t*,
     const cef_string_t* url) {
   auto* owner = OwnerFromDisplay(self);
-  owner->url = CefStringToStdString(url);
+  std::string next_url = CefStringToStdString(url);
+  if (next_url == "about:blank" && !owner->url.empty() && owner->url != "about:blank") {
+    return;
+  }
+  owner->url = next_url;
   Publish(owner);
 }
 
