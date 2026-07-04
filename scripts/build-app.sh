@@ -58,6 +58,7 @@ cp .build/release/Kooky "${APP}/Contents/MacOS/${APP_NAME}"
 cp -R .build/release/Kooky_KookyKit.bundle "${APP}/Contents/Resources/"
 
 CEF_VENDOR_DIR="${ROOT}/Vendor/CEF/current"
+CEF_BRIDGE_DIR="${ROOT}/Vendor/CEFBridge/current"
 if [ -d "$CEF_VENDOR_DIR" ]; then
     echo "==> Bundling CEF from ${CEF_VENDOR_DIR}"
     [ -d "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" ] || {
@@ -75,6 +76,12 @@ if [ -d "$CEF_VENDOR_DIR" ]; then
         for helper in "${CEF_HELPERS[@]}"; do
             cp -R "$helper" "${APP}/Contents/Frameworks/"
         done
+    fi
+    if [ -d "${CEF_BRIDGE_DIR}/KookyCEFBridge.framework" ]; then
+        echo "==> Bundling KookyCEFBridge from ${CEF_BRIDGE_DIR}"
+        cp -R "${CEF_BRIDGE_DIR}/KookyCEFBridge.framework" "${APP}/Contents/Frameworks/"
+    else
+        echo "warning: CEF framework present but KookyCEFBridge.framework is missing; Chromium engine will not launch yet" >&2
     fi
 fi
 
@@ -210,6 +217,9 @@ if [ -d "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework" ]; th
         for helper in "${BUNDLED_CEF_HELPERS[@]}"; do
             codesign --force --deep --sign - "$helper"
         done
+    fi
+    if [ -d "${APP}/Contents/Frameworks/KookyCEFBridge.framework" ]; then
+        codesign --force --deep --sign - "${APP}/Contents/Frameworks/KookyCEFBridge.framework"
     fi
     codesign --force --deep --sign - "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
 fi

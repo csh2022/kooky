@@ -73,6 +73,9 @@ inside the existing pane model.
 
 ### Stage 3: Native Bridge
 
+- Build `KookyCEFBridge.framework` outside the default SwiftPM target graph so
+  developers without `Vendor/CEF` can still build Kooky normally.
+- Bundle that bridge from `Vendor/CEFBridge/current` when it exists.
 - Add an Objective-C++ CEF bridge target that owns CEF initialization, shutdown,
   browser creation, and the native browser `NSView`.
 - Implement `ChromiumBrowserEngine` in Swift as a thin adapter over the bridge.
