@@ -177,6 +177,42 @@ final class BrowserPaneLifecycleTests: XCTestCase {
         XCTAssertEqual(engine.stopCount, 1)
     }
 
+    func testBrowserStateAndHistoryCommandsReportNavigationAvailability() async {
+        let engines = BrowserEnginePool()
+        let store = makeStore(browserEngines: engines)
+        let workspace = try! XCTUnwrap(store.active)
+        let agentId = try! XCTUnwrap(workspace.activeSession?.id)
+
+        await store.applyBrowserCommand(.open(address: "example.com"), sessionId: agentId)
+        let engine = try! XCTUnwrap(engines.created.first)
+        engine.snapshot = BrowserEngineSnapshot(
+            title: "Result",
+            urlString: "https://example.com/result",
+            canGoBack: true,
+            canGoForward: false,
+            isLoading: false,
+            errorMessage: nil
+        )
+        engine.onSnapshotChange?(engine.snapshot)
+
+        let stateResult = await store.applyBrowserCommand(.state, sessionId: agentId)
+        let state = try! XCTUnwrap(stateResult)
+        XCTAssertTrue(state.contains("canGoBack: true"))
+        XCTAssertTrue(state.contains("canGoForward: false"))
+
+        let backResult = await store.applyBrowserCommand(.back, sessionId: agentId)
+        let back = try! XCTUnwrap(backResult)
+        XCTAssertTrue(back.contains("ok back requested"))
+        XCTAssertTrue(back.contains("canGoBack: true"))
+        XCTAssertEqual(engine.goBackCount, 1)
+
+        let forwardResult = await store.applyBrowserCommand(.forward, sessionId: agentId)
+        let forward = try! XCTUnwrap(forwardResult)
+        XCTAssertTrue(forward.contains("forward unavailable: canGoForward false"))
+        XCTAssertTrue(forward.contains("canGoForward: false"))
+        XCTAssertEqual(engine.goForwardCount, 1)
+    }
+
     func testAutoCloseRemovesAgentOwnedBrowser() {
         let store = makeStore()
         let workspace = try! XCTUnwrap(store.active)

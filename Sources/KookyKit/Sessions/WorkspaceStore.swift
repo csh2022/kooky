@@ -1454,12 +1454,20 @@ final class WorkspaceStore {
             return await browser.surface.engine.waitForTitle(text, timeoutMilliseconds: timeoutMilliseconds)
         case .back:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            let before = browser.surface.snapshot
             browser.surface.engine.goBack()
-            return "ok back\n"
+            return browserStateDescription(
+                browser,
+                prefix: before.canGoBack ? "ok back requested" : "back unavailable: canGoBack false"
+            )
         case .forward:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
+            let before = browser.surface.snapshot
             browser.surface.engine.goForward()
-            return "ok forward\n"
+            return browserStateDescription(
+                browser,
+                prefix: before.canGoForward ? "ok forward requested" : "forward unavailable: canGoForward false"
+            )
         case .reload:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             browser.surface.engine.reload()
@@ -1539,12 +1547,16 @@ final class WorkspaceStore {
         return nil
     }
 
-    private func browserStateDescription(_ browser: BrowserPane) -> String {
+    private func browserStateDescription(_ browser: BrowserPane, prefix: String? = nil) -> String {
         let snapshot = browser.surface.snapshot
+        let header = prefix.map { "\($0)\n" } ?? ""
         return """
+        \(header)\
         title: \(snapshot.title)
         url: \(snapshot.urlString)
         loading: \(snapshot.isLoading)
+        canGoBack: \(snapshot.canGoBack)
+        canGoForward: \(snapshot.canGoForward)
 
         """
     }

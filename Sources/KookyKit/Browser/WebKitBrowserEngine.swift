@@ -422,9 +422,11 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         let event = double ? "dblclick" : "click"
         return """
         (() => {
+          \(domUtilityJavaScript())
           const target = window.__kookyElementById && window.__kookyElementById(\(id));
           if (!target) return false;
           target.scrollIntoView({ block: 'center', inline: 'center' });
+          if (!window.__kookyVisible(target)) return false;
           target.focus && target.focus();
           target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
           target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
@@ -527,9 +529,12 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         let value = javaScriptStringLiteral(text)
         return """
         (() => {
+          \(domUtilityJavaScript())
           const target = window.__kookyElementById && window.__kookyElementById(\(id));
           const value = \(value);
           if (!target) return false;
+          target.scrollIntoView({ block: 'center', inline: 'center' });
+          if (!window.__kookyVisible(target)) return false;
           const dispatchInput = (el, inputType, data) => {
             try {
               el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data }));
@@ -554,7 +559,6 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             }
             return true;
           };
-          target.scrollIntoView({ block: 'center', inline: 'center' });
           target.focus && target.focus();
           if (!setNativeValue(target, value)) return false;
           dispatchInput(target, 'insertText', value);
@@ -960,9 +964,16 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           const after = metrics(target);
           const movedX = after.x - before.x;
           const movedY = after.y - before.y;
+          const moved = Math.abs(movedX) > 0 || Math.abs(movedY) > 0;
+          const reason = moved
+            ? 'moved'
+            : (axis === 'x'
+              ? (before.maxX <= 1 ? 'no horizontal scroll range' : (delta > 0 ? 'already at right edge' : 'already at left edge'))
+              : (before.maxY <= 1 ? 'no vertical scroll range' : (delta > 0 ? 'already at bottom edge' : 'already at top edge')));
           return [
-            'ok scrolled \(normalized)',
+            (moved ? 'ok scrolled \(normalized)' : 'no scroll movement \(normalized)'),
             'target: ' + descriptor(target),
+            'reason: ' + reason,
             'movedX: ' + movedX,
             'movedY: ' + movedY,
             'x: ' + after.x,
@@ -986,9 +997,11 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         let id = javaScriptStringLiteral(id)
         return """
         (() => {
+          \(domUtilityJavaScript())
           const target = window.__kookyElementById && window.__kookyElementById(\(id));
           if (!target) return false;
           target.scrollIntoView({ block: 'center', inline: 'center' });
+          if (!window.__kookyVisible(target)) return false;
           target.focus && target.focus();
           target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
           target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window }));
@@ -1044,7 +1057,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
 
     static func domUtilityJavaScript() -> String {
         """
-        window.__kookyElementId = window.__kookyElementId || ((el) => {
+        window.__kookyElementId = ((el) => {
           if (el.getAttribute && el.getAttribute('data-kooky-id')) return el.getAttribute('data-kooky-id');
           const all = Array.from(document.querySelectorAll('*'));
           const tag = (el.tagName || 'el').toLowerCase();
@@ -1052,19 +1065,21 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           try { el.setAttribute('data-kooky-id', id); } catch {}
           return id;
         });
-        window.__kookyElementById = window.__kookyElementById || ((id) => {
+        window.__kookyElementById = ((id) => {
           if (!id) return null;
           const direct = document.querySelector(`[data-kooky-id="${CSS.escape(id)}"]`);
-          if (direct) return direct;
-          const match = /^e(\\d+)-/.exec(id);
+          const match = /^e(\\d+)-([a-z0-9-]+)$/i.exec(id);
+          if (direct && (!match || (direct.tagName || '').toLowerCase() === match[2].toLowerCase())) return direct;
           if (!match) return null;
-          return Array.from(document.querySelectorAll('*'))[Number(match[1]) - 1] || null;
+          const candidate = Array.from(document.querySelectorAll('*'))[Number(match[1]) - 1] || null;
+          if (!candidate) return null;
+          return (candidate.tagName || '').toLowerCase() === match[2].toLowerCase() ? candidate : null;
         });
-        window.__kookyRect = window.__kookyRect || ((el) => {
+        window.__kookyRect = ((el) => {
           const r = el.getBoundingClientRect();
           return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
         });
-        window.__kookyVisible = window.__kookyVisible || ((el) => {
+        window.__kookyVisible = ((el) => {
           const style = window.getComputedStyle(el);
           if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return false;
           const r = el.getBoundingClientRect();
@@ -1073,14 +1088,14 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           return r.width > 0 && r.height > 0 && r.bottom >= 0 && r.right >= 0 &&
             r.top <= vh && r.left <= vw;
         });
-        window.__kookyElementText = window.__kookyElementText || ((el) => [
+        window.__kookyElementText = ((el) => [
           el.innerText,
           el.textContent,
           el.getAttribute && el.getAttribute('aria-label'),
           el.getAttribute && el.getAttribute('title'),
           el.getAttribute && el.getAttribute('name')
         ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 240));
-        window.__kookyRole = window.__kookyRole || ((el) => {
+        window.__kookyRole = ((el) => {
           if (el.getAttribute && el.getAttribute('role')) return el.getAttribute('role');
           const tag = (el.tagName || '').toLowerCase();
           if (tag === 'a') return 'link';
@@ -1091,7 +1106,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           if (el.isContentEditable) return 'textbox';
           return tag;
         });
-        window.__kookyVisibleElements = window.__kookyVisibleElements || ((selector) => {
+        window.__kookyVisibleElements = ((selector) => {
           const seen = new Set();
           return Array.from(document.querySelectorAll(selector)).filter((el) => {
             if (seen.has(el) || !window.__kookyVisible(el)) return false;

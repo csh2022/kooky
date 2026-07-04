@@ -124,6 +124,8 @@ constexpr const char* kEvalMessageName = "KookyEval";
 constexpr const char* kEvalResultMessageName = "KookyEvalResult";
 constexpr const char* kEvalContextNotReadyResult = "__KOOKY_CONTEXT_NOT_READY__";
 
+void KickMessagePump(int64_t delay_ms = 0);
+
 bool DebugLoggingEnabled() {
   const char* value = getenv("KOOKY_CEF_DEBUG");
   return value && value[0] && strcmp(value, "0") != 0;
@@ -316,10 +318,31 @@ void Publish(KookyCEFBrowser* owner) {
       owner->is_loading);
 }
 
+bool ShouldKeepPumping() {
+  std::lock_guard<std::mutex> map_lock(g_browser_map_mutex);
+  for (const auto& entry : g_browsers_by_id) {
+    auto* owner = entry.second;
+    if (!owner || owner->closing) {
+      continue;
+    }
+    if (owner->is_loading) {
+      return true;
+    }
+    std::lock_guard<std::mutex> eval_lock(owner->eval_mutex);
+    if (!owner->evaluations.empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void LoadURLOnBrowser(KookyCEFBrowser* owner, const char* url) {
   if (!owner || !owner->browser) {
     return;
   }
+  owner->is_loading = 1;
+  Publish(owner);
+  KickMessagePump();
   auto* frame = owner->browser->get_main_frame(owner->browser);
   if (!frame) {
     return;
@@ -524,8 +547,10 @@ void RunScheduledMessagePumpWork(NSTimer* timer) {
   if (g_initialized) {
     cef_do_message_loop_work();
   }
-  if (g_initialized && g_message_loop_burst_remaining > 0) {
-    --g_message_loop_burst_remaining;
+  if (g_initialized && (g_message_loop_burst_remaining > 0 || ShouldKeepPumping())) {
+    if (g_message_loop_burst_remaining > 0) {
+      --g_message_loop_burst_remaining;
+    }
     g_message_loop_timer = [NSTimer scheduledTimerWithTimeInterval:0.01
                                                            repeats:NO
                                                              block:^(NSTimer* nextTimer) {
@@ -542,7 +567,7 @@ void ScheduleMessagePumpWorkOnMain(int64_t delay_ms) {
     [g_message_loop_timer invalidate];
     g_message_loop_timer = nil;
   }
-  g_message_loop_burst_remaining = 100;
+  g_message_loop_burst_remaining = 300;
   if (delay_ms <= 0) {
     cef_do_message_loop_work();
     --g_message_loop_burst_remaining;
@@ -560,10 +585,14 @@ void ScheduleMessagePumpWorkOnMain(int64_t delay_ms) {
                                                            }];
 }
 
-void OnScheduleMessagePumpWork(cef_browser_process_handler_t*, int64_t delay_ms) {
+void KickMessagePump(int64_t delay_ms) {
   dispatch_async(dispatch_get_main_queue(), ^{
     ScheduleMessagePumpWorkOnMain(delay_ms);
   });
+}
+
+void OnScheduleMessagePumpWork(cef_browser_process_handler_t*, int64_t delay_ms) {
+  KickMessagePump(delay_ms);
 }
 
 void OnContextCreated(
@@ -695,6 +724,7 @@ void OnAddressChange(
     cef_frame_t*,
     const cef_string_t* url) {
   auto* owner = OwnerFromDisplay(self);
+  DebugLog("address changed");
   std::string next_url = CefStringToStdString(url);
   if (next_url == "about:blank" && !owner->url.empty() && owner->url != "about:blank") {
     return;
@@ -705,12 +735,14 @@ void OnAddressChange(
 
 void OnTitleChange(cef_display_handler_t* self, cef_browser_t*, const cef_string_t* title) {
   auto* owner = OwnerFromDisplay(self);
+  DebugLog("title changed");
   owner->title = CefStringToStdString(title);
   Publish(owner);
 }
 
 void OnAfterCreated(cef_life_span_handler_t* self, cef_browser_t* browser) {
   auto* owner = OwnerFromLifeSpan(self);
+  DebugLog("browser created");
   owner->browser = browser;
   if (browser && browser->base.add_ref) {
     browser->base.add_ref(&browser->base);
@@ -778,10 +810,12 @@ void OnLoadingStateChange(
     int canGoBack,
     int canGoForward) {
   auto* owner = OwnerFromLoad(self);
+  DebugLog(isLoading ? "loading started" : "loading finished");
   owner->is_loading = isLoading;
   owner->can_go_back = canGoBack;
   owner->can_go_forward = canGoForward;
   Publish(owner);
+  KickMessagePump();
 }
 
 KookyCEFClient* MakeClient(KookyCEFBrowser* owner) {
@@ -863,6 +897,7 @@ int KookyCEFInitialize(const char* cache_path) {
   settings.size = sizeof(settings);
   settings.no_sandbox = 1;
   settings.external_message_pump = 1;
+  settings.command_line_args_disabled = 1;
   SetCefString(&settings.user_agent_product, "KookyChromium/1.0");
   std::string helper_path = HelperExecutablePath();
   if (!helper_path.empty()) {
@@ -984,9 +1019,11 @@ void KookyCEFLoadURL(void* browser, const char* url) {
     return;
   }
   owner->url = url ? url : "about:blank";
+  owner->is_loading = 1;
   if (!owner->browser) {
     owner->pending_url = owner->url;
     Publish(owner);
+    KickMessagePump();
     return;
   }
   LoadURLOnBrowser(owner, owner->url.c_str());
@@ -995,6 +1032,9 @@ void KookyCEFLoadURL(void* browser, const char* url) {
 void KookyCEFReload(void* browser) {
   auto* owner = reinterpret_cast<KookyCEFBrowser*>(browser);
   if (owner && owner->browser) {
+    owner->is_loading = 1;
+    Publish(owner);
+    KickMessagePump();
     owner->browser->reload(owner->browser);
   }
 }
@@ -1003,12 +1043,16 @@ void KookyCEFStopLoading(void* browser) {
   auto* owner = reinterpret_cast<KookyCEFBrowser*>(browser);
   if (owner && owner->browser) {
     owner->browser->stop_load(owner->browser);
+    KickMessagePump();
   }
 }
 
 void KookyCEFGoBack(void* browser) {
   auto* owner = reinterpret_cast<KookyCEFBrowser*>(browser);
   if (owner && owner->browser && owner->browser->can_go_back(owner->browser)) {
+    owner->is_loading = 1;
+    Publish(owner);
+    KickMessagePump();
     owner->browser->go_back(owner->browser);
   }
 }
@@ -1016,6 +1060,9 @@ void KookyCEFGoBack(void* browser) {
 void KookyCEFGoForward(void* browser) {
   auto* owner = reinterpret_cast<KookyCEFBrowser*>(browser);
   if (owner && owner->browser && owner->browser->can_go_forward(owner->browser)) {
+    owner->is_loading = 1;
+    Publish(owner);
+    KickMessagePump();
     owner->browser->go_forward(owner->browser);
   }
 }
@@ -1066,9 +1113,11 @@ void KookyCEFEvaluateJavaScript(
     args->set_string(args, 1, &source);
     cef_string_clear(&source);
     frame->send_process_message(frame, PID_RENDERER, message);
+    KickMessagePump();
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
       FinishEvaluation(owner, message_id, kEvalContextNotReadyResult);
+      KickMessagePump();
     });
   });
 }

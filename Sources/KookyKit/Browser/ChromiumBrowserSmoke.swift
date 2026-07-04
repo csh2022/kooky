@@ -89,9 +89,10 @@ public enum ChromiumBrowserSmoke {
             log("agent smoke loading \(url.absoluteString)")
             engine.load(request)
             guard waitUntil(timeout: 15, predicate: {
-                !engine.snapshot.isLoading
-                    && !engine.snapshot.urlString.isEmpty
+                !engine.snapshot.urlString.isEmpty
                     && engine.snapshot.urlString != "about:blank"
+                    && ((try? runAsync("preload text", timeout: 2) { await engine.pageText() }) ?? "")
+                        .contains("Kooky Browser Agent Test")
             }) else {
                 fputs("agent smoke failed: page did not load\n", stderr)
                 return 1
@@ -199,9 +200,10 @@ public enum ChromiumBrowserSmoke {
             window.orderFrontRegardless()
 
             guard waitUntil(timeout: 15, predicate: {
-                !browser.surface.snapshot.isLoading
-                    && !browser.surface.snapshot.urlString.isEmpty
+                !browser.surface.snapshot.urlString.isEmpty
                     && browser.surface.snapshot.urlString != "about:blank"
+                    && ((try? command("preload text", .text)) ?? "")
+                        .contains("Kooky Browser Agent Test")
             }) else {
                 throw SmokeFailure("page did not load")
             }

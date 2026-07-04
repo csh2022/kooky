@@ -15,6 +15,7 @@ final class ChromiumBrowserEngine: BrowserEngine {
     private var pendingRequest: BrowserLoadRequest?
     private var didInitializeCEF = false
     private var browserCreationFailed = false
+    private var readyProbeGeneration = 0
     private var currentSnapshot = BrowserEngineSnapshot(
         title: "Chromium",
         urlString: "",
@@ -65,11 +66,15 @@ final class ChromiumBrowserEngine: BrowserEngine {
         currentSnapshot.urlString = request.url.absoluteString
         currentSnapshot.isLoading = true
         apply(currentSnapshot)
+        scheduleDocumentReadyProbe()
     }
 
     func reload() {
         guard let browser else { return }
         bridge.reload(browser.raw)
+        currentSnapshot.isLoading = true
+        apply(currentSnapshot)
+        scheduleDocumentReadyProbe()
     }
 
     func stopLoading() {
@@ -80,11 +85,17 @@ final class ChromiumBrowserEngine: BrowserEngine {
     func goBack() {
         guard currentSnapshot.canGoBack, let browser else { return }
         bridge.goBack(browser.raw)
+        currentSnapshot.isLoading = true
+        apply(currentSnapshot)
+        scheduleDocumentReadyProbe()
     }
 
     func goForward() {
         guard currentSnapshot.canGoForward, let browser else { return }
         bridge.goForward(browser.raw)
+        currentSnapshot.isLoading = true
+        apply(currentSnapshot)
+        scheduleDocumentReadyProbe()
     }
 
     func click(text: String) {
@@ -258,6 +269,45 @@ final class ChromiumBrowserEngine: BrowserEngine {
     private func apply(_ snapshot: BrowserEngineSnapshot) {
         currentSnapshot = snapshot
         onSnapshotChange?(snapshot)
+        if snapshot.isLoading {
+            scheduleDocumentReadyProbe()
+        }
+    }
+
+    private func scheduleDocumentReadyProbe() {
+        readyProbeGeneration &+= 1
+        let generation = readyProbeGeneration
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for _ in 0..<80 {
+                guard generation == self.readyProbeGeneration,
+                      self.currentSnapshot.isLoading,
+                      !self.browserCreationFailed
+                else { return }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                let state = await self.evaluateString("""
+                (() => [
+                  document.readyState || '',
+                  document.title || '',
+                  location.href || ''
+                ].join('\\n'))();
+                """)
+                let lines = state.components(separatedBy: "\n")
+                guard let readyState = lines.first else { continue }
+                if readyState == "interactive" || readyState == "complete" {
+                    var snapshot = self.currentSnapshot
+                    if lines.count > 1, !lines[1].isEmpty {
+                        snapshot.title = lines[1]
+                    }
+                    if lines.count > 2, !lines[2].isEmpty {
+                        snapshot.urlString = lines[2]
+                    }
+                    snapshot.isLoading = false
+                    self.apply(snapshot)
+                    return
+                }
+            }
+        }
     }
 
     private func evaluateString(_ script: String) async -> String {
