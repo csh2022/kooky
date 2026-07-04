@@ -146,6 +146,36 @@ final class TerminalKeyRoutingTests: XCTestCase {
         )
     }
 
+    func testFlagsChangedEventsDoNotReadCharacters() throws {
+        let flagsEvent = try XCTUnwrap(NSEvent.keyEvent(
+            with: .flagsChanged,
+            location: .zero,
+            modifierFlags: [.capsLock],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: false,
+            keyCode: 57
+        ))
+        XCTAssertEqual(GhosttySurfaceView.textForKeyEvent(flagsEvent), "")
+
+        let keyEvent = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "a",
+            charactersIgnoringModifiers: "a",
+            isARepeat: false,
+            keyCode: 0
+        ))
+        XCTAssertEqual(GhosttySurfaceView.textForKeyEvent(keyEvent), "a")
+    }
+
     private static func pressArrowUp(on surface: ghostty_surface_t) -> Bool {
         var key = ghostty_input_key_s()
         key.action = GHOSTTY_ACTION_PRESS

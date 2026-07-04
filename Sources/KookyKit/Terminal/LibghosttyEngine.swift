@@ -1117,13 +1117,7 @@ final class GhosttySurfaceView: NSView {
     @discardableResult
     private func sendKey(event: NSEvent, action: ghostty_input_action_e, surface: ghostty_surface_t) -> Bool {
         let mods = Self.mapModifiers(event.modifierFlags)
-        let chars = event.characters ?? ""
-        // NSEvent gives function/arrow keys a Private-Use-Area "character"
-        // (e.g. NSUpArrowFunctionKey = 0xF700). Those aren't real text — strip
-        // them so libghostty relies on `keycode` instead and emits the correct
-        // escape sequence (CSI A/B/C/D, etc.).
-        let firstScalar = chars.unicodeScalars.first?.value ?? 0
-        let textToSend = (firstScalar >= 0xE000 && firstScalar <= 0xF8FF) ? "" : chars
+        let textToSend = Self.textForKeyEvent(event)
 
         return textToSend.withCString { cstr in
             var key = ghostty_input_key_s()
@@ -1136,6 +1130,19 @@ final class GhosttySurfaceView: NSView {
             key.composing = false
             return ghostty_surface_key(surface, key)
         }
+    }
+
+    nonisolated static func textForKeyEvent(_ event: NSEvent) -> String {
+        if event.type == .flagsChanged {
+            return ""
+        }
+        let chars = event.characters ?? ""
+        // NSEvent gives function/arrow keys a Private-Use-Area "character"
+        // (e.g. NSUpArrowFunctionKey = 0xF700). Those aren't real text — strip
+        // them so libghostty relies on `keycode` instead and emits the correct
+        // escape sequence (CSI A/B/C/D, etc.).
+        let firstScalar = chars.unicodeScalars.first?.value ?? 0
+        return (firstScalar >= 0xE000 && firstScalar <= 0xF8FF) ? "" : chars
     }
 
     private static func mapModifiers(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
