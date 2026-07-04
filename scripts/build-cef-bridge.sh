@@ -82,6 +82,8 @@ for helper in "${HELPER_NAMES[@]}"; do
     <key>LSBackgroundOnly</key><true/>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Kooky uses the embedded Chromium browser engine, which may inspect Bluetooth device state for web platform compatibility.</string>
 </dict></plist>
 PLIST
 done

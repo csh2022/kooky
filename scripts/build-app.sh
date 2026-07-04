@@ -199,6 +199,8 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Kooky uses the embedded Chromium browser engine, which may inspect Bluetooth device state for web platform compatibility.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>
