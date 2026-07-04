@@ -49,12 +49,33 @@ echo "==> Assembling ${APP} (v${VERSION})"
 rm -rf "$APP"
 mkdir -p "${APP}/Contents/MacOS"
 mkdir -p "${APP}/Contents/Resources"
+mkdir -p "${APP}/Contents/Frameworks"
 
 cp .build/release/Kooky "${APP}/Contents/MacOS/${APP_NAME}"
 # Bundle.module's first lookup candidate is `Bundle.main.resourceURL`
 # (= Contents/Resources/), so the resource bundle has to live there or
 # the running .app will silently fall back to .build/release/ on disk.
 cp -R .build/release/Kooky_KookyKit.bundle "${APP}/Contents/Resources/"
+
+CEF_VENDOR_DIR="${ROOT}/Vendor/CEF/current"
+if [ -d "$CEF_VENDOR_DIR" ]; then
+    echo "==> Bundling CEF from ${CEF_VENDOR_DIR}"
+    [ -d "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" ] || {
+        echo "missing CEF framework: ${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" >&2
+        exit 1
+    }
+    cp -R "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" "${APP}/Contents/Frameworks/"
+    shopt -s nullglob
+    CEF_HELPERS=("${CEF_VENDOR_DIR}"/Kooky\ Helper*.app)
+    shopt -u nullglob
+    if [ "${#CEF_HELPERS[@]}" -eq 0 ]; then
+        echo "warning: CEF framework present but no Kooky Helper apps found; Chromium engine will not launch yet" >&2
+    else
+        for helper in "${CEF_HELPERS[@]}"; do
+            cp -R "$helper" "${APP}/Contents/Frameworks/"
+        done
+    fi
+fi
 
 # App icon — generated from branding/AppIcon.png if present. macOS reads
 # .icns from CFBundleIconFile in Info.plist; we synthesize the multi-size
@@ -179,6 +200,15 @@ echo "==> Adhoc codesign (skips Gatekeeper kill on first launch)"
 # .app — each layer wants its descendants already signed before signing
 # itself.
 codesign --force --sign - "${APP}/Contents/Resources/Kooky_KookyKit.bundle"
+if [ -d "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
+    shopt -s nullglob
+    BUNDLED_CEF_HELPERS=("${APP}/Contents/Frameworks"/*.app)
+    shopt -u nullglob
+    for helper in "${BUNDLED_CEF_HELPERS[@]}"; do
+        codesign --force --deep --sign - "$helper"
+    done
+    codesign --force --deep --sign - "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
+fi
 codesign --force --sign - "${APP}/Contents/MacOS/${APP_NAME}"
 codesign --force --sign - "${APP}" 2>&1 | tail -3
 

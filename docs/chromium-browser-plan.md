@@ -56,10 +56,17 @@ inside the existing pane model.
 
 ### Stage 2: CEF Bundle and Helper Layout
 
-- Add scripts that download or locate a pinned CEF standard distribution for the
-  host architecture.
-- Teach app build scripts to place `Chromium Embedded Framework.framework` and
-  required helper apps under `Kooky.app/Contents/Frameworks/`.
+- Add `scripts/setup-cef.sh` to download or locate a pinned CEF standard
+  distribution for the host architecture. The initial pin is CEF
+  `144.0.29+g0b1a012+chromium-144.0.7559.256` for macOS arm64, with sha1
+  verification and environment overrides for version, platform, checksum, and
+  URL.
+- Teach `scripts/build-app.sh` to place
+  `Chromium Embedded Framework.framework` and required helper apps under
+  `Kooky.app/Contents/Frameworks/` when `Vendor/CEF/current` exists. Helper
+  apps must be Kooky-built bundles; the setup script must not rename CEF sample
+  helpers because their internal executable names and bundle metadata would not
+  match Kooky's expected helper paths.
 - Keep the binary payload out of git.
 - Add packaging validation that fails when Chromium is selected but bundle
   assets are missing.
