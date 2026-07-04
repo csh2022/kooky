@@ -218,7 +218,7 @@ struct ContentView: View {
                 help: "Browser Panel"
             ) {
                 withAnimation(Theme.chromeTransition) {
-                    _ = store.openBrowserSplit()
+                    _ = store.openBrowserSplit(address: "https://www.google.com/")
                 }
             }
             InboxBell()
