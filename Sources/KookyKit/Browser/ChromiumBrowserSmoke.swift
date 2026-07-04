@@ -120,7 +120,7 @@ public enum ChromiumBrowserSmoke {
             try assertContains(try runAsync("wait text") { await engine.waitForText("clicked:Alice", timeoutMilliseconds: 3000) }, "clicked:Alice", "wait text")
             try assertCommand(try runAsync("click at") { await engine.clickAt(x: 10, y: 10) }, contains: "ok", label: "click-at")
             try assertCommand(try runAsync("press") { await engine.press(key: "Tab") }, contains: "ok", label: "press")
-            try assertCommand(try runAsync("scroll") { await engine.scroll(direction: "down", amount: 900) }, contains: "scroll", label: "scroll")
+            try assertScrollMoved(try runAsync("scroll") { await engine.scroll(direction: "down", amount: 900) }, label: "scroll")
             try assertCommand(try runAsync("hover") { await engine.hover(id: hoverId) }, contains: "ok", label: "hover")
             try assertContains(try runAsync("wait url") { await engine.waitForURL("kooky-browser-agent-test", timeoutMilliseconds: 1000) }, "kooky-browser-agent-test", "wait-url")
             try assertContains(try runAsync("wait title") { await engine.waitForTitle("Kooky Browser Agent Test", timeoutMilliseconds: 1000) }, "Kooky Browser Agent Test", "wait-title")
@@ -228,7 +228,7 @@ public enum ChromiumBrowserSmoke {
             try assertCommand(try command("click-id", .clickId(id: submitId, double: false)), contains: "ok", label: "click-id")
             try assertCommand(try command("click-at", .clickAt(x: 10, y: 10)), contains: "ok", label: "click-at")
             try assertCommand(try command("press", .press(key: "Tab")), contains: "ok", label: "press")
-            try assertCommand(try command("scroll", .scroll(direction: "down", amount: 900)), contains: "scroll", label: "scroll")
+            try assertScrollMoved(try command("scroll", .scroll(direction: "down", amount: 900)), label: "scroll")
             try assertCommand(try command("hover", .hover(id: hoverId)), contains: "ok", label: "hover")
             try assertContains(try command("wait-url", .waitURL(text: "127.0.0.1", timeoutMilliseconds: 1000)), "127.0.0.1", "wait-url")
             try assertContains(try command("wait-title", .waitTitle(text: "Kooky Browser Agent Test", timeoutMilliseconds: 1000)), "Kooky Browser Agent Test", "wait-title")
@@ -306,6 +306,21 @@ public enum ChromiumBrowserSmoke {
     private static func assertCommand(_ value: String, contains expected: String, label: String) throws {
         guard value.localizedCaseInsensitiveContains(expected) else {
             throw SmokeFailure("\(label) returned unexpected output: \(value)")
+        }
+    }
+
+    private static func assertScrollMoved(_ value: String, label: String) throws {
+        guard value.localizedCaseInsensitiveContains("ok scrolled") else {
+            throw SmokeFailure("\(label) did not move: \(value)")
+        }
+        let movedYLine = value
+            .split(separator: "\n")
+            .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("movedY:") }
+        let movedY = movedYLine
+            .flatMap { Double($0.replacingOccurrences(of: "movedY:", with: "").trimmingCharacters(in: .whitespaces)) }
+            ?? 0
+        guard abs(movedY) > 0 else {
+            throw SmokeFailure("\(label) reported no vertical movement: \(value)")
         }
     }
 

@@ -25,5 +25,8 @@ final class BrowserCommandJavaScriptTests: XCTestCase {
         XCTAssertTrue(script.contains("already at bottom edge"))
         XCTAssertTrue(script.contains("scroll command had no visible effect"))
         XCTAssertTrue(script.contains("document.documentElement.scrollTop"))
+        XCTAssertTrue(script.contains("for (const candidate of candidates)"))
+        XCTAssertTrue(script.contains("restoreElement(candidate, candidateBefore)"))
+        XCTAssertTrue(script.contains("'attempts: ' + attempts"))
     }
 }

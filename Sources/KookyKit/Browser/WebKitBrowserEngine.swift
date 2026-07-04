@@ -961,29 +961,75 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
               const rangeB = axis === 'x' ? mb.maxX : mb.maxY;
               return (rangeB - rangeA) || (visibleArea(b) - visibleArea(a));
             });
-          const candidates = priority.concat(allScrollable);
-          const movable = candidates.find(canMoveAxis);
-          const target = movable || (canMoveAxis(root) ? root : (candidates[0] || root));
-          const before = metrics(target);
-          if (target === root || target === document.documentElement || target === document.body) {
-            window.scrollBy({ left: dx, top: dy, behavior: 'auto' });
-            let interim = metrics(root);
-            if (Math.abs(interim.x - before.x) === 0 && Math.abs(interim.y - before.y) === 0) {
-              const nextX = clamp(before.x + dx, 0, before.maxX);
-              const nextY = clamp(before.y + dy, 0, before.maxY);
-              try { root.scrollLeft = nextX; root.scrollTop = nextY; } catch {}
-              try { document.documentElement.scrollLeft = nextX; document.documentElement.scrollTop = nextY; } catch {}
-              try { document.body.scrollLeft = nextX; document.body.scrollTop = nextY; } catch {}
-              try { window.scrollTo(nextX, nextY); } catch {}
+          const candidates = [];
+          const appendCandidate = (el) => {
+            if (!el || candidates.includes(el)) return;
+            candidates.push(el);
+          };
+          priority.filter(canMoveAxis).forEach(appendCandidate);
+          allScrollable.filter(canMoveAxis).forEach(appendCandidate);
+          appendCandidate(root);
+          priority.forEach(appendCandidate);
+          allScrollable.forEach(appendCandidate);
+          const restoreRoot = (m) => {
+            try { root.scrollLeft = m.x; root.scrollTop = m.y; } catch {}
+            try { document.documentElement.scrollLeft = m.x; document.documentElement.scrollTop = m.y; } catch {}
+            try { document.body.scrollLeft = m.x; document.body.scrollTop = m.y; } catch {}
+            try { window.scrollTo(m.x, m.y); } catch {}
+          };
+          const restoreElement = (el, m) => {
+            if (el === root || el === document.documentElement || el === document.body) {
+              restoreRoot(m);
+            } else {
+              try { el.scrollLeft = m.x; el.scrollTop = m.y; } catch {}
             }
-          } else {
-            target.scrollLeft = clamp((target.scrollLeft || 0) + dx, 0, before.maxX);
-            target.scrollTop = clamp((target.scrollTop || 0) + dy, 0, before.maxY);
+          };
+          const applyScroll = (el, before) => {
+            if (el === root || el === document.documentElement || el === document.body) {
+              window.scrollBy({ left: dx, top: dy, behavior: 'auto' });
+              let interim = metrics(root);
+              if (Math.abs(interim.x - before.x) === 0 && Math.abs(interim.y - before.y) === 0) {
+                const nextX = clamp(before.x + dx, 0, before.maxX);
+                const nextY = clamp(before.y + dy, 0, before.maxY);
+                restoreRoot({ x: nextX, y: nextY });
+              }
+            } else {
+              el.scrollLeft = clamp((el.scrollLeft || 0) + dx, 0, before.maxX);
+              el.scrollTop = clamp((el.scrollTop || 0) + dy, 0, before.maxY);
+            }
+          };
+          let target = candidates[0] || root;
+          let before = metrics(target);
+          let after = before;
+          let movedX = 0;
+          let movedY = 0;
+          let moved = false;
+          let attempts = 0;
+          for (const candidate of candidates) {
+            const candidateBefore = metrics(candidate);
+            const max = axis === 'x' ? candidateBefore.maxX : candidateBefore.maxY;
+            const current = axis === 'x' ? candidateBefore.x : candidateBefore.y;
+            const canMove = max > 1 && (delta > 0 ? current < max - 1 : current > 1);
+            if (!canMove && candidate !== root && candidates.length > 1) continue;
+            attempts += 1;
+            applyScroll(candidate, candidateBefore);
+            const candidateAfter = metrics(candidate);
+            const candidateMovedX = candidateAfter.x - candidateBefore.x;
+            const candidateMovedY = candidateAfter.y - candidateBefore.y;
+            if (Math.abs(candidateMovedX) > 0 || Math.abs(candidateMovedY) > 0) {
+              target = candidate;
+              before = candidateBefore;
+              after = candidateAfter;
+              movedX = candidateMovedX;
+              movedY = candidateMovedY;
+              moved = true;
+              break;
+            }
+            if (candidate !== root) restoreElement(candidate, candidateBefore);
+            target = candidate;
+            before = candidateBefore;
+            after = candidateAfter;
           }
-          const after = metrics(target);
-          const movedX = after.x - before.x;
-          const movedY = after.y - before.y;
-          const moved = Math.abs(movedX) > 0 || Math.abs(movedY) > 0;
           const current = axis === 'x' ? after.x : after.y;
           const max = axis === 'x' ? after.maxX : after.maxY;
           const reason = moved
@@ -995,6 +1041,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             (moved ? 'ok scrolled \(normalized)' : 'no scroll movement \(normalized)'),
             'target: ' + descriptor(target),
             'reason: ' + reason,
+            'attempts: ' + attempts,
             'movedX: ' + movedX,
             'movedY: ' + movedY,
             'x: ' + after.x,
