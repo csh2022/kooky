@@ -20,6 +20,28 @@
 #include "include/internal/cef_string.h"
 #include "include/wrapper/cef_library_loader.h"
 
+static void KookyCEFResizeBrowser(void* owner);
+
+@interface KookyCEFContainerView : NSView
+@property(nonatomic, assign) void* browserOwner;
+@end
+
+@implementation KookyCEFContainerView
+- (BOOL)isFlipped {
+  return YES;
+}
+
+- (void)setFrameSize:(NSSize)newSize {
+  [super setFrameSize:newSize];
+  KookyCEFResizeBrowser(self.browserOwner);
+}
+
+- (void)layout {
+  [super layout];
+  KookyCEFResizeBrowser(self.browserOwner);
+}
+@end
+
 @interface KookyCEFApplication : NSApplication <CefAppProtocol> {
  @private
   BOOL handlingSendEvent_;
@@ -213,6 +235,30 @@ void LoadURLOnBrowser(KookyCEFBrowser* owner, const char* url) {
   cef_string_clear(&cef_url);
 }
 
+void ResizeBrowser(KookyCEFBrowser* owner) {
+  if (!owner || !owner->container || !owner->browser) {
+    return;
+  }
+  auto* host = owner->browser->get_host(owner->browser);
+  if (!host) {
+    return;
+  }
+  NSView* browser_view = (__bridge NSView*)host->get_window_handle(host);
+  if (browser_view) {
+    browser_view.frame = owner->container.bounds;
+    browser_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  }
+  host->was_resized(host);
+}
+
+}  // namespace
+
+static void KookyCEFResizeBrowser(void* owner) {
+  ResizeBrowser(reinterpret_cast<KookyCEFBrowser*>(owner));
+}
+
+namespace {
+
 cef_display_handler_t* GetDisplayHandler(cef_client_t* self) {
   return &reinterpret_cast<KookyCEFClient*>(self)->display;
 }
@@ -247,6 +293,7 @@ void OnAfterCreated(cef_life_span_handler_t* self, cef_browser_t* browser) {
   if (browser && browser->base.add_ref) {
     browser->base.add_ref(&browser->base);
   }
+  ResizeBrowser(owner);
   if (!owner->pending_url.empty()) {
     LoadURLOnBrowser(owner, owner->pending_url.c_str());
     owner->pending_url.clear();
@@ -381,7 +428,11 @@ void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, voi
     return nullptr;
   }
   auto* owner = new KookyCEFBrowser();
-  owner->container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 800)];
+  auto* container = [[KookyCEFContainerView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 800)];
+  container.browserOwner = owner;
+  container.wantsLayer = YES;
+  container.layer.masksToBounds = YES;
+  owner->container = container;
   owner->browser = nullptr;
   owner->client = MakeClient(owner);
   owner->callback = callback;
