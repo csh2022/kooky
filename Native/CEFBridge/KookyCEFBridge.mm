@@ -2,6 +2,7 @@
 #import <objc/runtime.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <dispatch/dispatch.h>
 #include <map>
@@ -12,6 +13,7 @@
 #include "KookyCEFBridge.h"
 #include "include/capi/cef_app_capi.h"
 #include "include/capi/cef_browser_capi.h"
+#include "include/capi/cef_browser_process_handler_capi.h"
 #include "include/capi/cef_client_capi.h"
 #include "include/capi/cef_command_line_capi.h"
 #include "include/capi/cef_display_handler_capi.h"
@@ -86,6 +88,7 @@ struct KookyCEFEvaluation {
 
 struct KookyCEFApp {
   cef_app_t app;
+  cef_browser_process_handler_t browser_process;
   cef_render_process_handler_t render;
 };
 
@@ -111,6 +114,7 @@ bool g_initialized = false;
 void* g_library_loader = nullptr;
 KookyCEFApp* g_app = nullptr;
 NSTimer* g_message_loop_timer = nil;
+int g_message_loop_burst_remaining = 0;
 std::mutex g_browser_map_mutex;
 std::map<int, KookyCEFBrowser*> g_browsers_by_id;
 std::mutex g_render_context_mutex;
@@ -119,6 +123,19 @@ std::map<std::string, cef_v8_context_t*> g_render_contexts;
 constexpr const char* kEvalMessageName = "KookyEval";
 constexpr const char* kEvalResultMessageName = "KookyEvalResult";
 constexpr const char* kEvalContextNotReadyResult = "__KOOKY_CONTEXT_NOT_READY__";
+
+bool DebugLoggingEnabled() {
+  const char* value = getenv("KOOKY_CEF_DEBUG");
+  return value && value[0] && strcmp(value, "0") != 0;
+}
+
+void DebugLog(const char* message) {
+  if (!DebugLoggingEnabled()) {
+    return;
+  }
+  fprintf(stderr, "kooky cef: %s\n", message);
+  fflush(stderr);
+}
 
 template <typename T>
 void InitBase(T* value) {
@@ -212,13 +229,18 @@ int OnRenderProcessMessageReceived(
     cef_frame_t* frame,
     cef_process_id_t source_process,
     cef_process_message_t* message);
+cef_browser_process_handler_t* GetBrowserProcessHandler(cef_app_t* self);
+void OnScheduleMessagePumpWork(cef_browser_process_handler_t*, int64_t delay_ms);
 
 KookyCEFApp* MakeApp() {
   auto* app = new KookyCEFApp();
   InitBase(&app->app);
+  InitBase(&app->browser_process);
   InitBase(&app->render);
   app->app.on_before_command_line_processing = OnBeforeCommandLineProcessing;
+  app->app.get_browser_process_handler = GetBrowserProcessHandler;
   app->app.get_render_process_handler = GetRenderProcessHandler;
+  app->browser_process.on_schedule_message_pump_work = OnScheduleMessagePumpWork;
   app->render.on_context_created = OnContextCreated;
   app->render.on_context_released = OnContextReleased;
   app->render.on_process_message_received = OnRenderProcessMessageReceived;
@@ -487,8 +509,61 @@ cef_load_handler_t* GetLoadHandler(cef_client_t* self) {
   return &reinterpret_cast<KookyCEFClient*>(self)->load;
 }
 
+cef_browser_process_handler_t* GetBrowserProcessHandler(cef_app_t* self) {
+  return &reinterpret_cast<KookyCEFApp*>(self)->browser_process;
+}
+
 cef_render_process_handler_t* GetRenderProcessHandler(cef_app_t* self) {
   return &reinterpret_cast<KookyCEFApp*>(self)->render;
+}
+
+void RunScheduledMessagePumpWork(NSTimer* timer) {
+  if (timer == g_message_loop_timer) {
+    g_message_loop_timer = nil;
+  }
+  if (g_initialized) {
+    cef_do_message_loop_work();
+  }
+  if (g_initialized && g_message_loop_burst_remaining > 0) {
+    --g_message_loop_burst_remaining;
+    g_message_loop_timer = [NSTimer scheduledTimerWithTimeInterval:0.01
+                                                           repeats:NO
+                                                             block:^(NSTimer* nextTimer) {
+                                                               RunScheduledMessagePumpWork(nextTimer);
+                                                             }];
+  }
+}
+
+void ScheduleMessagePumpWorkOnMain(int64_t delay_ms) {
+  if (!g_initialized) {
+    return;
+  }
+  if (g_message_loop_timer) {
+    [g_message_loop_timer invalidate];
+    g_message_loop_timer = nil;
+  }
+  g_message_loop_burst_remaining = 100;
+  if (delay_ms <= 0) {
+    cef_do_message_loop_work();
+    --g_message_loop_burst_remaining;
+    g_message_loop_timer = [NSTimer scheduledTimerWithTimeInterval:0.01
+                                                           repeats:NO
+                                                             block:^(NSTimer* timer) {
+                                                               RunScheduledMessagePumpWork(timer);
+                                                             }];
+    return;
+  }
+  g_message_loop_timer = [NSTimer scheduledTimerWithTimeInterval:static_cast<NSTimeInterval>(delay_ms) / 1000.0
+                                                         repeats:NO
+                                                           block:^(NSTimer* timer) {
+                                                             RunScheduledMessagePumpWork(timer);
+                                                           }];
+}
+
+void OnScheduleMessagePumpWork(cef_browser_process_handler_t*, int64_t delay_ms) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    ScheduleMessagePumpWorkOnMain(delay_ms);
+  });
 }
 
 void OnContextCreated(
@@ -503,6 +578,7 @@ void OnContextCreated(
   if (key.empty()) {
     return;
   }
+  DebugLog("render context created");
   if (context->base.add_ref) {
     context->base.add_ref(&context->base);
   }
@@ -526,6 +602,7 @@ void OnContextReleased(
   std::lock_guard<std::mutex> lock(g_render_context_mutex);
   auto existing = g_render_contexts.find(key);
   if (existing != g_render_contexts.end()) {
+    DebugLog("render context released");
     if (existing->second && existing->second->base.release) {
       existing->second->base.release(&existing->second->base);
     }
@@ -546,6 +623,7 @@ int OnRenderProcessMessageReceived(
   if (name != kEvalMessageName) {
     return 0;
   }
+  DebugLog("renderer received eval message");
   cef_list_value_t* args = message->get_argument_list(message);
   if (!args || args->get_size(args) < 2) {
     return 1;
@@ -600,6 +678,7 @@ int OnClientProcessMessageReceived(
   if (name != kEvalResultMessageName) {
     return 0;
   }
+  DebugLog("browser received eval result");
   cef_list_value_t* args = message->get_argument_list(message);
   if (!args || args->get_size(args) < 2) {
     return 1;
@@ -783,7 +862,7 @@ int KookyCEFInitialize(const char* cache_path) {
   cef_settings_t settings = {};
   settings.size = sizeof(settings);
   settings.no_sandbox = 1;
-  settings.external_message_pump = 0;
+  settings.external_message_pump = 1;
   SetCefString(&settings.user_agent_product, "KookyChromium/1.0");
   std::string helper_path = HelperExecutablePath();
   if (!helper_path.empty()) {
@@ -810,19 +889,14 @@ int KookyCEFInitialize(const char* cache_path) {
   cef_string_clear(&settings.cache_path);
   cef_string_clear(&settings.root_cache_path);
 
-  g_message_loop_timer = [NSTimer scheduledTimerWithTimeInterval:0.01
-                                                        repeats:YES
-                                                          block:^(NSTimer*) {
-                                                            cef_do_message_loop_work();
-                                                          }];
   g_initialized = true;
   return 1;
 }
 
 void KookyCEFDoMessageLoopWork(void) {
-  if (g_initialized) {
-    cef_do_message_loop_work();
-  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+    ScheduleMessagePumpWorkOnMain(0);
+  });
 }
 
 static void* KookyCEFCreateBrowserWithParent(NSView* parent, const char* url, KookyCEFStateCallback callback, void* context) {
@@ -958,6 +1032,7 @@ void KookyCEFEvaluateJavaScript(
     }
     return;
   }
+  DebugLog("browser sending eval message");
   std::string script_copy = script ? script : "";
   dispatch_async(dispatch_get_main_queue(), ^{
     if (!owner || owner->closing || !owner->browser) {
@@ -992,8 +1067,8 @@ void KookyCEFEvaluateJavaScript(
     cef_string_clear(&source);
     frame->send_process_message(frame, PID_RENDERER, message);
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      FinishEvaluation(owner, message_id, "");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+      FinishEvaluation(owner, message_id, kEvalContextNotReadyResult);
     });
   });
 }
