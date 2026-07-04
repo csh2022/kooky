@@ -201,7 +201,9 @@ final class WorkspaceStore {
         optionsProvider: @escaping @MainActor (String) -> String? = { KookySettingsModel.shared.agentOptions[$0] },
         resumeProvider: @escaping @MainActor () -> Bool = { KookySettingsModel.shared.resumeConversations },
         codexSessionLookup: @escaping @MainActor (URL) -> String? = { CodexSessionLocator.latestSessionId(cwd: $0) },
-        browserEngineFactory: @escaping @MainActor () -> any BrowserEngine = { WebKitBrowserEngine() },
+        browserEngineFactory: @escaping @MainActor () -> any BrowserEngine = {
+            BrowserEngineProvider.defaultProvider().makeEngine()
+        },
         peerStores: @escaping @MainActor () -> [WorkspaceStore] = { [] },
         moveToNewWindow: @escaping @MainActor (UUID) -> Void = { _ in },
         onSessionAlert: @escaping @MainActor (UUID, SessionAlertKind) -> Void = { _, _ in },
