@@ -9,6 +9,7 @@ struct BrowserPaneView: View {
     @State private var credentialForm: BrowserCredentialForm?
     @State private var savedAccounts: [String] = []
     @State private var credentialStatus: String?
+    @State private var dismissedCredentialPromptKeys: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,12 +21,18 @@ struct BrowserPaneView: View {
                         errorBanner(message)
                     }
                 }
+                .overlay(alignment: .topTrailing) {
+                    credentialPrompt
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.chromeBackground)
         .task(id: browser.surface.snapshot.urlString) {
             await refreshCredentialState()
+        }
+        .task {
+            await refreshCredentialStateWhileVisible()
         }
     }
 
@@ -99,9 +106,21 @@ struct BrowserPaneView: View {
             .help("Fill Saved Password")
         }
         if credentialForm?.canSave == true {
-            HoverableIconButton(systemName: "tray.and.arrow.down", fontSize: 12, size: 28, help: "Save Password") {
+            Button {
                 saveCredential()
+            } label: {
+                Label("Save", systemImage: "key")
+                    .labelStyle(.titleAndIcon)
+                    .font(Theme.mono(11))
+                    .padding(.horizontal, 9)
+                    .frame(height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Theme.chromeActive)
+                    )
             }
+            .buttonStyle(.plain)
+            .help("Save Password")
         }
         if let credentialStatus {
             Text(credentialStatus)
@@ -130,6 +149,51 @@ struct BrowserPaneView: View {
             .background(Theme.chromeBackground.opacity(0.94))
     }
 
+    @ViewBuilder
+    private var credentialPrompt: some View {
+        if let form = credentialForm,
+           form.canSave,
+           !dismissedCredentialPromptKeys.contains(credentialPromptKey(for: form)) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Save password?")
+                    .font(Theme.mono(12))
+                    .foregroundStyle(Theme.chromeForeground)
+                HStack(spacing: 8) {
+                    Button("Not Now") {
+                        dismissedCredentialPromptKeys.insert(credentialPromptKey(for: form))
+                    }
+                    .buttonStyle(.plain)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.chromeMuted)
+
+                    Button("Save") {
+                        saveCredential()
+                    }
+                    .buttonStyle(.plain)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.chromeForeground)
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Theme.chromeActive)
+                    )
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.chromeBackground.opacity(0.96))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Theme.chromeHairline)
+            )
+            .shadow(radius: 8, y: 4)
+            .padding(12)
+        }
+    }
+
     private func refreshCredentialState() async {
         let form = await browser.surface.engine.credentialForm()
         credentialForm = form
@@ -140,6 +204,17 @@ struct BrowserPaneView: View {
         } else {
             savedAccounts = []
         }
+    }
+
+    private func refreshCredentialStateWhileVisible() async {
+        while !Task.isCancelled {
+            await refreshCredentialState()
+            try? await Task.sleep(for: .milliseconds(750))
+        }
+    }
+
+    private func credentialPromptKey(for form: BrowserCredentialForm) -> String {
+        "\(form.site)\t\(form.account)"
     }
 
     private func saveCredential() {
@@ -156,6 +231,7 @@ struct BrowserPaneView: View {
                     password: form.password
                 ))
                 credentialStatus = "Saved"
+                dismissedCredentialPromptKeys.insert(credentialPromptKey(for: form))
                 await refreshCredentialState()
             } catch {
                 credentialStatus = "Save failed"
