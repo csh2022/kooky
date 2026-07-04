@@ -79,50 +79,248 @@ final class ChromiumBrowserEngine: BrowserEngine {
         bridge.goForward(browser.raw)
     }
 
-    func click(text: String) {}
-    func clickElement(id: String, double: Bool) async -> String { commandUnavailable() }
-    func clickAt(x: Double, y: Double) async -> String { commandUnavailable() }
-    func fill(field: String, text: String) async -> String { commandUnavailable() }
-    func fillElement(id: String, text: String) async -> String { commandUnavailable() }
-    func clear(field: String?) async -> String { commandUnavailable() }
-    func type(text: String) {}
-    func paste(text: String) {}
-    func press(key: String) async -> String { commandUnavailable() }
-    func hotkey(_ combo: String) {}
-    func scroll(direction: String, amount: Double?) async -> String { commandUnavailable() }
-    func hover(id: String) async -> String { commandUnavailable() }
-    func waitForText(_ text: String, timeoutMilliseconds: Int) async -> String { commandUnavailable() }
-    func waitForURL(_ text: String, timeoutMilliseconds: Int) async -> String { commandUnavailable() }
-    func waitForTitle(_ text: String, timeoutMilliseconds: Int) async -> String { commandUnavailable() }
-    func pageText() async -> String { commandUnavailable() }
-    func pageHTML() async -> String { "" }
-    func linksJSONLines() async -> String { "" }
-    func elementsJSONLines() async -> String { "" }
-    func pageSnapshot() async -> String {
-        """
-        Kooky Chromium browser snapshot
-        title: \(currentSnapshot.title)
-        url: \(currentSnapshot.urlString)
-        loading: \(currentSnapshot.isLoading)
-        commands: Chromium DOM automation is not implemented yet.
-        \n
-        """
+    func click(text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Task { _ = await evaluateString(WebKitBrowserEngine.clickJavaScript(text: trimmed)) }
     }
-    func saveScreenshot(to path: String?) async -> String { commandUnavailable() }
-    func credentialForm() async -> BrowserCredentialForm? { nil }
-    func fillCredential(_ credential: BrowserCredential) async -> String { commandUnavailable() }
+
+    func clickElement(id: String, double: Bool) async -> String {
+        let result = await evaluateString(WebKitBrowserEngine.clickElementJavaScript(id: id, double: double))
+        return result == "true" ? "ok clicked id: \(id)\n" : "element not found: \(id)\n"
+    }
+
+    func clickAt(x: Double, y: Double) async -> String {
+        let result = await evaluateString(WebKitBrowserEngine.clickAtJavaScript(x: x, y: y))
+        return result == "true" ? "ok clicked at: \(x),\(y)\n" : "click target not found at: \(x),\(y)\n"
+    }
+
+    func fill(field: String, text: String) async -> String {
+        let trimmed = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "field not found\n" }
+        let result = await evaluateString(WebKitBrowserEngine.fillJavaScript(field: trimmed, text: text))
+        return result == "true" ? "ok filled field: \(trimmed)\n" : "field not found: \(trimmed)\n"
+    }
+
+    func fillElement(id: String, text: String) async -> String {
+        let result = await evaluateString(WebKitBrowserEngine.fillElementJavaScript(id: id, text: text))
+        return result == "true" ? "ok filled id: \(id)\n" : "element not found or not fillable: \(id)\n"
+    }
+
+    func clear(field: String?) async -> String {
+        let result = await evaluateString(WebKitBrowserEngine.clearJavaScript(field: field ?? ""))
+        return result == "true" ? "ok cleared\n" : "field not found\n"
+    }
+
+    func type(text: String) {
+        guard !text.isEmpty else { return }
+        Task { _ = await evaluateString(WebKitBrowserEngine.typeJavaScript(text: text)) }
+    }
+
+    func paste(text: String) {
+        guard !text.isEmpty else { return }
+        Task { _ = await evaluateString(WebKitBrowserEngine.typeJavaScript(text: text)) }
+    }
+
+    func press(key: String) async -> String {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "key press failed\n" }
+        let result = await evaluateString(WebKitBrowserEngine.pressJavaScript(key: trimmed))
+        switch result {
+        case "submitted":
+            return "ok pressed key: \(trimmed)\nsubmitted: true\n"
+        case "clicked-submit":
+            return "ok pressed key: \(trimmed)\nclickedSubmit: true\n"
+        case "pressed":
+            return "ok pressed key: \(trimmed)\n"
+        default:
+            return "key press failed: \(trimmed)\n"
+        }
+    }
+
+    func hotkey(_ combo: String) {
+        let trimmed = combo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Task { _ = await evaluateString(WebKitBrowserEngine.hotkeyJavaScript(combo: trimmed)) }
+    }
+
+    func scroll(direction: String, amount: Double?) async -> String {
+        let result = await evaluateString(WebKitBrowserEngine.scrollJavaScript(direction: direction, amount: amount))
+        return result.isEmpty ? "scroll failed\n" : result.ensuringTrailingNewline()
+    }
+
+    func hover(id: String) async -> String {
+        let result = await evaluateString(WebKitBrowserEngine.hoverJavaScript(id: id))
+        return result == "true" ? "ok hovered id: \(id)\n" : "element not found: \(id)\n"
+    }
+
+    func waitForText(_ text: String, timeoutMilliseconds: Int) async -> String {
+        await waitForCondition(label: "text", text: text, timeoutMilliseconds: timeoutMilliseconds) { [weak self] in
+            guard let self else { return "" }
+            return await self.pageText()
+        }
+    }
+
+    func waitForURL(_ text: String, timeoutMilliseconds: Int) async -> String {
+        await waitForCondition(label: "url", text: text, timeoutMilliseconds: timeoutMilliseconds) { [weak self] in
+            self?.snapshot.urlString ?? ""
+        }
+    }
+
+    func waitForTitle(_ text: String, timeoutMilliseconds: Int) async -> String {
+        await waitForCondition(label: "title", text: text, timeoutMilliseconds: timeoutMilliseconds) { [weak self] in
+            self?.snapshot.title ?? ""
+        }
+    }
+
+    func pageText() async -> String {
+        await evaluateString(WebKitBrowserEngine.pageTextJavaScript()).trimmedForCLI()
+    }
+
+    func pageHTML() async -> String {
+        await evaluateString("document.documentElement ? document.documentElement.outerHTML : ''").trimmedForCLI()
+    }
+
+    func linksJSONLines() async -> String {
+        await evaluateString(WebKitBrowserEngine.linksJavaScript()).ensuringTrailingNewline()
+    }
+
+    func elementsJSONLines() async -> String {
+        await evaluateString(WebKitBrowserEngine.elementsJavaScript()).ensuringTrailingNewline()
+    }
+    func pageSnapshot() async -> String {
+        let state = browserStateText(prefix: "Kooky Chromium browser snapshot")
+        let elements = await elementsJSONLines()
+        let text = await pageText()
+        return """
+        \(state)
+        Elements:
+        \(elements)
+        Text:
+        \(text)
+        """.ensuringTrailingNewline()
+    }
+
+    func saveScreenshot(to path: String?) async -> String {
+        let resolved = screenshotPath(path)
+        let bounds = view.bounds.width > 0 && view.bounds.height > 0
+            ? view.bounds
+            : NSRect(x: 0, y: 0, width: 1280, height: 800)
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else {
+            return "screenshot failed\n"
+        }
+        view.cacheDisplay(in: bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            return "screenshot failed\n"
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: resolved.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: resolved, options: .atomic)
+            return resolved.path + "\n"
+        } catch {
+            return "screenshot failed: \(error.localizedDescription)\n"
+        }
+    }
+
+    func credentialForm() async -> BrowserCredentialForm? {
+        let json = await evaluateString(WebKitBrowserEngine.credentialFormJavaScript())
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let site = object["site"] as? String,
+              let account = object["account"] as? String,
+              let password = object["password"] as? String
+        else { return nil }
+        return BrowserCredentialForm(site: site, account: account, password: password)
+    }
+
+    func fillCredential(_ credential: BrowserCredential) async -> String {
+        guard !credential.account.isEmpty, !credential.password.isEmpty else {
+            return "credential is empty\n"
+        }
+        let result = await evaluateString(WebKitBrowserEngine.fillCredentialJavaScript(
+            account: credential.account,
+            password: credential.password
+        ))
+        return result == "true" ? "ok filled credential: \(credential.account)\n" : "credential form not found\n"
+    }
 
     private func apply(_ snapshot: BrowserEngineSnapshot) {
         currentSnapshot = snapshot
         onSnapshotChange?(snapshot)
     }
 
-    private func commandUnavailable() -> String {
-        "Chromium browser command is not implemented yet.\n"
+    private func evaluateString(_ script: String) async -> String {
+        await withCheckedContinuation { continuation in
+            let box = ChromiumEvaluateCallbackBox(continuation)
+            let context = Unmanaged.passRetained(box).toOpaque()
+            bridge.evaluateJavaScript(browser.raw, script, ChromiumBrowserEngine.evaluateCallback, context)
+        }
+    }
+
+    private func waitForCondition(
+        label: String,
+        text: String,
+        timeoutMilliseconds: Int,
+        value: () async -> String
+    ) async -> String {
+        let deadline = Date().addingTimeInterval(TimeInterval(max(timeoutMilliseconds, 0)) / 1000.0)
+        repeat {
+            let current = await value()
+            if current.localizedCaseInsensitiveContains(text) {
+                return browserStateText(prefix: "ok found \(label): \(text)", condition: label)
+            }
+            if Date() >= deadline { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        } while true
+        return browserStateText(prefix: "timed out waiting for \(label): \(text)", condition: label)
+    }
+
+    private func browserStateText(prefix: String, condition: String? = nil) -> String {
+        let snapshot = self.snapshot
+        let conditionLine = condition.map { "condition: \($0)\n" } ?? ""
+        return """
+        \(prefix)
+        \(conditionLine)title: \(snapshot.title)
+        url: \(snapshot.urlString)
+        loading: \(snapshot.isLoading)
+
+        """
+    }
+
+    private func screenshotPath(_ path: String?) -> URL {
+        if let path, !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let expanded = (path as NSString).expandingTildeInPath
+            return URL(fileURLWithPath: expanded)
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kooky-browser", isDirectory: true)
+        let stamp = Self.screenshotTimestamp.string(from: Date())
+        return dir.appendingPathComponent("screenshot-\(stamp).png")
+    }
+
+    private static let screenshotTimestamp: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = .current
+        return fmt
+    }()
+
+    private static let evaluateCallback: ChromiumBrowserBridge.EvaluateCallback = { context, result in
+        guard let context else { return }
+        let box = Unmanaged<ChromiumEvaluateCallbackBox>.fromOpaque(context).takeRetainedValue()
+        box.continuation.resume(returning: ChromiumBrowserEngine.string(from: result))
     }
 
     private static func cacheDirectoryURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        let override = ProcessInfo.processInfo.environment["KOOKY_CHROMIUM_CACHE_PATH"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/kooky/chromium-root/default", isDirectory: true)
     }
 
@@ -143,6 +341,14 @@ final class ChromiumBrowserEngine: BrowserEngine {
     private static func string(from pointer: UnsafePointer<CChar>?) -> String {
         guard let pointer else { return "" }
         return String(cString: pointer)
+    }
+}
+
+private final class ChromiumEvaluateCallbackBox {
+    let continuation: CheckedContinuation<String, Never>
+
+    init(_ continuation: CheckedContinuation<String, Never>) {
+        self.continuation = continuation
     }
 }
 
@@ -196,6 +402,8 @@ private final class ChromiumBrowserBridge: @unchecked Sendable {
     typealias CreateBrowser = @convention(c) (UnsafePointer<CChar>?, StateCallback?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
     typealias GetView = @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
     typealias LoadURL = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
+    typealias EvaluateCallback = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
+    typealias EvaluateJavaScript = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, EvaluateCallback?, UnsafeMutableRawPointer?) -> Void
     typealias BrowserCommand = @convention(c) (UnsafeMutableRawPointer?) -> Void
 
     let handle: UnsafeMutableRawPointer
@@ -203,6 +411,7 @@ private final class ChromiumBrowserBridge: @unchecked Sendable {
     let createBrowser: CreateBrowser
     let getViewFunction: GetView
     let loadURLFunction: LoadURL
+    let evaluateJavaScriptFunction: EvaluateJavaScript
     let reload: BrowserCommand
     let stopLoading: BrowserCommand
     let goBack: BrowserCommand
@@ -227,6 +436,7 @@ private final class ChromiumBrowserBridge: @unchecked Sendable {
         createBrowser = try Self.symbol(handle, "KookyCEFCreateBrowser", as: CreateBrowser.self)
         getViewFunction = try Self.symbol(handle, "KookyCEFGetView", as: GetView.self)
         loadURLFunction = try Self.symbol(handle, "KookyCEFLoadURL", as: LoadURL.self)
+        evaluateJavaScriptFunction = try Self.symbol(handle, "KookyCEFEvaluateJavaScript", as: EvaluateJavaScript.self)
         reload = try Self.symbol(handle, "KookyCEFReload", as: BrowserCommand.self)
         stopLoading = try Self.symbol(handle, "KookyCEFStopLoading", as: BrowserCommand.self)
         goBack = try Self.symbol(handle, "KookyCEFGoBack", as: BrowserCommand.self)
@@ -254,10 +464,29 @@ private final class ChromiumBrowserBridge: @unchecked Sendable {
         url.withCString { loadURLFunction(browser, $0) }
     }
 
+    func evaluateJavaScript(
+        _ browser: UnsafeMutableRawPointer,
+        _ script: String,
+        _ callback: EvaluateCallback?,
+        _ context: UnsafeMutableRawPointer?
+    ) {
+        script.withCString { evaluateJavaScriptFunction(browser, $0, callback, context) }
+    }
+
     private static func symbol<T>(_ handle: UnsafeMutableRawPointer, _ name: String, as type: T.Type) throws -> T {
         guard let pointer = dlsym(handle, name) else {
             throw ChromiumBrowserError.missingSymbol(name)
         }
         return unsafeBitCast(pointer, to: type)
+    }
+}
+
+private extension String {
+    func ensuringTrailingNewline() -> String {
+        hasSuffix("\n") ? self : self + "\n"
+    }
+
+    func trimmedForCLI() -> String {
+        trimmingCharacters(in: .whitespacesAndNewlines).ensuringTrailingNewline()
     }
 }

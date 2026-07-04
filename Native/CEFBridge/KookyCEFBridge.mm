@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstring>
 #include <dispatch/dispatch.h>
+#include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -73,6 +75,11 @@ struct KookyCEFClient {
   KookyCEFBrowser* owner;
 };
 
+struct KookyCEFEvaluation {
+  KookyCEFEvaluateCallback callback;
+  void* context;
+};
+
 struct KookyCEFApp {
   cef_app_t app;
 };
@@ -90,6 +97,9 @@ struct KookyCEFBrowser {
   int can_go_forward;
   int is_loading;
   int closing;
+  int next_eval_id;
+  std::mutex eval_mutex;
+  std::map<int, KookyCEFEvaluation> evaluations;
 };
 
 bool g_initialized = false;
@@ -253,6 +263,100 @@ void ResizeBrowser(KookyCEFBrowser* owner) {
   host->was_resized(host);
 }
 
+std::string JSONValueToString(id value) {
+  if (!value || value == [NSNull null]) {
+    return "";
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    return [(NSString*)value UTF8String];
+  }
+  if ([value isKindOfClass:[NSNumber class]]) {
+    return [[(NSNumber*)value stringValue] UTF8String];
+  }
+  NSData* encoded = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+  if (!encoded) {
+    return "";
+  }
+  NSString* json = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
+  return json ? [json UTF8String] : "";
+}
+
+std::string ParseJSONValueToString(const std::string& json) {
+  if (json.empty() || json == "undefined") {
+    return "";
+  }
+  NSData* data = [NSData dataWithBytes:json.data() length:json.size()];
+  NSError* error = nil;
+  id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  return error ? "" : JSONValueToString(object);
+}
+
+std::string JSONStringLiteral(const std::string& value) {
+  NSString* string = [[NSString alloc] initWithBytes:value.data()
+                                             length:value.size()
+                                           encoding:NSUTF8StringEncoding];
+  if (!string) {
+    string = @"";
+  }
+  NSArray* array = @[ string ];
+  NSData* data = [NSJSONSerialization dataWithJSONObject:array options:0 error:nil];
+  NSString* json = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"[\"\"]";
+  if (!json || json.length < 2) {
+    return "\"\"";
+  }
+  NSString* literal = [json substringWithRange:NSMakeRange(1, json.length - 2)];
+  return [literal UTF8String] ? [literal UTF8String] : "\"\"";
+}
+
+void FinishEvaluation(KookyCEFBrowser* owner, int message_id, const std::string& result) {
+  if (!owner) {
+    return;
+  }
+  KookyCEFEvaluation evaluation = {};
+  {
+    std::lock_guard<std::mutex> lock(owner->eval_mutex);
+    auto it = owner->evaluations.find(message_id);
+    if (it == owner->evaluations.end()) {
+      return;
+    }
+    evaluation = it->second;
+    owner->evaluations.erase(it);
+  }
+  if (evaluation.callback) {
+    evaluation.callback(evaluation.context, result.c_str());
+  }
+}
+
+void FinishEvaluationFromConsoleMessage(KookyCEFBrowser* owner, const std::string& message) {
+  static const std::string prefix = "__KOOKY_EVAL_RESULT__";
+  if (message.rfind(prefix, 0) != 0) {
+    return;
+  }
+  size_t marker = message.find("__", prefix.size());
+  if (marker == std::string::npos) {
+    return;
+  }
+  int message_id = atoi(message.substr(prefix.size(), marker - prefix.size()).c_str());
+  std::string json = message.substr(marker + 2);
+  FinishEvaluation(owner, message_id, ParseJSONValueToString(json));
+}
+
+void FinishAllEvaluations(KookyCEFBrowser* owner) {
+  if (!owner) {
+    return;
+  }
+  std::map<int, KookyCEFEvaluation> evaluations;
+  {
+    std::lock_guard<std::mutex> lock(owner->eval_mutex);
+    evaluations.swap(owner->evaluations);
+  }
+  for (const auto& item : evaluations) {
+    if (item.second.callback) {
+      item.second.callback(item.second.context, "");
+    }
+  }
+}
+
 }  // namespace
 
 static void KookyCEFResizeBrowser(void* owner) {
@@ -324,12 +428,25 @@ void OnBeforeClose(cef_life_span_handler_t* self, cef_browser_t* browser) {
   }
   if (owner->closing) {
     dispatch_async(dispatch_get_main_queue(), ^{
+      FinishAllEvaluations(owner);
       delete owner->client;
       delete owner;
     });
     return;
   }
   Publish(owner);
+}
+
+int OnConsoleMessage(
+    cef_display_handler_t* self,
+    cef_browser_t*,
+    cef_log_severity_t,
+    const cef_string_t* message,
+    const cef_string_t*,
+    int) {
+  auto* owner = OwnerFromDisplay(self);
+  FinishEvaluationFromConsoleMessage(owner, CefStringToStdString(message));
+  return 0;
 }
 
 void OnLoadingStateChange(
@@ -357,6 +474,7 @@ KookyCEFClient* MakeClient(KookyCEFBrowser* owner) {
   client->client.get_load_handler = GetLoadHandler;
   client->display.on_address_change = OnAddressChange;
   client->display.on_title_change = OnTitleChange;
+  client->display.on_console_message = OnConsoleMessage;
   client->life_span.on_after_created = OnAfterCreated;
   client->life_span.on_before_close = OnBeforeClose;
   client->load.on_loading_state_change = OnLoadingStateChange;
@@ -404,7 +522,7 @@ int KookyCEFInitialize(const char* cache_path) {
   cef_settings_t settings = {};
   settings.size = sizeof(settings);
   settings.no_sandbox = 1;
-  settings.external_message_pump = 0;
+  settings.external_message_pump = 1;
   SetCefString(&settings.user_agent_product, "KookyChromium/1.0");
   std::string helper_path = HelperExecutablePath();
   if (!helper_path.empty()) {
@@ -467,6 +585,7 @@ void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, voi
   owner->can_go_forward = 0;
   owner->is_loading = 0;
   owner->closing = 0;
+  owner->next_eval_id = 1;
 
   cef_window_info_t window_info = {};
   window_info.size = sizeof(window_info);
@@ -543,6 +662,62 @@ void KookyCEFGoForward(void* browser) {
   }
 }
 
+void KookyCEFEvaluateJavaScript(
+    void* browser,
+    const char* script,
+    KookyCEFEvaluateCallback callback,
+    void* context) {
+  auto* owner = reinterpret_cast<KookyCEFBrowser*>(browser);
+  if (!owner || owner->closing || !owner->browser || !callback) {
+    if (callback) {
+      callback(context, "");
+    }
+    return;
+  }
+  std::string script_copy = script ? script : "";
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (!owner || owner->closing || !owner->browser) {
+      callback(context, "");
+      return;
+    }
+    auto* frame = owner->browser->get_main_frame(owner->browser);
+    if (!frame) {
+      callback(context, "");
+      return;
+    }
+
+    int message_id = owner->next_eval_id++;
+    {
+      std::lock_guard<std::mutex> lock(owner->eval_mutex);
+      owner->evaluations[message_id] = { callback, context };
+    }
+
+    std::string prefix = "__KOOKY_EVAL_RESULT__" + std::to_string(message_id) + "__";
+    std::string code =
+        "(async function(){"
+        "const __kookyPrefix=" + JSONStringLiteral(prefix) + ";"
+        "const __kookySource=" + JSONStringLiteral(script_copy) + ";"
+        "try{"
+        "const __kookyValue=await (0,eval)(__kookySource);"
+        "let __kookyJSON=JSON.stringify(__kookyValue);"
+        "if(__kookyJSON===undefined){__kookyJSON='';}"
+        "console.log(__kookyPrefix+__kookyJSON);"
+        "}catch(e){console.log(__kookyPrefix+JSON.stringify(''));}"
+        "})();";
+    cef_string_t wrapped = {};
+    cef_string_t script_url = {};
+    SetCefString(&wrapped, code.c_str());
+    SetCefString(&script_url, "kooky://eval");
+    frame->execute_java_script(frame, &wrapped, &script_url, 1);
+    cef_string_clear(&wrapped);
+    cef_string_clear(&script_url);
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      FinishEvaluation(owner, message_id, "");
+    });
+  });
+}
+
 void KookyCEFCloseBrowser(void* browser) {
   auto* owner = reinterpret_cast<KookyCEFBrowser*>(browser);
   if (!owner) {
@@ -554,6 +729,7 @@ void KookyCEFCloseBrowser(void* browser) {
   owner->closing = 1;
   owner->callback = nullptr;
   owner->callback_context = nullptr;
+  FinishAllEvaluations(owner);
   if (owner->browser) {
     auto* host = owner->browser->get_host(owner->browser);
     if (host) {

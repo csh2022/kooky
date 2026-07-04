@@ -11,6 +11,7 @@ typedef void (*KookyCEFStateCallback)(
     int can_go_back,
     int can_go_forward,
     int is_loading);
+typedef void (*KookyCEFEvaluateCallback)(void* context, const char* result);
 
 int KookyCEFInstallApplication(void);
 int KookyCEFInitialize(const char* cache_path);
@@ -22,6 +23,7 @@ void KookyCEFReload(void* browser);
 void KookyCEFStopLoading(void* browser);
 void KookyCEFGoBack(void* browser);
 void KookyCEFGoForward(void* browser);
+void KookyCEFEvaluateJavaScript(void* browser, const char* script, KookyCEFEvaluateCallback callback, void* context);
 void KookyCEFCloseBrowser(void* browser);
 
 #ifdef __cplusplus

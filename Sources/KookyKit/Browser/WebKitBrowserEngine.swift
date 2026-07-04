@@ -373,7 +373,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         return fmt
     }()
 
-    private static func clickJavaScript(text: String) -> String {
+    static func clickJavaScript(text: String) -> String {
         let needle = javaScriptStringLiteral(text)
         return """
         (() => {
@@ -417,7 +417,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func clickElementJavaScript(id: String, double: Bool) -> String {
+    static func clickElementJavaScript(id: String, double: Bool) -> String {
         let id = javaScriptStringLiteral(id)
         let event = double ? "dblclick" : "click"
         return """
@@ -436,7 +436,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func clickAtJavaScript(x: Double, y: Double) -> String {
+    static func clickAtJavaScript(x: Double, y: Double) -> String {
         """
         (() => {
           const x = \(x);
@@ -453,7 +453,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func fillJavaScript(field: String, text: String) -> String {
+    static func fillJavaScript(field: String, text: String) -> String {
         let field = javaScriptStringLiteral(field)
         let value = javaScriptStringLiteral(text)
         return """
@@ -522,7 +522,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func fillElementJavaScript(id: String, text: String) -> String {
+    static func fillElementJavaScript(id: String, text: String) -> String {
         let id = javaScriptStringLiteral(id)
         let value = javaScriptStringLiteral(text)
         return """
@@ -564,7 +564,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func credentialFormJavaScript() -> String {
+    static func credentialFormJavaScript() -> String {
         """
         (() => {
           const visible = (el) => {
@@ -610,7 +610,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func fillCredentialJavaScript(account: String, password: String) -> String {
+    static func fillCredentialJavaScript(account: String, password: String) -> String {
         let account = javaScriptStringLiteral(account)
         let password = javaScriptStringLiteral(password)
         return """
@@ -676,7 +676,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func clearJavaScript(field: String) -> String {
+    static func clearJavaScript(field: String) -> String {
         let field = javaScriptStringLiteral(field)
         return """
         (() => {
@@ -712,7 +712,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func typeJavaScript(text: String) -> String {
+    static func typeJavaScript(text: String) -> String {
         let value = javaScriptStringLiteral(text)
         return """
         (() => {
@@ -738,7 +738,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func pressJavaScript(key: String) -> String {
+    static func pressJavaScript(key: String) -> String {
         let key = javaScriptStringLiteral(key)
         return """
         (() => {
@@ -802,7 +802,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func hotkeyJavaScript(combo: String) -> String {
+    static func hotkeyJavaScript(combo: String) -> String {
         let combo = javaScriptStringLiteral(combo)
         return """
         (() => {
@@ -832,7 +832,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func scrollJavaScript(direction: String, amount: Double?) -> String {
+    static func scrollJavaScript(direction: String, amount: Double?) -> String {
         let normalized = direction.lowercased()
         let distance = amount ?? 0
         let fallback = "Math.max(window.innerHeight * 0.85, 400)"
@@ -982,7 +982,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func hoverJavaScript(id: String) -> String {
+    static func hoverJavaScript(id: String) -> String {
         let id = javaScriptStringLiteral(id)
         return """
         (() => {
@@ -997,7 +997,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func pageTextJavaScript() -> String {
+    static func pageTextJavaScript() -> String {
         """
         (() => {
           const text = document.body ? (document.body.innerText || document.body.textContent || '') : '';
@@ -1006,7 +1006,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func linksJavaScript() -> String {
+    static func linksJavaScript() -> String {
         """
         (() => {
           \(domUtilityJavaScript())
@@ -1020,7 +1020,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func elementsJavaScript() -> String {
+    static func elementsJavaScript() -> String {
         """
         (() => {
           \(domUtilityJavaScript())
@@ -1042,7 +1042,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func domUtilityJavaScript() -> String {
+    static func domUtilityJavaScript() -> String {
         """
         window.__kookyElementId = window.__kookyElementId || ((el) => {
           if (el.getAttribute && el.getAttribute('data-kooky-id')) return el.getAttribute('data-kooky-id');
@@ -1103,7 +1103,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
         """
     }
 
-    private static func javaScriptStringLiteral(_ value: String) -> String {
+    static func javaScriptStringLiteral(_ value: String) -> String {
         guard
             let data = try? JSONSerialization.data(withJSONObject: [value]),
             let encoded = String(data: data, encoding: .utf8),
