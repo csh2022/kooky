@@ -118,6 +118,7 @@ std::map<std::string, cef_v8_context_t*> g_render_contexts;
 
 constexpr const char* kEvalMessageName = "KookyEval";
 constexpr const char* kEvalResultMessageName = "KookyEvalResult";
+constexpr const char* kEvalContextNotReadyResult = "__KOOKY_CONTEXT_NOT_READY__";
 
 template <typename T>
 void InitBase(T* value) {
@@ -564,7 +565,7 @@ int OnRenderProcessMessageReceived(
       }
     }
   }
-  std::string result = EvaluateInRenderContext(context, script);
+  std::string result = context ? EvaluateInRenderContext(context, script) : kEvalContextNotReadyResult;
   if (context && context->base.release) {
     context->base.release(&context->base);
   }
@@ -824,15 +825,23 @@ void KookyCEFDoMessageLoopWork(void) {
   }
 }
 
-void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, void* context) {
+static void* KookyCEFCreateBrowserWithParent(NSView* parent, const char* url, KookyCEFStateCallback callback, void* context) {
   if (!g_initialized) {
     return nullptr;
   }
   auto* owner = new KookyCEFBrowser();
-  auto* container = [[KookyCEFContainerView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 800)];
+  NSRect frame = parent ? parent.bounds : NSMakeRect(0, 0, 1280, 800);
+  if (frame.size.width <= 0 || frame.size.height <= 0) {
+    frame = NSMakeRect(0, 0, 1280, 800);
+  }
+  auto* container = [[KookyCEFContainerView alloc] initWithFrame:frame];
   container.browserOwner = owner;
   container.wantsLayer = YES;
   container.layer.masksToBounds = YES;
+  container.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  if (parent) {
+    [parent addSubview:container];
+  }
   owner->container = container;
   owner->browser = nullptr;
   owner->client = MakeClient(owner);
@@ -852,8 +861,8 @@ void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, voi
   window_info.parent_view = CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(owner->container);
   window_info.bounds.x = 0;
   window_info.bounds.y = 0;
-  window_info.bounds.width = 1280;
-  window_info.bounds.height = 800;
+  window_info.bounds.width = static_cast<int>(frame.size.width);
+  window_info.bounds.height = static_cast<int>(frame.size.height);
   window_info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
 
   cef_browser_settings_t browser_settings = {};
@@ -869,10 +878,25 @@ void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, voi
       nullptr);
   cef_string_clear(&cef_url);
   if (!ok) {
+    [container removeFromSuperview];
+    delete owner->client;
+    delete owner;
     return nullptr;
   }
   Publish(owner);
   return owner;
+}
+
+void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, void* context) {
+  return KookyCEFCreateBrowserWithParent(nil, url, callback, context);
+}
+
+void* KookyCEFCreateBrowserInView(void* parent_view, const char* url, KookyCEFStateCallback callback, void* context) {
+  if (!parent_view) {
+    return nullptr;
+  }
+  NSView* parent = (__bridge NSView*)parent_view;
+  return KookyCEFCreateBrowserWithParent(parent, url, callback, context);
 }
 
 void* KookyCEFGetView(void* browser) {

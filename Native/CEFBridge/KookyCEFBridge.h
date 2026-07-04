@@ -18,6 +18,7 @@ int KookyCEFExecuteProcess(int argc, char* argv[]);
 int KookyCEFInitialize(const char* cache_path);
 void KookyCEFDoMessageLoopWork(void);
 void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, void* context);
+void* KookyCEFCreateBrowserInView(void* parent_view, const char* url, KookyCEFStateCallback callback, void* context);
 void* KookyCEFGetView(void* browser);
 void KookyCEFLoadURL(void* browser, const char* url);
 void KookyCEFReload(void* browser);

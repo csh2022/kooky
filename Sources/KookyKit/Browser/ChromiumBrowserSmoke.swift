@@ -142,6 +142,114 @@ public enum ChromiumBrowserSmoke {
     }
 
     @MainActor
+    public static func runHookCommands(urlString: String = "https://example.com") -> Int32 {
+        log("hook smoke starting")
+        guard URL(string: urlString) != nil else {
+            fputs("invalid smoke URL: \(urlString)\n", stderr)
+            return 2
+        }
+        let runtime = ChromiumBrowserRuntime.bundledRuntime()
+        guard case .available = runtime.status() else {
+            fputs((runtime.status().message ?? "Chromium runtime unavailable") + "\n", stderr)
+            return 1
+        }
+
+        do {
+            _ = NSApplication.shared
+            let store = WorkspaceStore(
+                persistence: SmokePersistence(),
+                engineFactory: { SmokeTerminalEngine() },
+                optionsProvider: { _ in nil },
+                resumeProvider: { true },
+                browserEngineFactory: {
+                    do {
+                        return try ChromiumBrowserEngine(runtime: runtime)
+                    } catch {
+                        return UnsupportedChromiumBrowserEngine(missingRequirements: [error.localizedDescription])
+                    }
+                },
+                worktreeCapabilityProbe: { _ in false }
+            )
+            guard let workspace = store.active,
+                  let sessionId = workspace.activeSession?.id
+            else {
+                fputs("hook smoke failed: no active session\n", stderr)
+                return 1
+            }
+            func command(_ label: String, _ command: HookBrowserCommand) throws -> String {
+                try runAsync(label) {
+                    await store.applyBrowserCommand(command, sessionId: sessionId) ?? ""
+                }
+            }
+
+            log("hook smoke opening \(urlString)")
+            let opened = try command("open", .open(address: urlString))
+            try assertContains(opened, "title:", "open")
+            guard let browser = workspace.root.allBrowserPanes.first else {
+                throw SmokeFailure("browser pane was not created")
+            }
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = browser.surface.engine.view
+            window.orderFrontRegardless()
+
+            guard waitUntil(timeout: 15, predicate: {
+                !browser.surface.snapshot.isLoading
+                    && !browser.surface.snapshot.urlString.isEmpty
+                    && browser.surface.snapshot.urlString != "about:blank"
+            }) else {
+                throw SmokeFailure("page did not load")
+            }
+
+            log("hook smoke reading DOM")
+            try assertContains(try command("text", .text), "Kooky Browser Agent Test", "text")
+            let elements = try command("elements", .elements)
+            try assertContains(elements, "Submit Agent Test", "elements")
+            try assertContains(try command("links", .links), "Go Bottom Link", "links")
+            try assertContains(try command("snapshot", .snapshot(path: nil)), "Elements:", "snapshot")
+            let notesId = try elementId(containing: "Notes", in: elements)
+            let submitId = try elementId(containing: "Submit Agent Test", in: elements)
+            let hoverId = try elementId(containing: "Go Bottom Link", in: elements)
+
+            log("hook smoke interacting")
+            try assertCommand(try command("fill", .fill(field: "Name", text: "Alice")), contains: "ok", label: "fill")
+            try assertCommand(try command("click", .click(text: "Submit Agent Test")), contains: "ok", label: "click")
+            try assertContains(try command("wait text", .wait(text: "clicked:Alice", timeoutMilliseconds: 3000)), "clicked:Alice", "wait text")
+            try assertCommand(try command("clear", .clear(field: "Name")), contains: "ok", label: "clear")
+            try assertCommand(try command("refill", .fill(field: "Name", text: "Alice")), contains: "ok", label: "refill")
+            try assertCommand(try command("fill-id", .fillId(id: notesId, text: "memo")), contains: "ok", label: "fill-id")
+            try assertCommand(try command("click-id", .clickId(id: submitId, double: false)), contains: "ok", label: "click-id")
+            try assertCommand(try command("click-at", .clickAt(x: 10, y: 10)), contains: "ok", label: "click-at")
+            try assertCommand(try command("press", .press(key: "Tab")), contains: "ok", label: "press")
+            try assertCommand(try command("scroll", .scroll(direction: "down", amount: 900)), contains: "scroll", label: "scroll")
+            try assertCommand(try command("hover", .hover(id: hoverId)), contains: "ok", label: "hover")
+            try assertContains(try command("wait-url", .waitURL(text: "127.0.0.1", timeoutMilliseconds: 1000)), "127.0.0.1", "wait-url")
+            try assertContains(try command("wait-title", .waitTitle(text: "Kooky Browser Agent Test", timeoutMilliseconds: 1000)), "Kooky Browser Agent Test", "wait-title")
+
+            let screenshotPath = "/tmp/kooky-chromium-hook-smoke.png"
+            try assertContains(try command("screenshot", .screenshot(path: screenshotPath)), screenshotPath, "screenshot")
+            guard let size = try? FileManager.default.attributesOfItem(atPath: screenshotPath)[.size] as? NSNumber,
+                  size.intValue > 0 else {
+                throw SmokeFailure("screenshot file was not written")
+            }
+
+            try assertCommand(try command("close", .close), contains: "ok", label: "close")
+            window.close()
+            print("hook-smoke: ok")
+            log("hook smoke finished")
+            return 0
+        } catch {
+            fputs("hook smoke failed: \(error.localizedDescription)\n", stderr)
+            return 1
+        }
+    }
+
+    @MainActor
     private static func waitUntil(timeout: TimeInterval, predicate: @escaping @MainActor () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -205,4 +313,38 @@ public enum ChromiumBrowserSmoke {
         init(_ message: String) { self.message = message }
         var errorDescription: String? { message }
     }
+}
+
+private struct SmokePersistence: Persistence {
+    func load() -> PersistedState? { nil }
+    func save(_ state: PersistedState) {}
+}
+
+@MainActor
+private final class SmokeTerminalEngine: TerminalEngine {
+    let view: NSView = NSView()
+    var backgroundColor: NSColor { .black }
+    var onPwdChange: ((String) -> Void)?
+    var onTitleChange: ((String) -> Void)?
+    var onFocus: (() -> Void)?
+    var onCommandFinished: ((Int?, TimeInterval) -> Void)?
+    var onUserInput: (() -> Void)?
+    var onSearchStart: ((String) -> Void)?
+    var onSearchEnd: (() -> Void)?
+    var onSearchTotal: ((Int) -> Void)?
+    var onSearchSelected: ((Int) -> Void)?
+    var foregroundPid: pid_t? { nil }
+    var onProcessExitedCleanly: (() -> Void)?
+    var suspendsSizePropagation = false
+    var grabsFocusOnMount = true
+    var isRenderingActive = true
+
+    func start(config: TerminalSessionConfig) {}
+    func terminate() {}
+    func flushSize() {}
+    @discardableResult
+    func performAction(_ name: String) -> Bool { true }
+    func sendInput(_ text: String) {}
+    func paste(_ text: String) {}
+    func readSelection() -> String? { nil }
 }
