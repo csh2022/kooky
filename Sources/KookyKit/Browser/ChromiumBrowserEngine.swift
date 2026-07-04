@@ -26,6 +26,9 @@ final class ChromiumBrowserEngine: BrowserEngine {
     private var syntheticForwardURL: String?
     private var lastObservedURL = ""
     private var lastMatchedURL = ""
+    private var observedHistory = ChromiumBrowserObservedHistory()
+    private var pendingObservedHistoryIndex: Int?
+    private var pendingBackForwardURL: String?
     private var currentSnapshot = BrowserEngineSnapshot(
         title: "Chromium",
         urlString: "",
@@ -70,6 +73,8 @@ final class ChromiumBrowserEngine: BrowserEngine {
         syntheticCanGoBack = false
         syntheticCanGoForward = false
         syntheticForwardURL = nil
+        pendingObservedHistoryIndex = nil
+        pendingBackForwardURL = nil
         lastMatchedURL = ""
         if let browser {
             bridge.loadURL(browser.raw, request.url.absoluteString)
@@ -89,6 +94,8 @@ final class ChromiumBrowserEngine: BrowserEngine {
         syntheticCanGoBack = false
         syntheticCanGoForward = false
         syntheticForwardURL = nil
+        pendingObservedHistoryIndex = nil
+        pendingBackForwardURL = nil
         lastMatchedURL = ""
         bridge.reload(browser.raw)
         currentSnapshot.isLoading = true
@@ -104,6 +111,26 @@ final class ChromiumBrowserEngine: BrowserEngine {
     func goBack() {
         guard let browser else { return }
         let previousURL = currentSnapshot.urlString
+        if !previousURL.isEmpty {
+            pendingBackForwardURL = previousURL
+        }
+        if !currentSnapshot.urlString.isEmpty {
+            observedHistory.observe(currentSnapshot.urlString)
+        }
+        if let target = observedHistory.backTarget() {
+            pendingObservedHistoryIndex = target.index
+            syntheticCanGoBack = observedHistory.canGoBack(afterMovingTo: target.index)
+            syntheticCanGoForward = true
+            syntheticForwardURL = observedHistory.currentURL
+            bridge.loadURL(browser.raw, target.url)
+            currentSnapshot.urlString = target.url
+            currentSnapshot.isLoading = true
+            currentSnapshot.canGoBack = syntheticCanGoBack
+            currentSnapshot.canGoForward = true
+            apply(currentSnapshot)
+            scheduleDocumentReadyProbe()
+            return
+        }
         let usedNativeBack = currentSnapshot.canGoBack && !syntheticCanGoBack
         if usedNativeBack {
             bridge.goBack(browser.raw)
@@ -128,6 +155,21 @@ final class ChromiumBrowserEngine: BrowserEngine {
 
     func goForward() {
         guard let browser else { return }
+        pendingBackForwardURL = nil
+        if let target = observedHistory.forwardTarget() {
+            pendingObservedHistoryIndex = target.index
+            syntheticCanGoBack = true
+            syntheticCanGoForward = observedHistory.canGoForward(afterMovingTo: target.index)
+            syntheticForwardURL = observedHistory.url(after: target.index)
+            bridge.loadURL(browser.raw, target.url)
+            currentSnapshot.urlString = target.url
+            currentSnapshot.isLoading = true
+            currentSnapshot.canGoBack = true
+            currentSnapshot.canGoForward = syntheticCanGoForward
+            apply(currentSnapshot)
+            scheduleDocumentReadyProbe()
+            return
+        }
         let previousURL = currentSnapshot.urlString
         if syntheticCanGoForward, let syntheticForwardURL {
             bridge.loadURL(browser.raw, syntheticForwardURL)
@@ -248,6 +290,7 @@ final class ChromiumBrowserEngine: BrowserEngine {
             let currentURL = self.snapshot.urlString
             if currentURL.localizedCaseInsensitiveContains(text) {
                 self.lastMatchedURL = currentURL
+                self.recordObservedHistoryURL(currentURL)
             }
             return currentURL
         }
@@ -257,6 +300,9 @@ final class ChromiumBrowserEngine: BrowserEngine {
         await waitForCondition(label: "title", text: text, timeoutMilliseconds: timeoutMilliseconds) { [weak self] in
             guard let self else { return "" }
             await self.refreshDocumentSnapshot()
+            if self.snapshot.title.localizedCaseInsensitiveContains(text) {
+                self.recordObservedHistoryURL(self.snapshot.urlString)
+            }
             return self.snapshot.title
         }
     }
@@ -337,6 +383,36 @@ final class ChromiumBrowserEngine: BrowserEngine {
 
     private func apply(_ snapshot: BrowserEngineSnapshot) {
         var nextSnapshot = snapshot
+        if !nextSnapshot.isLoading, !nextSnapshot.urlString.isEmpty {
+            let pendingForwardURL = syntheticForwardURL
+            if let pendingObservedHistoryIndex,
+               observedHistory.url(at: pendingObservedHistoryIndex) != nil {
+                observedHistory.move(to: pendingObservedHistoryIndex)
+                observedHistory.replaceCurrentURL(with: nextSnapshot.urlString)
+                self.pendingObservedHistoryIndex = nil
+                pendingBackForwardURL = nil
+                syntheticCanGoForward = observedHistory.canGoForward || pendingForwardURL != nil
+                syntheticForwardURL = observedHistory.forwardTarget()?.url ?? pendingForwardURL
+            } else if let pendingBackForwardURL {
+                observedHistory.recordBackLanding(nextSnapshot.urlString, forwardURL: pendingBackForwardURL)
+                self.pendingBackForwardURL = nil
+                pendingObservedHistoryIndex = nil
+                syntheticCanGoForward = observedHistory.canGoForward
+                syntheticForwardURL = observedHistory.forwardTarget()?.url ?? pendingBackForwardURL
+            } else {
+                observedHistory.observe(nextSnapshot.urlString)
+                pendingObservedHistoryIndex = nil
+                syntheticCanGoForward = observedHistory.canGoForward
+                syntheticForwardURL = observedHistory.forwardTarget()?.url
+            }
+            syntheticCanGoBack = observedHistory.canGoBack
+            if observedHistory.canGoBack {
+                nextSnapshot.canGoBack = true
+            }
+            if syntheticCanGoForward {
+                nextSnapshot.canGoForward = true
+            }
+        }
         if syntheticCanGoBack {
             nextSnapshot.canGoBack = true
         }
@@ -348,6 +424,17 @@ final class ChromiumBrowserEngine: BrowserEngine {
         if nextSnapshot.isLoading {
             scheduleDocumentReadyProbe()
         }
+    }
+
+    private func recordObservedHistoryURL(_ url: String) {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        observedHistory.observe(trimmed)
+        syntheticCanGoBack = observedHistory.canGoBack
+        syntheticCanGoForward = observedHistory.canGoForward
+        syntheticForwardURL = observedHistory.forwardTarget()?.url
+        currentSnapshot.canGoBack = currentSnapshot.canGoBack || observedHistory.canGoBack
+        currentSnapshot.canGoForward = currentSnapshot.canGoForward || observedHistory.canGoForward
     }
 
     private func scheduleDocumentReadyProbe() {
@@ -612,6 +699,98 @@ final class ChromiumBrowserEngine: BrowserEngine {
     private static func string(from pointer: UnsafePointer<CChar>?) -> String {
         guard let pointer else { return "" }
         return String(cString: pointer)
+    }
+}
+
+struct ChromiumBrowserObservedHistory {
+    private(set) var urls: [String] = []
+    private(set) var index: Int = -1
+
+    var currentURL: String? {
+        url(at: index)
+    }
+
+    var canGoBack: Bool {
+        index > 0
+    }
+
+    var canGoForward: Bool {
+        index >= 0 && index < urls.count - 1
+    }
+
+    mutating func observe(_ url: String) {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if currentURL == trimmed { return }
+        if index >= 0 && index < urls.count - 1 {
+            urls.removeSubrange((index + 1)..<urls.count)
+        }
+        urls.append(trimmed)
+        index = urls.count - 1
+    }
+
+    mutating func move(to targetIndex: Int) {
+        guard urls.indices.contains(targetIndex) else { return }
+        index = targetIndex
+    }
+
+    mutating func replaceCurrentURL(with url: String) {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, urls.indices.contains(index) else { return }
+        urls[index] = trimmed
+    }
+
+    mutating func recordBackLanding(_ landedURL: String, forwardURL: String) {
+        let landed = landedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let forward = forwardURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !landed.isEmpty, !forward.isEmpty else { return }
+
+        guard let forwardIndex = urls.lastIndex(of: forward) else {
+            observe(landed)
+            if currentURL != forward {
+                urls.append(forward)
+            }
+            index = max(0, urls.count - 2)
+            return
+        }
+
+        if forwardIndex > 0 {
+            urls[forwardIndex - 1] = landed
+            index = forwardIndex - 1
+            return
+        }
+
+        urls.insert(landed, at: forwardIndex)
+        index = forwardIndex
+    }
+
+    func backTarget() -> (index: Int, url: String)? {
+        guard canGoBack else { return nil }
+        let targetIndex = index - 1
+        return (targetIndex, urls[targetIndex])
+    }
+
+    func forwardTarget() -> (index: Int, url: String)? {
+        guard canGoForward else { return nil }
+        let targetIndex = index + 1
+        return (targetIndex, urls[targetIndex])
+    }
+
+    func url(at targetIndex: Int) -> String? {
+        guard urls.indices.contains(targetIndex) else { return nil }
+        return urls[targetIndex]
+    }
+
+    func url(after targetIndex: Int) -> String? {
+        url(at: targetIndex + 1)
+    }
+
+    func canGoBack(afterMovingTo targetIndex: Int) -> Bool {
+        targetIndex > 0 && urls.indices.contains(targetIndex)
+    }
+
+    func canGoForward(afterMovingTo targetIndex: Int) -> Bool {
+        targetIndex >= 0 && targetIndex < urls.count - 1
     }
 }
 

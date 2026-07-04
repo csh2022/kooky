@@ -241,9 +241,7 @@ public enum ChromiumBrowserSmoke {
                 }
                 try assertContains(backState, "canGoForward: true", "back state")
                 let forwardState = try command("forward", .forward)
-                if !forwardState.contains("view=images") {
-                    fputs("hook smoke warning: synthetic history forward did not restore pushed URL\n", stderr)
-                }
+                try assertContains(forwardState, "view=images", "forward state")
             }
             if elements.contains("Native Normal") {
                 try assertCommand(try command("native normal", .click(text: "Native Normal")), contains: "ok", label: "native normal")
@@ -271,6 +269,197 @@ public enum ChromiumBrowserSmoke {
             return 0
         } catch {
             fputs("hook smoke failed: \(error.localizedDescription)\n", stderr)
+            return 1
+        }
+    }
+
+    @MainActor
+    public static func runGoogleCommands() -> Int32 {
+        log("google smoke starting")
+        let runtime = ChromiumBrowserRuntime.bundledRuntime()
+        guard case .available = runtime.status() else {
+            fputs((runtime.status().message ?? "Chromium runtime unavailable") + "\n", stderr)
+            return 1
+        }
+
+        do {
+            _ = NSApplication.shared
+            let engine = try ChromiumBrowserEngine(runtime: runtime)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 744, height: 999),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = engine.view
+            window.orderFrontRegardless()
+
+            guard let request = BrowserLoadRequest("https://www.google.com") else {
+                throw SmokeFailure("invalid Google URL")
+            }
+            log("google smoke loading https://www.google.com")
+            engine.load(request)
+            try assertContains(
+                try runAsync("wait home title") {
+                    await engine.waitForTitle("Google", timeoutMilliseconds: 15_000)
+                },
+                "Google",
+                "home title"
+            )
+
+            log("google smoke reading home")
+            guard waitUntil(timeout: 15, predicate: {
+                ((try? runAsync("home elements probe", timeout: 1) { await engine.elementsJSONLines() }) ?? "")
+                    .contains("\"role\":\"combobox\"")
+            }) else {
+                throw SmokeFailure("Google home DOM elements did not become available")
+            }
+            let homeElements = try runAsync("home elements") { await engine.elementsJSONLines() }
+            if !homeElements.contains("\"role\":\"combobox\"") {
+                fputs("google smoke home elements:\n\(homeElements.prefix(2_000))\n", stderr)
+            }
+            let homeSearchId = try elementId(where: { object in
+                object["role"] as? String == "combobox"
+            }, in: homeElements, label: "home search combobox")
+            try assertContains(try runAsync("home links") { await engine.linksJSONLines() }, "\"href\"", "home links")
+            try assertContains(try runAsync("home text") { await engine.pageText() }, "Sign in", "home text")
+            try assertContains(try runAsync("home html") { await engine.pageHTML() }, "Google", "home html")
+            try assertContains(try runAsync("home snapshot") { await engine.pageSnapshot() }, "Elements:", "home snapshot")
+            let homeScreenshot = "/tmp/kooky-google-smoke-home.png"
+            try assertContains(try runAsync("home screenshot") { await engine.saveScreenshot(to: homeScreenshot) }, homeScreenshot, "home screenshot")
+
+            log("google smoke searching alpha")
+            try assertCommand(
+                try runAsync("fill alpha") { await engine.fillElement(id: homeSearchId, text: "Kooky google smoke alpha") },
+                contains: "ok",
+                label: "fill alpha"
+            )
+            try assertCommand(try runAsync("press alpha") { await engine.press(key: "Enter") }, contains: "ok", label: "press alpha")
+            try assertContains(
+                try runAsync("wait alpha url") {
+                    await engine.waitForURL("Kooky+google+smoke+alpha", timeoutMilliseconds: 15_000)
+                },
+                "Kooky+google+smoke+alpha",
+                "alpha url"
+            )
+            try assertContains(
+                try runAsync("wait alpha title") {
+                    await engine.waitForTitle("alpha", timeoutMilliseconds: 15_000)
+                },
+                "alpha",
+                "alpha title"
+            )
+
+            let staleFill = try runAsync("stale fill") {
+                await engine.fillElement(id: homeSearchId, text: "stale should fail")
+            }
+            guard staleFill.localizedCaseInsensitiveContains("not found") else {
+                throw SmokeFailure("stale home search id unexpectedly filled current page: \(staleFill)")
+            }
+
+            log("google smoke searching beta")
+            let alphaElements = try runAsync("alpha elements") { await engine.elementsJSONLines() }
+            let alphaSearchId = try elementId(where: { object in
+                object["role"] as? String == "combobox"
+            }, in: alphaElements, label: "alpha search combobox")
+            try assertCommand(
+                try runAsync("fill beta") { await engine.fillElement(id: alphaSearchId, text: "Kooky google smoke beta") },
+                contains: "ok",
+                label: "fill beta"
+            )
+            try assertCommand(try runAsync("press beta") { await engine.press(key: "Enter") }, contains: "ok", label: "press beta")
+            try assertContains(
+                try runAsync("wait beta title") {
+                    await engine.waitForTitle("beta", timeoutMilliseconds: 15_000)
+                },
+                "beta",
+                "beta title"
+            )
+
+            log("google smoke paste/type gamma")
+            try assertCommand(try runAsync("clear search") { await engine.clear(field: "Search") }, contains: "ok", label: "clear")
+            engine.paste(text: "Kooky google smoke ")
+            _ = waitUntil(timeout: 0.5) { false }
+            engine.type(text: "gamma")
+            _ = waitUntil(timeout: 0.5) { false }
+            try assertCommand(try runAsync("press gamma") { await engine.press(key: "Enter") }, contains: "ok", label: "press gamma")
+            try assertContains(
+                try runAsync("wait gamma url") {
+                    await engine.waitForURL("Kooky+google+smoke+gamma", timeoutMilliseconds: 15_000)
+                },
+                "Kooky+google+smoke+gamma",
+                "gamma url"
+            )
+            try assertContains(
+                try runAsync("wait gamma title") {
+                    await engine.waitForTitle("gamma", timeoutMilliseconds: 15_000)
+                },
+                "gamma",
+                "gamma title"
+            )
+
+            log("google smoke page interactions")
+            guard waitUntil(timeout: 20, predicate: {
+                let elements = (try? runAsync("gamma nav probe", timeout: 1) { await engine.elementsJSONLines() }) ?? ""
+                return elements.localizedCaseInsensitiveContains("Images") || elements.contains("udm=2")
+            }) else {
+                let elements = (try? runAsync("gamma nav timeout elements", timeout: 2) { await engine.elementsJSONLines() }) ?? ""
+                throw SmokeFailure("Google result navigation did not become available: \(elements.prefix(1_000))")
+            }
+            var gammaElements = try runAsync("gamma elements") { await engine.elementsJSONLines() }
+            if !gammaElements.localizedCaseInsensitiveContains("images") && !gammaElements.contains("udm=2") {
+                fputs("google smoke gamma elements:\n\(gammaElements.prefix(3_000))\n", stderr)
+            }
+            let imagesId = try googleImagesElementId(in: gammaElements)
+            try assertCommand(try runAsync("hover images") { await engine.hover(id: imagesId) }, contains: "ok", label: "hover images")
+            try assertCommand(try runAsync("click at") { await engine.clickAt(x: 20, y: 20) }, contains: "ok", label: "click at")
+            try assertScrollMoved(try runAsync("scroll down") { await engine.scroll(direction: "down", amount: 600) }, label: "scroll down")
+            try assertScrollMoved(try runAsync("scroll up") { await engine.scroll(direction: "up", amount: 300) }, label: "scroll up")
+            let gammaScreenshot = "/tmp/kooky-google-smoke-gamma.png"
+            try assertContains(try runAsync("gamma screenshot") { await engine.saveScreenshot(to: gammaScreenshot) }, gammaScreenshot, "gamma screenshot")
+            engine.reload()
+            try assertContains(
+                try runAsync("wait reloaded gamma") {
+                    await engine.waitForTitle("gamma", timeoutMilliseconds: 15_000)
+                },
+                "gamma",
+                "reloaded gamma title"
+            )
+            engine.stopLoading()
+
+            log("google smoke images history")
+            _ = try runAsync("scroll top") { await engine.scroll(direction: "up", amount: 2_000) }
+            gammaElements = try runAsync("gamma top elements") { await engine.elementsJSONLines() }
+            let topImagesId = try googleImagesElementId(in: gammaElements)
+            try assertCommand(try runAsync("click images") { await engine.clickElement(id: topImagesId, double: false) }, contains: "ok", label: "click images")
+            try assertContains(
+                try runAsync("wait images url") {
+                    await engine.waitForURL("udm=2", timeoutMilliseconds: 15_000)
+                },
+                "udm=2",
+                "images url"
+            )
+            engine.goBack()
+            guard waitUntil(timeout: 15, predicate: {
+                engine.snapshot.urlString.contains("q=Kooky+google+smoke+gamma")
+                    && !engine.snapshot.urlString.contains("udm=2")
+                    && engine.snapshot.canGoForward
+            }) else {
+                throw SmokeFailure("google images back did not restore normal URL with forward available: \(engine.snapshot)")
+            }
+            engine.goForward()
+            guard waitUntil(timeout: 15, predicate: {
+                engine.snapshot.urlString.contains("udm=2")
+            }) else {
+                throw SmokeFailure("google images forward did not restore images URL: \(engine.snapshot)")
+            }
+
+            print("google-smoke: ok")
+            window.close()
+            log("google smoke finished")
+            return 0
+        } catch {
+            fputs("google smoke failed: \(error.localizedDescription)\n", stderr)
             return 1
         }
     }
@@ -347,17 +536,37 @@ public enum ChromiumBrowserSmoke {
     }
 
     private static func elementId(containing text: String, in jsonLines: String) throws -> String {
+        try elementId(where: { object in
+            let haystack = object.values.compactMap { $0 as? String }.joined(separator: " ")
+            return haystack.localizedCaseInsensitiveContains(text)
+        }, in: jsonLines, label: text)
+    }
+
+    private static func googleImagesElementId(in jsonLines: String) throws -> String {
+        if let id = try? elementId(where: { object in
+            guard let href = object["href"] as? String else { return false }
+            return href.contains("udm=2")
+        }, in: jsonLines, label: "Google Images href") {
+            return id
+        }
+        return try elementId(containing: "Images", in: jsonLines)
+    }
+
+    private static func elementId(
+        where predicate: ([String: Any]) -> Bool,
+        in jsonLines: String,
+        label: String
+    ) throws -> String {
         for line in jsonLines.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let id = object["id"] as? String
             else { continue }
-            let haystack = object.values.compactMap { $0 as? String }.joined(separator: " ")
-            if haystack.localizedCaseInsensitiveContains(text) {
+            if predicate(object) {
                 return id
             }
         }
-        throw SmokeFailure("element id not found for \(text)")
+        throw SmokeFailure("element id not found for \(label)")
     }
 
     private struct SmokeFailure: LocalizedError {
