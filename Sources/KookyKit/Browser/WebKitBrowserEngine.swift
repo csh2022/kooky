@@ -864,6 +864,7 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           const delta = axis === 'x' ? dx : dy;
           const viewportWidth = Math.round(window.innerWidth || document.documentElement.clientWidth || 0);
           const viewportHeight = Math.round(window.innerHeight || document.documentElement.clientHeight || 0);
+          const viewportArea = Math.max(1, viewportWidth * viewportHeight);
           const root = document.scrollingElement || document.documentElement || document.body;
           const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
           const visibleArea = (el) => {
@@ -928,6 +929,12 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
               : '';
             return (tag + id + classes).slice(0, 160);
           };
+          const isLargeSurface = (el) => {
+            if (el === root || el === document.documentElement || el === document.body) return true;
+            const tag = (el.tagName || '').toLowerCase();
+            if (['main', 'article', 'section'].includes(tag)) return true;
+            return visibleArea(el) >= viewportArea * 0.25;
+          };
           const addCandidate = (list, seen, el) => {
             for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
               if (seen.has(node)) continue;
@@ -966,6 +973,10 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             if (!el || candidates.includes(el)) return;
             candidates.push(el);
           };
+          if (axis === 'y' && canMoveAxis(root)) appendCandidate(root);
+          priority.filter((el) => canMoveAxis(el) && isLargeSurface(el)).forEach(appendCandidate);
+          allScrollable.filter((el) => canMoveAxis(el) && isLargeSurface(el)).forEach(appendCandidate);
+          if (axis !== 'y' && canMoveAxis(root)) appendCandidate(root);
           priority.filter(canMoveAxis).forEach(appendCandidate);
           allScrollable.filter(canMoveAxis).forEach(appendCandidate);
           appendCandidate(root);
@@ -1016,7 +1027,10 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             const candidateAfter = metrics(candidate);
             const candidateMovedX = candidateAfter.x - candidateBefore.x;
             const candidateMovedY = candidateAfter.y - candidateBefore.y;
-            if (Math.abs(candidateMovedX) > 0 || Math.abs(candidateMovedY) > 0) {
+            const candidateMovedPrimary = axis === 'x' ? candidateMovedX : candidateMovedY;
+            const meaningfulMovement = Math.abs(candidateMovedPrimary) >= 1
+              && (isLargeSurface(candidate) || Math.abs(candidateMovedPrimary) >= Math.min(Math.abs(delta) * 0.25, 120));
+            if (meaningfulMovement) {
               target = candidate;
               before = candidateBefore;
               after = candidateAfter;

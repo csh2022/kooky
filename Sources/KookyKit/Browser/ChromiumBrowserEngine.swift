@@ -104,7 +104,8 @@ final class ChromiumBrowserEngine: BrowserEngine {
     func goBack() {
         guard let browser else { return }
         let previousURL = currentSnapshot.urlString
-        if currentSnapshot.canGoBack && !syntheticCanGoBack {
+        let usedNativeBack = currentSnapshot.canGoBack && !syntheticCanGoBack
+        if usedNativeBack {
             bridge.goBack(browser.raw)
         }
         currentSnapshot.isLoading = true
@@ -116,7 +117,12 @@ final class ChromiumBrowserEngine: BrowserEngine {
             syntheticForwardURL = lastObservedURL.isEmpty ? (previousURL.isEmpty ? nil : previousURL) : lastObservedURL
         }
         apply(currentSnapshot)
-        scheduleHistoryFallback(script: "history.back()", previousURL: previousURL, direction: .back)
+        scheduleHistoryFallback(
+            script: "history.back()",
+            previousURL: previousURL,
+            direction: .back,
+            runScript: !usedNativeBack
+        )
         scheduleDocumentReadyProbe()
     }
 
@@ -136,14 +142,20 @@ final class ChromiumBrowserEngine: BrowserEngine {
             scheduleDocumentReadyProbe()
             return
         }
-        if currentSnapshot.canGoForward && !syntheticCanGoForward {
+        let usedNativeForward = currentSnapshot.canGoForward && !syntheticCanGoForward
+        if usedNativeForward {
             bridge.goForward(browser.raw)
         }
         currentSnapshot.isLoading = true
         currentSnapshot.canGoBack = true
         syntheticCanGoBack = true
         apply(currentSnapshot)
-        scheduleHistoryFallback(script: "history.forward()", previousURL: previousURL, direction: .forward)
+        scheduleHistoryFallback(
+            script: "history.forward()",
+            previousURL: previousURL,
+            direction: .forward,
+            runScript: !usedNativeForward
+        )
         scheduleDocumentReadyProbe()
     }
 
@@ -377,13 +389,14 @@ final class ChromiumBrowserEngine: BrowserEngine {
     private func scheduleHistoryFallback(
         script: String,
         previousURL: String,
-        direction: HistoryNavigationDirection
+        direction: HistoryNavigationDirection,
+        runScript: Bool
     ) {
         Task { @MainActor [weak self] in
             guard let self else { return }
             var effectivePreviousURL = previousURL
             try? await Task.sleep(nanoseconds: 150_000_000)
-            if self.currentSnapshot.urlString == previousURL {
+            if runScript && self.currentSnapshot.urlString == previousURL {
                 let pageURLBeforeFallback = await self.evaluateString("""
                 (() => {
                   const before = location.href || '';

@@ -28,5 +28,8 @@ final class BrowserCommandJavaScriptTests: XCTestCase {
         XCTAssertTrue(script.contains("for (const candidate of candidates)"))
         XCTAssertTrue(script.contains("restoreElement(candidate, candidateBefore)"))
         XCTAssertTrue(script.contains("'attempts: ' + attempts"))
+        XCTAssertTrue(script.contains("const isLargeSurface = (el) =>"))
+        XCTAssertTrue(script.contains("if (axis === 'y' && canMoveAxis(root)) appendCandidate(root)"))
+        XCTAssertTrue(script.contains("meaningfulMovement"))
     }
 }

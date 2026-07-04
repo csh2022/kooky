@@ -245,6 +245,17 @@ public enum ChromiumBrowserSmoke {
                     fputs("hook smoke warning: synthetic history forward did not restore pushed URL\n", stderr)
                 }
             }
+            if elements.contains("Native Normal") {
+                try assertCommand(try command("native normal", .click(text: "Native Normal")), contains: "ok", label: "native normal")
+                try assertContains(try command("wait native normal", .waitURL(text: "mode=normal", timeoutMilliseconds: 3000)), "mode=normal", "native normal url")
+                try assertCommand(try command("native images", .click(text: "Native Images")), contains: "ok", label: "native images")
+                try assertContains(try command("wait native images", .waitURL(text: "mode=images", timeoutMilliseconds: 3000)), "mode=images", "native images url")
+                let nativeBackState = try command("native back", .back)
+                try assertContains(nativeBackState, "mode=normal", "native back state")
+                try assertContains(nativeBackState, "canGoForward: true", "native back state")
+                let nativeForwardState = try command("native forward", .forward)
+                try assertContains(nativeForwardState, "mode=images", "native forward state")
+            }
 
             let screenshotPath = "/tmp/kooky-chromium-hook-smoke.png"
             try assertContains(try command("screenshot", .screenshot(path: screenshotPath)), screenshotPath, "screenshot")
@@ -321,6 +332,17 @@ public enum ChromiumBrowserSmoke {
             ?? 0
         guard abs(movedY) > 0 else {
             throw SmokeFailure("\(label) reported no vertical movement: \(value)")
+        }
+        let target = value
+            .split(separator: "\n")
+            .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("target:") }
+            .map(String.init)
+            ?? ""
+        guard !target.localizedCaseInsensitiveContains("target: button"),
+              !target.localizedCaseInsensitiveContains("target: span"),
+              !target.localizedCaseInsensitiveContains("target: input")
+        else {
+            throw SmokeFailure("\(label) scrolled a small control instead of the page/body: \(value)")
         }
     }
 
