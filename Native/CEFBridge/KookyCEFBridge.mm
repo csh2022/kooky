@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <dispatch/dispatch.h>
 #include <string>
 #include <vector>
 
@@ -88,6 +89,7 @@ struct KookyCEFBrowser {
   int can_go_back;
   int can_go_forward;
   int is_loading;
+  int closing;
 };
 
 bool g_initialized = false;
@@ -209,7 +211,7 @@ KookyCEFBrowser* OwnerFromLoad(cef_load_handler_t* self) {
 }
 
 void Publish(KookyCEFBrowser* owner) {
-  if (!owner || !owner->callback) {
+  if (!owner || owner->closing || !owner->callback) {
     return;
   }
   owner->callback(
@@ -297,6 +299,13 @@ void OnAfterCreated(cef_life_span_handler_t* self, cef_browser_t* browser) {
   if (browser && browser->base.add_ref) {
     browser->base.add_ref(&browser->base);
   }
+  if (owner->closing) {
+    auto* host = browser ? browser->get_host(browser) : nullptr;
+    if (host) {
+      host->close_browser(host, 1);
+    }
+    return;
+  }
   ResizeBrowser(owner);
   if (!owner->pending_url.empty()) {
     LoadURLOnBrowser(owner, owner->pending_url.c_str());
@@ -308,7 +317,17 @@ void OnAfterCreated(cef_life_span_handler_t* self, cef_browser_t* browser) {
 void OnBeforeClose(cef_life_span_handler_t* self, cef_browser_t* browser) {
   auto* owner = OwnerFromLifeSpan(self);
   if (owner->browser == browser) {
+    if (owner->browser && owner->browser->base.release) {
+      owner->browser->base.release(&owner->browser->base);
+    }
     owner->browser = nullptr;
+  }
+  if (owner->closing) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      delete owner->client;
+      delete owner;
+    });
+    return;
   }
   Publish(owner);
 }
@@ -447,6 +466,7 @@ void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, voi
   owner->can_go_back = 0;
   owner->can_go_forward = 0;
   owner->is_loading = 0;
+  owner->closing = 0;
 
   cef_window_info_t window_info = {};
   window_info.size = sizeof(window_info);
@@ -528,16 +548,16 @@ void KookyCEFCloseBrowser(void* browser) {
   if (!owner) {
     return;
   }
+  if (owner->closing) {
+    return;
+  }
+  owner->closing = 1;
+  owner->callback = nullptr;
+  owner->callback_context = nullptr;
   if (owner->browser) {
     auto* host = owner->browser->get_host(owner->browser);
     if (host) {
       host->close_browser(host, 1);
     }
-    if (owner->browser->base.release) {
-      owner->browser->base.release(&owner->browser->base);
-    }
   }
-  delete owner->client;
-  [owner->container removeFromSuperview];
-  delete owner;
 }
