@@ -232,7 +232,14 @@ if [ -d "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework" ]; th
     if [ -d "${APP}/Contents/Frameworks/KookyCEFBridge.framework" ]; then
         codesign --force --deep --sign - "${APP}/Contents/Frameworks/KookyCEFBridge.framework"
     fi
-    codesign --force --deep --sign - "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
+    CEF_FRAMEWORK="${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
+    if ! codesign --force --deep --sign - "${CEF_FRAMEWORK}"; then
+        if codesign -dv "${CEF_FRAMEWORK}/Versions/A/Chromium Embedded Framework" >/dev/null 2>&1; then
+            echo "warning: keeping existing valid CEF signature after codesign retry failed" >&2
+        else
+            exit 1
+        fi
+    fi
 fi
 codesign --force --sign - "${APP}/Contents/MacOS/${APP_NAME}"
 codesign --force --sign - "${APP}" 2>&1 | tail -3

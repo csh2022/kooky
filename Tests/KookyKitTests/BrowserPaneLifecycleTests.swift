@@ -208,7 +208,7 @@ final class BrowserPaneLifecycleTests: XCTestCase {
 
         let forwardResult = await store.applyBrowserCommand(.forward, sessionId: agentId)
         let forward = try! XCTUnwrap(forwardResult)
-        XCTAssertTrue(forward.contains("forward unavailable: canGoForward false"))
+        XCTAssertTrue(forward.contains("forward requested: canGoForward false before command"))
         XCTAssertTrue(forward.contains("canGoForward: false"))
         XCTAssertEqual(engine.goForwardCount, 1)
     }

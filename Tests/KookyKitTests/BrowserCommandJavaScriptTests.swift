@@ -23,5 +23,7 @@ final class BrowserCommandJavaScriptTests: XCTestCase {
         XCTAssertTrue(script.contains("no scroll movement down"))
         XCTAssertTrue(script.contains("'reason: ' + reason"))
         XCTAssertTrue(script.contains("already at bottom edge"))
+        XCTAssertTrue(script.contains("scroll command had no visible effect"))
+        XCTAssertTrue(script.contains("document.documentElement.scrollTop"))
     }
 }

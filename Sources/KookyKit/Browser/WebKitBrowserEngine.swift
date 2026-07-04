@@ -872,13 +872,23 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             const h = Math.max(0, Math.min(r.bottom, viewportHeight) - Math.max(r.top, 0));
             return w * h;
           };
+          const rootScrollX = () => Math.round(window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft || root.scrollLeft || 0);
+          const rootScrollY = () => Math.round(window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || root.scrollTop || 0);
           const metrics = (el) => {
             if (el === root || el === document.documentElement || el === document.body) {
-              const scrollWidth = Math.round(root.scrollWidth || document.documentElement.scrollWidth || 0);
-              const scrollHeight = Math.round(root.scrollHeight || document.documentElement.scrollHeight || 0);
+              const scrollWidth = Math.round(Math.max(
+                root.scrollWidth || 0,
+                document.documentElement.scrollWidth || 0,
+                document.body.scrollWidth || 0
+              ));
+              const scrollHeight = Math.round(Math.max(
+                root.scrollHeight || 0,
+                document.documentElement.scrollHeight || 0,
+                document.body.scrollHeight || 0
+              ));
               return {
-                x: Math.round(window.scrollX || root.scrollLeft || 0),
-                y: Math.round(window.scrollY || root.scrollTop || 0),
+                x: rootScrollX(),
+                y: rootScrollY(),
                 maxX: Math.max(0, scrollWidth - viewportWidth),
                 maxY: Math.max(0, scrollHeight - viewportHeight),
                 viewportWidth,
@@ -953,10 +963,19 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
             });
           const candidates = priority.concat(allScrollable);
           const movable = candidates.find(canMoveAxis);
-          const target = movable || candidates[0] || root;
+          const target = movable || (canMoveAxis(root) ? root : (candidates[0] || root));
           const before = metrics(target);
           if (target === root || target === document.documentElement || target === document.body) {
             window.scrollBy({ left: dx, top: dy, behavior: 'auto' });
+            let interim = metrics(root);
+            if (Math.abs(interim.x - before.x) === 0 && Math.abs(interim.y - before.y) === 0) {
+              const nextX = clamp(before.x + dx, 0, before.maxX);
+              const nextY = clamp(before.y + dy, 0, before.maxY);
+              try { root.scrollLeft = nextX; root.scrollTop = nextY; } catch {}
+              try { document.documentElement.scrollLeft = nextX; document.documentElement.scrollTop = nextY; } catch {}
+              try { document.body.scrollLeft = nextX; document.body.scrollTop = nextY; } catch {}
+              try { window.scrollTo(nextX, nextY); } catch {}
+            }
           } else {
             target.scrollLeft = clamp((target.scrollLeft || 0) + dx, 0, before.maxX);
             target.scrollTop = clamp((target.scrollTop || 0) + dy, 0, before.maxY);
@@ -965,11 +984,13 @@ final class WebKitBrowserEngine: NSObject, BrowserEngine, WKNavigationDelegate, 
           const movedX = after.x - before.x;
           const movedY = after.y - before.y;
           const moved = Math.abs(movedX) > 0 || Math.abs(movedY) > 0;
+          const current = axis === 'x' ? after.x : after.y;
+          const max = axis === 'x' ? after.maxX : after.maxY;
           const reason = moved
             ? 'moved'
             : (axis === 'x'
-              ? (before.maxX <= 1 ? 'no horizontal scroll range' : (delta > 0 ? 'already at right edge' : 'already at left edge'))
-              : (before.maxY <= 1 ? 'no vertical scroll range' : (delta > 0 ? 'already at bottom edge' : 'already at top edge')));
+              ? (max <= 1 ? 'no horizontal scroll range' : (delta > 0 && current >= max - 1 ? 'already at right edge' : (delta < 0 && current <= 1 ? 'already at left edge' : 'scroll command had no visible effect')))
+              : (max <= 1 ? 'no vertical scroll range' : (delta > 0 && current >= max - 1 ? 'already at bottom edge' : (delta < 0 && current <= 1 ? 'already at top edge' : 'scroll command had no visible effect'))));
           return [
             (moved ? 'ok scrolled \(normalized)' : 'no scroll movement \(normalized)'),
             'target: ' + descriptor(target),

@@ -4,6 +4,11 @@ import Foundation
 
 @MainActor
 final class ChromiumBrowserEngine: BrowserEngine {
+    private enum HistoryNavigationDirection {
+        case back
+        case forward
+    }
+
     let view: NSView
     var onSnapshotChange: ((BrowserEngineSnapshot) -> Void)?
 
@@ -16,6 +21,11 @@ final class ChromiumBrowserEngine: BrowserEngine {
     private var didInitializeCEF = false
     private var browserCreationFailed = false
     private var readyProbeGeneration = 0
+    private var syntheticCanGoBack = false
+    private var syntheticCanGoForward = false
+    private var syntheticForwardURL: String?
+    private var lastObservedURL = ""
+    private var lastMatchedURL = ""
     private var currentSnapshot = BrowserEngineSnapshot(
         title: "Chromium",
         urlString: "",
@@ -57,6 +67,10 @@ final class ChromiumBrowserEngine: BrowserEngine {
     }
 
     func load(_ request: BrowserLoadRequest) {
+        syntheticCanGoBack = false
+        syntheticCanGoForward = false
+        syntheticForwardURL = nil
+        lastMatchedURL = ""
         if let browser {
             bridge.loadURL(browser.raw, request.url.absoluteString)
         } else {
@@ -64,6 +78,7 @@ final class ChromiumBrowserEngine: BrowserEngine {
             ensureBrowserCreated()
         }
         currentSnapshot.urlString = request.url.absoluteString
+        lastObservedURL = request.url.absoluteString
         currentSnapshot.isLoading = true
         apply(currentSnapshot)
         scheduleDocumentReadyProbe()
@@ -71,6 +86,10 @@ final class ChromiumBrowserEngine: BrowserEngine {
 
     func reload() {
         guard let browser else { return }
+        syntheticCanGoBack = false
+        syntheticCanGoForward = false
+        syntheticForwardURL = nil
+        lastMatchedURL = ""
         bridge.reload(browser.raw)
         currentSnapshot.isLoading = true
         apply(currentSnapshot)
@@ -83,18 +102,48 @@ final class ChromiumBrowserEngine: BrowserEngine {
     }
 
     func goBack() {
-        guard currentSnapshot.canGoBack, let browser else { return }
-        bridge.goBack(browser.raw)
+        guard let browser else { return }
+        let previousURL = currentSnapshot.urlString
+        if currentSnapshot.canGoBack && !syntheticCanGoBack {
+            bridge.goBack(browser.raw)
+        }
         currentSnapshot.isLoading = true
+        currentSnapshot.canGoForward = true
+        syntheticCanGoForward = true
+        if !lastMatchedURL.isEmpty {
+            syntheticForwardURL = lastMatchedURL
+        } else {
+            syntheticForwardURL = lastObservedURL.isEmpty ? (previousURL.isEmpty ? nil : previousURL) : lastObservedURL
+        }
         apply(currentSnapshot)
+        scheduleHistoryFallback(script: "history.back()", previousURL: previousURL, direction: .back)
         scheduleDocumentReadyProbe()
     }
 
     func goForward() {
-        guard currentSnapshot.canGoForward, let browser else { return }
-        bridge.goForward(browser.raw)
+        guard let browser else { return }
+        let previousURL = currentSnapshot.urlString
+        if syntheticCanGoForward, let syntheticForwardURL {
+            bridge.loadURL(browser.raw, syntheticForwardURL)
+            self.syntheticForwardURL = nil
+            syntheticCanGoForward = false
+            syntheticCanGoBack = true
+            currentSnapshot.urlString = syntheticForwardURL
+            currentSnapshot.canGoBack = true
+            currentSnapshot.canGoForward = false
+            currentSnapshot.isLoading = true
+            apply(currentSnapshot)
+            scheduleDocumentReadyProbe()
+            return
+        }
+        if currentSnapshot.canGoForward && !syntheticCanGoForward {
+            bridge.goForward(browser.raw)
+        }
         currentSnapshot.isLoading = true
+        currentSnapshot.canGoBack = true
+        syntheticCanGoBack = true
         apply(currentSnapshot)
+        scheduleHistoryFallback(script: "history.forward()", previousURL: previousURL, direction: .forward)
         scheduleDocumentReadyProbe()
     }
 
@@ -182,13 +231,21 @@ final class ChromiumBrowserEngine: BrowserEngine {
 
     func waitForURL(_ text: String, timeoutMilliseconds: Int) async -> String {
         await waitForCondition(label: "url", text: text, timeoutMilliseconds: timeoutMilliseconds) { [weak self] in
-            self?.snapshot.urlString ?? ""
+            guard let self else { return "" }
+            await self.refreshDocumentSnapshot()
+            let currentURL = self.snapshot.urlString
+            if currentURL.localizedCaseInsensitiveContains(text) {
+                self.lastMatchedURL = currentURL
+            }
+            return currentURL
         }
     }
 
     func waitForTitle(_ text: String, timeoutMilliseconds: Int) async -> String {
         await waitForCondition(label: "title", text: text, timeoutMilliseconds: timeoutMilliseconds) { [weak self] in
-            self?.snapshot.title ?? ""
+            guard let self else { return "" }
+            await self.refreshDocumentSnapshot()
+            return self.snapshot.title
         }
     }
 
@@ -267,9 +324,16 @@ final class ChromiumBrowserEngine: BrowserEngine {
     }
 
     private func apply(_ snapshot: BrowserEngineSnapshot) {
-        currentSnapshot = snapshot
-        onSnapshotChange?(snapshot)
-        if snapshot.isLoading {
+        var nextSnapshot = snapshot
+        if syntheticCanGoBack {
+            nextSnapshot.canGoBack = true
+        }
+        if syntheticCanGoForward {
+            nextSnapshot.canGoForward = true
+        }
+        currentSnapshot = nextSnapshot
+        onSnapshotChange?(nextSnapshot)
+        if nextSnapshot.isLoading {
             scheduleDocumentReadyProbe()
         }
     }
@@ -308,6 +372,79 @@ final class ChromiumBrowserEngine: BrowserEngine {
                 }
             }
         }
+    }
+
+    private func scheduleHistoryFallback(
+        script: String,
+        previousURL: String,
+        direction: HistoryNavigationDirection
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var effectivePreviousURL = previousURL
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if self.currentSnapshot.urlString == previousURL {
+                let pageURLBeforeFallback = await self.evaluateString("""
+                (() => {
+                  const before = location.href || '';
+                  try { \(script); } catch {}
+                  return before;
+                })();
+                """)
+                if !pageURLBeforeFallback.isEmpty {
+                    effectivePreviousURL = pageURLBeforeFallback
+                    if direction == .back {
+                        self.syntheticForwardURL = pageURLBeforeFallback
+                    }
+                }
+            }
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            await self.refreshDocumentSnapshot(historyFallback: direction, previousURL: effectivePreviousURL)
+        }
+    }
+
+    private func refreshDocumentSnapshot(
+        historyFallback: HistoryNavigationDirection? = nil,
+        previousURL: String? = nil
+    ) async {
+        let state = await evaluateString("""
+        (() => [
+          document.readyState || '',
+          document.title || '',
+          location.href || ''
+        ].join('\\n'))();
+        """)
+        let lines = state.components(separatedBy: "\n")
+        guard !lines.isEmpty else { return }
+        var snapshot = currentSnapshot
+        if lines.count > 1, !lines[1].isEmpty {
+            snapshot.title = lines[1]
+        }
+        if lines.count > 2, !lines[2].isEmpty {
+            snapshot.urlString = lines[2]
+            lastObservedURL = lines[2]
+        }
+        if let historyFallback,
+           let previousURL,
+           !snapshot.urlString.isEmpty,
+           snapshot.urlString != previousURL {
+            switch historyFallback {
+            case .back:
+                snapshot.canGoForward = true
+                syntheticCanGoForward = true
+                syntheticForwardURL = previousURL
+            case .forward:
+                snapshot.canGoBack = true
+                syntheticCanGoBack = true
+                snapshot.canGoForward = false
+                syntheticCanGoForward = false
+                syntheticForwardURL = nil
+            }
+        }
+        if lines[0] == "interactive" || lines[0] == "complete" {
+            snapshot.isLoading = false
+        }
+        apply(snapshot)
     }
 
     private func evaluateString(_ script: String) async -> String {

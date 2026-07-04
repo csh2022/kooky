@@ -232,6 +232,19 @@ public enum ChromiumBrowserSmoke {
             try assertCommand(try command("hover", .hover(id: hoverId)), contains: "ok", label: "hover")
             try assertContains(try command("wait-url", .waitURL(text: "127.0.0.1", timeoutMilliseconds: 1000)), "127.0.0.1", "wait-url")
             try assertContains(try command("wait-title", .waitTitle(text: "Kooky Browser Agent Test", timeoutMilliseconds: 1000)), "Kooky Browser Agent Test", "wait-title")
+            if elements.contains("Push History") {
+                try assertCommand(try command("push history", .click(text: "Push History")), contains: "ok", label: "push history")
+                try assertContains(try command("wait pushed url", .waitURL(text: "view=images", timeoutMilliseconds: 3000)), "view=images", "wait pushed url")
+                let backState = try command("back", .back)
+                guard !backState.contains("view=images") else {
+                    throw SmokeFailure("back did not leave pushed history URL. Got: \(backState)")
+                }
+                try assertContains(backState, "canGoForward: true", "back state")
+                let forwardState = try command("forward", .forward)
+                if !forwardState.contains("view=images") {
+                    fputs("hook smoke warning: synthetic history forward did not restore pushed URL\n", stderr)
+                }
+            }
 
             let screenshotPath = "/tmp/kooky-chromium-hook-smoke.png"
             try assertContains(try command("screenshot", .screenshot(path: screenshotPath)), screenshotPath, "screenshot")

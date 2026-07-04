@@ -1456,17 +1456,19 @@ final class WorkspaceStore {
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             let before = browser.surface.snapshot
             browser.surface.engine.goBack()
+            await waitForBrowserNavigationState()
             return browserStateDescription(
                 browser,
-                prefix: before.canGoBack ? "ok back requested" : "back unavailable: canGoBack false"
+                prefix: before.canGoBack ? "ok back requested" : "back requested: canGoBack false before command"
             )
         case .forward:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
             let before = browser.surface.snapshot
             browser.surface.engine.goForward()
+            await waitForBrowserNavigationState()
             return browserStateDescription(
                 browser,
-                prefix: before.canGoForward ? "ok forward requested" : "forward unavailable: canGoForward false"
+                prefix: before.canGoForward ? "ok forward requested" : "forward requested: canGoForward false before command"
             )
         case .reload:
             guard let browser = reusableBrowser(owner: owner) else { return "browser not open\n" }
@@ -1559,6 +1561,10 @@ final class WorkspaceStore {
         canGoForward: \(snapshot.canGoForward)
 
         """
+    }
+
+    private func waitForBrowserNavigationState() async {
+        try? await Task.sleep(nanoseconds: 1_600_000_000)
     }
 
     private func load(_ address: String?, in browser: BrowserPane) {
