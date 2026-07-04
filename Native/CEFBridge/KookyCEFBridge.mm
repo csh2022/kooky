@@ -18,6 +18,10 @@
 #include "include/capi/cef_life_span_handler_capi.h"
 #include "include/capi/cef_load_handler_capi.h"
 #include "include/capi/cef_frame_capi.h"
+#include "include/capi/cef_process_message_capi.h"
+#include "include/capi/cef_render_process_handler_capi.h"
+#include "include/capi/cef_values_capi.h"
+#include "include/capi/cef_v8_capi.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_api_hash.h"
 #include "include/internal/cef_string.h"
@@ -82,6 +86,7 @@ struct KookyCEFEvaluation {
 
 struct KookyCEFApp {
   cef_app_t app;
+  cef_render_process_handler_t render;
 };
 
 struct KookyCEFBrowser {
@@ -106,6 +111,13 @@ bool g_initialized = false;
 void* g_library_loader = nullptr;
 KookyCEFApp* g_app = nullptr;
 NSTimer* g_message_loop_timer = nil;
+std::mutex g_browser_map_mutex;
+std::map<int, KookyCEFBrowser*> g_browsers_by_id;
+std::mutex g_render_context_mutex;
+std::map<std::string, cef_v8_context_t*> g_render_contexts;
+
+constexpr const char* kEvalMessageName = "KookyEval";
+constexpr const char* kEvalResultMessageName = "KookyEvalResult";
 
 template <typename T>
 void InitBase(T* value) {
@@ -128,6 +140,15 @@ std::string CefStringToStdString(const cef_string_t* value) {
     result.assign(utf8.str, utf8.length);
   }
   cef_string_utf8_clear(&utf8);
+  return result;
+}
+
+std::string CefUserFreeStringToStdString(cef_string_userfree_t value) {
+  if (!value) {
+    return "";
+  }
+  std::string result = CefStringToStdString(value);
+  cef_string_userfree_free(value);
   return result;
 }
 
@@ -173,10 +194,33 @@ void OnBeforeCommandLineProcessing(
   AppendSwitchWithValue(command_line, "user-agent-product", "KookyChromium/1.0");
 }
 
+cef_render_process_handler_t* GetRenderProcessHandler(cef_app_t* self);
+void OnContextCreated(
+    cef_render_process_handler_t*,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_v8_context_t* context);
+void OnContextReleased(
+    cef_render_process_handler_t*,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_v8_context_t* context);
+int OnRenderProcessMessageReceived(
+    cef_render_process_handler_t*,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_process_id_t source_process,
+    cef_process_message_t* message);
+
 KookyCEFApp* MakeApp() {
   auto* app = new KookyCEFApp();
   InitBase(&app->app);
+  InitBase(&app->render);
   app->app.on_before_command_line_processing = OnBeforeCommandLineProcessing;
+  app->app.get_render_process_handler = GetRenderProcessHandler;
+  app->render.on_context_created = OnContextCreated;
+  app->render.on_context_released = OnContextReleased;
+  app->render.on_process_message_received = OnRenderProcessMessageReceived;
   return app;
 }
 
@@ -201,6 +245,14 @@ std::string ParentDirectory(const std::string& path) {
   return path.substr(0, slash);
 }
 
+std::string FrameKey(cef_browser_t* browser, cef_frame_t* frame) {
+  if (!browser || !frame) {
+    return "";
+  }
+  std::string frame_id = CefUserFreeStringToStdString(frame->get_identifier(frame));
+  return std::to_string(browser->get_identifier(browser)) + ":" + frame_id;
+}
+
 KookyCEFBrowser* OwnerFromClient(cef_client_t* self) {
   return reinterpret_cast<KookyCEFClient*>(self)->owner;
 }
@@ -219,6 +271,14 @@ KookyCEFBrowser* OwnerFromLoad(cef_load_handler_t* self) {
   return reinterpret_cast<KookyCEFClient*>(
       reinterpret_cast<char*>(self) - offsetof(KookyCEFClient, load))->owner;
 }
+
+KookyCEFBrowser* OwnerFromBrowserId(int browser_id) {
+  std::lock_guard<std::mutex> lock(g_browser_map_mutex);
+  auto it = g_browsers_by_id.find(browser_id);
+  return it == g_browsers_by_id.end() ? nullptr : it->second;
+}
+
+void FinishEvaluation(KookyCEFBrowser* owner, int message_id, const std::string& result);
 
 void Publish(KookyCEFBrowser* owner) {
   if (!owner || owner->closing || !owner->callback) {
@@ -308,6 +368,54 @@ std::string JSONStringLiteral(const std::string& value) {
   return [literal UTF8String] ? [literal UTF8String] : "\"\"";
 }
 
+std::string V8ValueToString(cef_v8_value_t* value) {
+  if (!value || !value->is_valid(value) || value->is_undefined(value) || value->is_null(value)) {
+    return "";
+  }
+  if (value->is_string(value)) {
+    return CefUserFreeStringToStdString(value->get_string_value(value));
+  }
+  if (value->is_bool(value)) {
+    return value->get_bool_value(value) ? "true" : "false";
+  }
+  if (value->is_int(value)) {
+    return std::to_string(value->get_int_value(value));
+  }
+  if (value->is_uint(value)) {
+    return std::to_string(value->get_uint_value(value));
+  }
+  if (value->is_double(value)) {
+    return std::to_string(value->get_double_value(value));
+  }
+  return "";
+}
+
+std::string EvaluateInRenderContext(cef_v8_context_t* context, const std::string& script) {
+  if (!context || !context->enter(context)) {
+    return "";
+  }
+  cef_string_t code = {};
+  cef_string_t script_url = {};
+  SetCefString(&code, script.c_str());
+  SetCefString(&script_url, "kooky://eval");
+  cef_v8_value_t* retval = nullptr;
+  cef_v8_exception_t* exception = nullptr;
+  std::string result;
+  if (context->eval(context, &code, &script_url, 1, &retval, &exception)) {
+    result = V8ValueToString(retval);
+  }
+  if (retval && retval->base.release) {
+    retval->base.release(&retval->base);
+  }
+  if (exception && exception->base.release) {
+    exception->base.release(&exception->base);
+  }
+  cef_string_clear(&code);
+  cef_string_clear(&script_url);
+  context->exit(context);
+  return result;
+}
+
 void FinishEvaluation(KookyCEFBrowser* owner, int message_id, const std::string& result) {
   if (!owner) {
     return;
@@ -327,18 +435,19 @@ void FinishEvaluation(KookyCEFBrowser* owner, int message_id, const std::string&
   }
 }
 
-void FinishEvaluationFromConsoleMessage(KookyCEFBrowser* owner, const std::string& message) {
+bool FinishEvaluationFromConsoleMessage(KookyCEFBrowser* owner, const std::string& message) {
   static const std::string prefix = "__KOOKY_EVAL_RESULT__";
   if (message.rfind(prefix, 0) != 0) {
-    return;
+    return false;
   }
   size_t marker = message.find("__", prefix.size());
   if (marker == std::string::npos) {
-    return;
+    return false;
   }
   int message_id = atoi(message.substr(prefix.size(), marker - prefix.size()).c_str());
   std::string json = message.substr(marker + 2);
   FinishEvaluation(owner, message_id, ParseJSONValueToString(json));
+  return true;
 }
 
 void FinishAllEvaluations(KookyCEFBrowser* owner) {
@@ -377,6 +486,129 @@ cef_load_handler_t* GetLoadHandler(cef_client_t* self) {
   return &reinterpret_cast<KookyCEFClient*>(self)->load;
 }
 
+cef_render_process_handler_t* GetRenderProcessHandler(cef_app_t* self) {
+  return &reinterpret_cast<KookyCEFApp*>(self)->render;
+}
+
+void OnContextCreated(
+    cef_render_process_handler_t*,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_v8_context_t* context) {
+  if (!browser || !frame || !context || !frame->is_main(frame)) {
+    return;
+  }
+  std::string key = FrameKey(browser, frame);
+  if (key.empty()) {
+    return;
+  }
+  if (context->base.add_ref) {
+    context->base.add_ref(&context->base);
+  }
+  std::lock_guard<std::mutex> lock(g_render_context_mutex);
+  auto existing = g_render_contexts.find(key);
+  if (existing != g_render_contexts.end() && existing->second && existing->second->base.release) {
+    existing->second->base.release(&existing->second->base);
+  }
+  g_render_contexts[key] = context;
+}
+
+void OnContextReleased(
+    cef_render_process_handler_t*,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_v8_context_t* context) {
+  if (!browser || !frame || !context) {
+    return;
+  }
+  std::string key = FrameKey(browser, frame);
+  std::lock_guard<std::mutex> lock(g_render_context_mutex);
+  auto existing = g_render_contexts.find(key);
+  if (existing != g_render_contexts.end()) {
+    if (existing->second && existing->second->base.release) {
+      existing->second->base.release(&existing->second->base);
+    }
+    g_render_contexts.erase(existing);
+  }
+}
+
+int OnRenderProcessMessageReceived(
+    cef_render_process_handler_t*,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_process_id_t,
+    cef_process_message_t* message) {
+  if (!browser || !frame || !message) {
+    return 0;
+  }
+  std::string name = CefUserFreeStringToStdString(message->get_name(message));
+  if (name != kEvalMessageName) {
+    return 0;
+  }
+  cef_list_value_t* args = message->get_argument_list(message);
+  if (!args || args->get_size(args) < 2) {
+    return 1;
+  }
+  int message_id = args->get_int(args, 0);
+  std::string script = CefUserFreeStringToStdString(args->get_string(args, 1));
+
+  cef_v8_context_t* context = nullptr;
+  std::string key = FrameKey(browser, frame);
+  {
+    std::lock_guard<std::mutex> lock(g_render_context_mutex);
+    auto it = g_render_contexts.find(key);
+    if (it != g_render_contexts.end()) {
+      context = it->second;
+      if (context && context->base.add_ref) {
+        context->base.add_ref(&context->base);
+      }
+    }
+  }
+  std::string result = EvaluateInRenderContext(context, script);
+  if (context && context->base.release) {
+    context->base.release(&context->base);
+  }
+
+  cef_string_t result_name = {};
+  SetCefString(&result_name, kEvalResultMessageName);
+  cef_process_message_t* response = cef_process_message_create(&result_name);
+  cef_string_clear(&result_name);
+  if (!response) {
+    return 1;
+  }
+  cef_list_value_t* response_args = response->get_argument_list(response);
+  response_args->set_int(response_args, 0, message_id);
+  cef_string_t result_value = {};
+  SetCefString(&result_value, result.c_str());
+  response_args->set_string(response_args, 1, &result_value);
+  cef_string_clear(&result_value);
+  frame->send_process_message(frame, PID_BROWSER, response);
+  return 1;
+}
+
+int OnClientProcessMessageReceived(
+    cef_client_t*,
+    cef_browser_t* browser,
+    cef_frame_t*,
+    cef_process_id_t,
+    cef_process_message_t* message) {
+  if (!browser || !message) {
+    return 0;
+  }
+  std::string name = CefUserFreeStringToStdString(message->get_name(message));
+  if (name != kEvalResultMessageName) {
+    return 0;
+  }
+  cef_list_value_t* args = message->get_argument_list(message);
+  if (!args || args->get_size(args) < 2) {
+    return 1;
+  }
+  int message_id = args->get_int(args, 0);
+  std::string result = CefUserFreeStringToStdString(args->get_string(args, 1));
+  FinishEvaluation(OwnerFromBrowserId(browser->get_identifier(browser)), message_id, result);
+  return 1;
+}
+
 void OnAddressChange(
     cef_display_handler_t* self,
     cef_browser_t*,
@@ -403,6 +635,10 @@ void OnAfterCreated(cef_life_span_handler_t* self, cef_browser_t* browser) {
   if (browser && browser->base.add_ref) {
     browser->base.add_ref(&browser->base);
   }
+  if (browser) {
+    std::lock_guard<std::mutex> lock(g_browser_map_mutex);
+    g_browsers_by_id[browser->get_identifier(browser)] = owner;
+  }
   if (owner->closing) {
     auto* host = browser ? browser->get_host(browser) : nullptr;
     if (host) {
@@ -420,6 +656,13 @@ void OnAfterCreated(cef_life_span_handler_t* self, cef_browser_t* browser) {
 
 void OnBeforeClose(cef_life_span_handler_t* self, cef_browser_t* browser) {
   auto* owner = OwnerFromLifeSpan(self);
+  if (browser) {
+    std::lock_guard<std::mutex> lock(g_browser_map_mutex);
+    auto it = g_browsers_by_id.find(browser->get_identifier(browser));
+    if (it != g_browsers_by_id.end() && it->second == owner) {
+      g_browsers_by_id.erase(it);
+    }
+  }
   if (owner->browser == browser) {
     if (owner->browser && owner->browser->base.release) {
       owner->browser->base.release(&owner->browser->base);
@@ -445,8 +688,7 @@ int OnConsoleMessage(
     const cef_string_t*,
     int) {
   auto* owner = OwnerFromDisplay(self);
-  FinishEvaluationFromConsoleMessage(owner, CefStringToStdString(message));
-  return 0;
+  return FinishEvaluationFromConsoleMessage(owner, CefStringToStdString(message)) ? 1 : 0;
 }
 
 void OnLoadingStateChange(
@@ -472,6 +714,7 @@ KookyCEFClient* MakeClient(KookyCEFBrowser* owner) {
   client->client.get_display_handler = GetDisplayHandler;
   client->client.get_life_span_handler = GetLifeSpanHandler;
   client->client.get_load_handler = GetLoadHandler;
+  client->client.on_process_message_received = OnClientProcessMessageReceived;
   client->display.on_address_change = OnAddressChange;
   client->display.on_title_change = OnTitleChange;
   client->display.on_console_message = OnConsoleMessage;
@@ -489,6 +732,23 @@ int KookyCEFInstallApplication(void) {
   }
   [KookyCEFApplication sharedApplication];
   return [NSApp isKindOfClass:[KookyCEFApplication class]] ? 1 : 0;
+}
+
+int KookyCEFExecuteProcess(int argc, char* argv[]) {
+  void* loader = cef_scoped_library_loader_create(1);
+  if (!loader) {
+    return 1;
+  }
+  cef_api_hash(CEF_API_VERSION, 0);
+  cef_main_args_t args = {};
+  args.argc = argc;
+  args.argv = argv;
+  if (!g_app) {
+    g_app = MakeApp();
+  }
+  int result = cef_execute_process(&args, &g_app->app, nullptr);
+  cef_scoped_library_loader_free(loader);
+  return result;
 }
 
 int KookyCEFInitialize(const char* cache_path) {
@@ -522,7 +782,7 @@ int KookyCEFInitialize(const char* cache_path) {
   cef_settings_t settings = {};
   settings.size = sizeof(settings);
   settings.no_sandbox = 1;
-  settings.external_message_pump = 1;
+  settings.external_message_pump = 0;
   SetCefString(&settings.user_agent_product, "KookyChromium/1.0");
   std::string helper_path = HelperExecutablePath();
   if (!helper_path.empty()) {
@@ -692,25 +952,21 @@ void KookyCEFEvaluateJavaScript(
       owner->evaluations[message_id] = { callback, context };
     }
 
-    std::string prefix = "__KOOKY_EVAL_RESULT__" + std::to_string(message_id) + "__";
-    std::string code =
-        "(async function(){"
-        "const __kookyPrefix=" + JSONStringLiteral(prefix) + ";"
-        "const __kookySource=" + JSONStringLiteral(script_copy) + ";"
-        "try{"
-        "const __kookyValue=await (0,eval)(__kookySource);"
-        "let __kookyJSON=JSON.stringify(__kookyValue);"
-        "if(__kookyJSON===undefined){__kookyJSON='';}"
-        "console.log(__kookyPrefix+__kookyJSON);"
-        "}catch(e){console.log(__kookyPrefix+JSON.stringify(''));}"
-        "})();";
-    cef_string_t wrapped = {};
-    cef_string_t script_url = {};
-    SetCefString(&wrapped, code.c_str());
-    SetCefString(&script_url, "kooky://eval");
-    frame->execute_java_script(frame, &wrapped, &script_url, 1);
-    cef_string_clear(&wrapped);
-    cef_string_clear(&script_url);
+    cef_string_t name = {};
+    SetCefString(&name, kEvalMessageName);
+    cef_process_message_t* message = cef_process_message_create(&name);
+    cef_string_clear(&name);
+    if (!message) {
+      FinishEvaluation(owner, message_id, "");
+      return;
+    }
+    cef_list_value_t* args = message->get_argument_list(message);
+    args->set_int(args, 0, message_id);
+    cef_string_t source = {};
+    SetCefString(&source, script_copy.c_str());
+    args->set_string(args, 1, &source);
+    cef_string_clear(&source);
+    frame->send_process_message(frame, PID_RENDERER, message);
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       FinishEvaluation(owner, message_id, "");

@@ -68,6 +68,7 @@ for helper in "${HELPER_NAMES[@]}"; do
     clang++ -std=c++17 \
         "${COMMON_FLAGS[@]}" \
         "$SRC_DIR/KookyCEFHelper.c" \
+        "$SRC_DIR/KookyCEFBridge.mm" \
         "${WRAPPER_SOURCES[@]}" \
         "${COMMON_FRAMEWORKS[@]}" \
         -o "$app/Contents/MacOS/$helper"

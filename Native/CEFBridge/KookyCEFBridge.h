@@ -14,6 +14,7 @@ typedef void (*KookyCEFStateCallback)(
 typedef void (*KookyCEFEvaluateCallback)(void* context, const char* result);
 
 int KookyCEFInstallApplication(void);
+int KookyCEFExecuteProcess(int argc, char* argv[]);
 int KookyCEFInitialize(const char* cache_path);
 void KookyCEFDoMessageLoopWork(void);
 void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, void* context);

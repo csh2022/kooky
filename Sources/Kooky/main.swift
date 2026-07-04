@@ -7,6 +7,11 @@ if KookyHookCommand.isInvocation(CommandLine.arguments) {
 
 ChromiumApplicationBootstrap.installIfAvailable()
 
+if CommandLine.arguments.contains("--chromium-agent-smoke") {
+    let url = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") } ?? "https://example.com"
+    exit(ChromiumBrowserSmoke.runAgentCommands(urlString: url))
+}
+
 if CommandLine.arguments.contains("--chromium-smoke") {
     let url = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") } ?? "https://example.com"
     exit(ChromiumBrowserSmoke.run(urlString: url))
