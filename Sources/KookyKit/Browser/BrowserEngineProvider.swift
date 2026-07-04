@@ -31,7 +31,11 @@ struct BrowserEngineProvider: Equatable {
         case .webKit:
             return WebKitBrowserEngine()
         case .chromium:
-            return UnsupportedChromiumBrowserEngine()
+            let runtime = ChromiumBrowserRuntime.bundledRuntime()
+            if case .unavailable(let missing) = runtime.status() {
+                return UnsupportedChromiumBrowserEngine(missingRequirements: missing)
+            }
+            return UnsupportedChromiumBrowserEngine(missingRequirements: ["Chromium bridge implementation"])
         }
     }
 }
@@ -42,9 +46,11 @@ final class UnsupportedChromiumBrowserEngine: BrowserEngine {
     var onSnapshotChange: ((BrowserEngineSnapshot) -> Void)?
 
     private var currentURLString = ""
-    private let message = "Chromium browser engine is not bundled in this build."
+    private let message: String
 
-    init() {
+    init(missingRequirements: [String] = ["Chromium browser engine"]) {
+        let labels = missingRequirements.joined(separator: ", ")
+        self.message = "Chromium browser engine is not available. Missing: \(labels)."
         let label = NSTextField(labelWithString: message)
         label.alignment = .center
         label.textColor = .secondaryLabelColor

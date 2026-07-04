@@ -31,6 +31,6 @@ final class BrowserEngineProviderTests: XCTestCase {
 
         XCTAssertTrue(engine is UnsupportedChromiumBrowserEngine)
         XCTAssertEqual(engine.snapshot.title, "Chromium Unavailable")
-        XCTAssertEqual(engine.snapshot.errorMessage, "Chromium browser engine is not bundled in this build.")
+        XCTAssertTrue(engine.snapshot.errorMessage?.contains("Chromium browser engine is not available.") == true)
     }
 }

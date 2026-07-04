@@ -65,6 +65,7 @@ if [ -d "$CEF_VENDOR_DIR" ]; then
         exit 1
     }
     cp -R "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" "${APP}/Contents/Frameworks/"
+    CEF_HELPERS=()
     shopt -s nullglob
     CEF_HELPERS=("${CEF_VENDOR_DIR}"/Kooky\ Helper*.app)
     shopt -u nullglob
@@ -201,12 +202,15 @@ echo "==> Adhoc codesign (skips Gatekeeper kill on first launch)"
 # itself.
 codesign --force --sign - "${APP}/Contents/Resources/Kooky_KookyKit.bundle"
 if [ -d "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
+    BUNDLED_CEF_HELPERS=()
     shopt -s nullglob
     BUNDLED_CEF_HELPERS=("${APP}/Contents/Frameworks"/*.app)
     shopt -u nullglob
-    for helper in "${BUNDLED_CEF_HELPERS[@]}"; do
-        codesign --force --deep --sign - "$helper"
-    done
+    if [ "${#BUNDLED_CEF_HELPERS[@]}" -gt 0 ]; then
+        for helper in "${BUNDLED_CEF_HELPERS[@]}"; do
+            codesign --force --deep --sign - "$helper"
+        done
+    fi
     codesign --force --deep --sign - "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
 fi
 codesign --force --sign - "${APP}/Contents/MacOS/${APP_NAME}"
