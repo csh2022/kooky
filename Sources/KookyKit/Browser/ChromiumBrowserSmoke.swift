@@ -110,12 +110,19 @@ public enum ChromiumBrowserSmoke {
 
             log("agent smoke interacting")
             try assertCommand(try runAsync("fill") { await engine.fill(field: "Name", text: "Alice") }, contains: "ok", label: "fill")
+            engine.click(text: "Submit Agent Test")
+            try assertContains(try runAsync("wait clicked by text") { await engine.waitForText("clicked:Alice", timeoutMilliseconds: 3000) }, "clicked:Alice", "click text")
+            try assertCommand(try runAsync("clear") { await engine.clear(field: "Name") }, contains: "ok", label: "clear")
+            try assertCommand(try runAsync("refill") { await engine.fill(field: "Name", text: "Alice") }, contains: "ok", label: "refill")
             try assertCommand(try runAsync("fill id") { await engine.fillElement(id: notesId, text: "memo") }, contains: "ok", label: "fill-id")
             try assertCommand(try runAsync("click id") { await engine.clickElement(id: submitId, double: false) }, contains: "ok", label: "click-id")
             try assertContains(try runAsync("wait text") { await engine.waitForText("clicked:Alice", timeoutMilliseconds: 3000) }, "clicked:Alice", "wait text")
+            try assertCommand(try runAsync("click at") { await engine.clickAt(x: 10, y: 10) }, contains: "ok", label: "click-at")
             try assertCommand(try runAsync("press") { await engine.press(key: "Tab") }, contains: "ok", label: "press")
             try assertCommand(try runAsync("scroll") { await engine.scroll(direction: "down", amount: 900) }, contains: "scroll", label: "scroll")
             try assertCommand(try runAsync("hover") { await engine.hover(id: hoverId) }, contains: "ok", label: "hover")
+            try assertContains(try runAsync("wait url") { await engine.waitForURL("kooky-browser-agent-test", timeoutMilliseconds: 1000) }, "kooky-browser-agent-test", "wait-url")
+            try assertContains(try runAsync("wait title") { await engine.waitForTitle("Kooky Browser Agent Test", timeoutMilliseconds: 1000) }, "Kooky Browser Agent Test", "wait-title")
 
             let screenshotPath = "/tmp/kooky-chromium-agent-smoke.png"
             try assertContains(try runAsync("screenshot") { await engine.saveScreenshot(to: screenshotPath) }, screenshotPath, "screenshot")
