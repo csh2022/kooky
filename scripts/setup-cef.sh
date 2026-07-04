@@ -59,7 +59,11 @@ fi
 
 mkdir -p "$VENDOR_DIR" "$DOWNLOAD_DIR"
 
-if [[ -f "${CURRENT_DIR}/.cef-version" && "$(cat "${CURRENT_DIR}/.cef-version")" == "${CEF_VERSION} ${CEF_PLATFORM}" ]]; then
+if [[ -f "${CURRENT_DIR}/.cef-version" &&
+      "$(cat "${CURRENT_DIR}/.cef-version")" == "${CEF_VERSION} ${CEF_PLATFORM}" &&
+      -d "${CURRENT_DIR}/Chromium Embedded Framework.framework" &&
+      -d "${CURRENT_DIR}/include" &&
+      -d "${CURRENT_DIR}/libcef_dll" ]]; then
     echo "CEF already prepared at ${CURRENT_DIR} (${CEF_VERSION} ${CEF_PLATFORM}). Skipping."
     exit 0
 fi
@@ -108,6 +112,16 @@ fi
 rm -rf "${CURRENT_DIR}.next"
 mkdir -p "${CURRENT_DIR}.next"
 cp -R "$FRAMEWORK_SRC" "${CURRENT_DIR}.next/"
+for support_dir in include libcef_dll cmake; do
+    if [[ -d "${DIST_DIR}/${support_dir}" ]]; then
+        cp -R "${DIST_DIR}/${support_dir}" "${CURRENT_DIR}.next/"
+    fi
+done
+for support_file in README.txt LICENSE.txt CREDITS.html; do
+    if [[ -f "${DIST_DIR}/${support_file}" ]]; then
+        cp "${DIST_DIR}/${support_file}" "${CURRENT_DIR}.next/"
+    fi
+done
 
 printf '%s %s\n' "$CEF_VERSION" "$CEF_PLATFORM" > "${CURRENT_DIR}.next/.cef-version"
 rm -rf "$CURRENT_DIR"
