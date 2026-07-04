@@ -19,6 +19,16 @@ struct ChromiumBrowserRuntime: Equatable {
     var bundleURL: URL
     var fileManager: FileManager = .default
 
+    var frameworksURL: URL {
+        bundleURL.appendingPathComponent("Contents/Frameworks", isDirectory: true)
+    }
+
+    var bridgeExecutableURL: URL {
+        frameworksURL
+            .appendingPathComponent("KookyCEFBridge.framework", isDirectory: true)
+            .appendingPathComponent("KookyCEFBridge")
+    }
+
     static func bundledRuntime(bundle: Bundle = .main) -> ChromiumBrowserRuntime {
         ChromiumBrowserRuntime(bundleURL: bundle.bundleURL)
     }
@@ -29,7 +39,7 @@ struct ChromiumBrowserRuntime: Equatable {
     }
 
     private func requiredPaths() -> [(label: String, url: URL)] {
-        let frameworks = bundleURL.appendingPathComponent("Contents/Frameworks", isDirectory: true)
+        let frameworks = frameworksURL
         return [
             (
                 "Chromium Embedded Framework.framework",
@@ -54,6 +64,16 @@ struct ChromiumBrowserRuntime: Equatable {
             (
                 "KookyCEFBridge.framework",
                 frameworks.appendingPathComponent("KookyCEFBridge.framework", isDirectory: true)
+            ),
+            (
+                "KookyCEFBridge",
+                bridgeExecutableURL
+            ),
+            (
+                "Kooky Helper executable",
+                frameworks
+                    .appendingPathComponent("Kooky Helper.app", isDirectory: true)
+                    .appendingPathComponent("Contents/MacOS/Kooky Helper")
             ),
         ]
     }

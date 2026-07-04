@@ -35,7 +35,11 @@ struct BrowserEngineProvider: Equatable {
             if case .unavailable(let missing) = runtime.status() {
                 return UnsupportedChromiumBrowserEngine(missingRequirements: missing)
             }
-            return UnsupportedChromiumBrowserEngine(missingRequirements: ["Chromium bridge implementation"])
+            do {
+                return try ChromiumBrowserEngine(runtime: runtime)
+            } catch {
+                return UnsupportedChromiumBrowserEngine(missingRequirements: [error.localizedDescription])
+            }
         }
     }
 }

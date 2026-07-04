@@ -18,6 +18,8 @@ final class ChromiumBrowserRuntimeTests: XCTestCase {
             "Kooky Helper (Plugin).app",
             "Kooky Helper (Renderer).app",
             "KookyCEFBridge.framework",
+            "KookyCEFBridge",
+            "Kooky Helper executable",
         ])
     }
 
@@ -37,6 +39,26 @@ final class ChromiumBrowserRuntimeTests: XCTestCase {
                 withIntermediateDirectories: true
             )
         }
+        FileManager.default.createFile(
+            atPath: frameworks
+                .appendingPathComponent("KookyCEFBridge.framework", isDirectory: true)
+                .appendingPathComponent("KookyCEFBridge")
+                .path,
+            contents: Data()
+        )
+        try FileManager.default.createDirectory(
+            at: frameworks
+                .appendingPathComponent("Kooky Helper.app", isDirectory: true)
+                .appendingPathComponent("Contents/MacOS", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        FileManager.default.createFile(
+            atPath: frameworks
+                .appendingPathComponent("Kooky Helper.app", isDirectory: true)
+                .appendingPathComponent("Contents/MacOS/Kooky Helper")
+                .path,
+            contents: Data()
+        )
 
         let runtime = ChromiumBrowserRuntime(bundleURL: root)
 

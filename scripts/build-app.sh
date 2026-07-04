@@ -65,10 +65,19 @@ if [ -d "$CEF_VENDOR_DIR" ]; then
         echo "missing CEF framework: ${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" >&2
         exit 1
     }
-    cp -R "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" "${APP}/Contents/Frameworks/"
+    CEF_FRAMEWORK_DEST="${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
+    mkdir -p "${CEF_FRAMEWORK_DEST}/Versions/A" "${CEF_FRAMEWORK_DEST}/Versions"
+    cp -R "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework/." "${CEF_FRAMEWORK_DEST}/Versions/A/"
+    ln -sfn "Versions/A/Chromium Embedded Framework" "${CEF_FRAMEWORK_DEST}/Chromium Embedded Framework"
+    ln -sfn "Versions/A/Libraries" "${CEF_FRAMEWORK_DEST}/Libraries"
+    ln -sfn "Versions/A/Resources" "${CEF_FRAMEWORK_DEST}/Resources"
+    ln -sfn "A" "${CEF_FRAMEWORK_DEST}/Versions/Current"
     CEF_HELPERS=()
     shopt -s nullglob
-    CEF_HELPERS=("${CEF_VENDOR_DIR}"/Kooky\ Helper*.app)
+    CEF_HELPERS=(
+        "${CEF_VENDOR_DIR}"/Kooky\ Helper*.app
+        "${CEF_BRIDGE_DIR}"/Kooky\ Helper*.app
+    )
     shopt -u nullglob
     if [ "${#CEF_HELPERS[@]}" -eq 0 ]; then
         echo "warning: CEF framework present but no Kooky Helper apps found; Chromium engine will not launch yet" >&2
