@@ -63,6 +63,7 @@ final class BrowserHostNSView: NSView {
         currentEngineView = nextView
         nextView.isHidden = false
         needsLayout = true
+        engine.browserHostViewDidAttach()
     }
 
     private func detachMovedView(_ view: NSView) {
