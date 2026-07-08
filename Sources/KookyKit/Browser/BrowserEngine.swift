@@ -25,6 +25,7 @@ protocol BrowserEngine: AnyObject {
     var snapshot: BrowserEngineSnapshot { get }
     var onSnapshotChange: ((BrowserEngineSnapshot) -> Void)? { get set }
 
+    func browserHostViewDidAttach()
     func load(_ request: BrowserLoadRequest)
     func reload()
     func stopLoading()
@@ -53,4 +54,8 @@ protocol BrowserEngine: AnyObject {
     func saveScreenshot(to path: String?) async -> String
     func credentialForm() async -> BrowserCredentialForm?
     func fillCredential(_ credential: BrowserCredential) async -> String
+}
+
+extension BrowserEngine {
+    func browserHostViewDidAttach() {}
 }

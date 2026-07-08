@@ -69,6 +69,14 @@ final class ChromiumBrowserEngine: BrowserEngine {
         currentSnapshot
     }
 
+    func browserHostViewDidAttach() {
+        refreshHostViewAttachment()
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.refreshHostViewAttachment()
+        }
+    }
+
     func load(_ request: BrowserLoadRequest) {
         syntheticCanGoBack = false
         syntheticCanGoForward = false
@@ -616,6 +624,10 @@ final class ChromiumBrowserEngine: BrowserEngine {
         return browser
     }
 
+    private func refreshHostViewAttachment() {
+        hostView.refreshBrowserEmbedding()
+    }
+
     private func waitForCondition(
         label: String,
         text: String,
@@ -801,6 +813,22 @@ private final class ChromiumBrowserEngineHostView: NSView {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
         onAttachedToWindow?()
+    }
+
+    func refreshBrowserEmbedding() {
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        for subview in subviews {
+            if subview.frame != bounds {
+                subview.frame = bounds
+            }
+            subview.needsLayout = true
+            subview.layoutSubtreeIfNeeded()
+            subview.needsDisplay = true
+            subview.displayIfNeeded()
+        }
+        needsDisplay = true
+        displayIfNeeded()
     }
 }
 
