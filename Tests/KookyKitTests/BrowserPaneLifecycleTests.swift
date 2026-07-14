@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import KookyKit
 
@@ -82,6 +83,49 @@ final class BrowserPaneLifecycleTests: XCTestCase {
             owner: .user
         )
         XCTAssertTrue(userBrowser.isVisible(activeSessionId: secondSession.id))
+    }
+
+    func testBrowserVisibilityChangeKeepsActiveTerminalHostMounted() {
+        let store = makeStore()
+        let workspace = try! XCTUnwrap(store.active)
+        let ownerPane = try! XCTUnwrap(workspace.root.firstPane)
+        let ownerSession = try! XCTUnwrap(ownerPane.activeTab)
+        let otherPane = try! XCTUnwrap(store.splitPane(ownerPane, orientation: .horizontal, in: workspace))
+        let otherSession = try! XCTUnwrap(otherPane.activeTab)
+        let browser = try! XCTUnwrap(
+            store.openBrowserSplit(address: "example.com", owner: .agent(ownerSession.id), in: workspace)
+        )
+        store.activateTab(otherSession, in: workspace)
+        XCTAssertFalse(browser.isVisible(activeSessionId: workspace.activeSession?.id))
+
+        let hostingView = NSHostingView(
+            rootView: PaneTreeView(node: workspace.root, workspace: workspace, store: store)
+        )
+        hostingView.frame = NSRect(x: 0, y: 0, width: 1_000, height: 700)
+        hostingView.layoutSubtreeIfNeeded()
+        let originalHost = try! XCTUnwrap(ownerSession.engine.view.superview as? TerminalHostView)
+
+        store.activateTab(ownerSession, in: workspace)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        hostingView.layoutSubtreeIfNeeded()
+        XCTAssertTrue(browser.isVisible(activeSessionId: workspace.activeSession?.id))
+
+        let hostAfterBrowserAppears = try! XCTUnwrap(ownerSession.engine.view.superview as? TerminalHostView)
+        XCTAssertTrue(
+            originalHost === hostAfterBrowserAppears,
+            "showing the browser must not remount the active terminal surface"
+        )
+
+        store.activateTab(otherSession, in: workspace)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        hostingView.layoutSubtreeIfNeeded()
+        XCTAssertFalse(browser.isVisible(activeSessionId: workspace.activeSession?.id))
+
+        let hostAfterBrowserHides = try! XCTUnwrap(ownerSession.engine.view.superview as? TerminalHostView)
+        XCTAssertTrue(
+            originalHost === hostAfterBrowserHides,
+            "hiding the browser must not remount the active terminal surface"
+        )
     }
 
     func testAgentBrowserSplitsNextToCallingSessionNotActivePane() {
