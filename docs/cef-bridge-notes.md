@@ -2,20 +2,23 @@
 
 ## Runtime Shape
 
-Kooky should not link CEF directly into `KookyKit` while Chromium is optional.
-The default SwiftPM build must continue to work without `Vendor/CEF`.
+Kooky should not link CEF directly into `KookyKit`. The default SwiftPM build
+continues to work without `Vendor/CEF`, but every packaged `.app` must contain a
+complete Chromium runtime.
 
 Use this shape:
 
 - `Vendor/CEF/current`: ignored CEF download prepared by `scripts/setup-cef.sh`.
 - `Vendor/CEFBridge/current/KookyCEFBridge.framework`: ignored native bridge
   product produced by a later bridge build script.
+- `~/Library/Caches/Kooky/CEF`: shared, checksum-verified archive cache reused by
+  local worktrees.
 - `Kooky.app/Contents/Frameworks/Chromium Embedded Framework.framework`:
-  copied by `scripts/build-app.sh` when CEF is present.
+  copied by `scripts/build-app.sh`; absence fails the build.
 - `Kooky.app/Contents/Frameworks/Kooky Helper*.app`: copied by
-  `scripts/build-app.sh` when helper apps are present.
+  `scripts/build-app.sh`; all required helper apps are mandatory.
 - `Kooky.app/Contents/Frameworks/KookyCEFBridge.framework`: copied by
-  `scripts/build-app.sh` when the native bridge is present.
+  `scripts/build-app.sh`; absence fails the build.
 
 `ChromiumBrowserRuntime` keeps the activation gate strict: the Chromium path is
 unavailable until the CEF framework, helper apps, and bridge framework are all

@@ -106,11 +106,17 @@ swift build
 swift run                            # dev mode
 swift test                           # 383 unit tests
 
-./scripts/build-app.sh               # writes dist/Kooky.app
+./scripts/build-app.sh               # prepares CEF and writes a complete dist/Kooky.app
+./scripts/install-local.sh           # builds, verifies, and installs the complete app
 ./scripts/build-dmg.sh --build       # writes dist/Kooky-vX.Y.Z.dmg
 ```
 
-`Vendor/` and `dist/` are gitignored. The libghostty setup script is idempotent.
+`Vendor/` and `dist/` are gitignored. Packaged app builds always include
+Chromium and fail if any required framework or helper is absent. Verified CEF
+and GhosttyKit archives are shared across worktrees through
+`~/Library/Caches/Kooky/`; set `KOOKY_CEF_CACHE_DIR` or
+`KOOKY_GHOSTTY_CACHE_DIR` to use persistent CI cache volumes. Use `swift build`
+for lightweight development that does not need an app bundle.
 
 ## Star History
 

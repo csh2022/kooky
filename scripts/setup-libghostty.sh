@@ -14,33 +14,50 @@ VENDOR_DIR="$REPO_ROOT/Vendor"
 FRAMEWORK_PATH="$VENDOR_DIR/GhosttyKit.xcframework"
 STAMP_FILE="$VENDOR_DIR/.ghostty-sha"
 ARCHIVE_URL="https://github.com/manaflow-ai/ghostty/releases/download/xcframework-${GHOSTTY_SHA}/GhosttyKit.xcframework.tar.gz"
+CACHE_DIR="${KOOKY_GHOSTTY_CACHE_DIR:-${HOME}/Library/Caches/Kooky/GhosttyKit}"
+ARCHIVE_PATH="${CACHE_DIR}/GhosttyKit-${GHOSTTY_SHA}.xcframework.tar.gz"
+PARTIAL_PATH="${ARCHIVE_PATH}.partial"
 
 if [[ -d "$FRAMEWORK_PATH" && -f "$STAMP_FILE" && "$(cat "$STAMP_FILE")" == "$GHOSTTY_SHA" ]]; then
     echo "GhosttyKit.xcframework already at pinned SHA ($GHOSTTY_SHA). Skipping."
     exit 0
 fi
 
-mkdir -p "$VENDOR_DIR"
+mkdir -p "$VENDOR_DIR" "$CACHE_DIR"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kooky-ghosttykit.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
-ARCHIVE_PATH="$TMP_DIR/GhosttyKit.xcframework.tar.gz"
 
-echo "Downloading GhosttyKit.xcframework for ghostty $GHOSTTY_SHA..."
-curl --fail --show-error --location \
-    --connect-timeout 10 \
-    --max-time 600 \
-    --retry 5 \
-    --retry-delay 5 \
-    --retry-all-errors \
-    -o "$ARCHIVE_PATH" \
-    "$ARCHIVE_URL"
+if [[ -f "$ARCHIVE_PATH" ]]; then
+    ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE_PATH" | awk '{print $1}')"
+    if [[ "$ACTUAL_SHA256" == "$EXPECTED_SHA256" ]]; then
+        echo "Using verified cached GhosttyKit archive: ${ARCHIVE_PATH}"
+    else
+        echo "Discarding corrupt GhosttyKit cache entry: ${ARCHIVE_PATH}" >&2
+        rm -f "$ARCHIVE_PATH"
+    fi
+fi
 
-ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE_PATH" | awk '{print $1}')"
-if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
-    echo "Checksum mismatch!" >&2
-    echo "  expected: $EXPECTED_SHA256" >&2
-    echo "  actual:   $ACTUAL_SHA256" >&2
-    exit 1
+if [[ ! -f "$ARCHIVE_PATH" ]]; then
+    echo "Downloading GhosttyKit.xcframework for ghostty $GHOSTTY_SHA into shared cache..."
+    curl --fail --show-error --location \
+        --continue-at - \
+        --connect-timeout 10 \
+        --max-time 600 \
+        --retry 5 \
+        --retry-delay 5 \
+        --retry-all-errors \
+        -o "$PARTIAL_PATH" \
+        "$ARCHIVE_URL"
+
+    ACTUAL_SHA256="$(shasum -a 256 "$PARTIAL_PATH" | awk '{print $1}')"
+    if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+        echo "Checksum mismatch!" >&2
+        echo "  expected: $EXPECTED_SHA256" >&2
+        echo "  actual:   $ACTUAL_SHA256" >&2
+        rm -f "$PARTIAL_PATH"
+        exit 1
+    fi
+    mv "$PARTIAL_PATH" "$ARCHIVE_PATH"
 fi
 
 echo "Verified. Extracting..."

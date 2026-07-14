@@ -19,6 +19,8 @@ APP="dist/Kooky.app"
     exit 1
 }
 
+"${ROOT}/scripts/verify-cef-app.sh" "$APP"
+
 VERSION="$(plutil -extract CFBundleShortVersionString raw "${APP}/Contents/Info.plist")"
 DMG="dist/Kooky-v${VERSION}.dmg"
 STAGING="dist/dmg-staging"
