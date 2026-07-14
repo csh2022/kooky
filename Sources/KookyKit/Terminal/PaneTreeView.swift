@@ -1739,32 +1739,28 @@ private struct SplitContainer: View {
         let activeSessionId = workspace.activeSession?.id
         let firstVisible = first.hasVisibleContent(activeSessionId: activeSessionId)
         let secondVisible = second.hasVisibleContent(activeSessionId: activeSessionId)
-        if firstVisible != secondVisible {
-            return AnyView(
-                PaneTreeView(node: firstVisible ? first : second, workspace: workspace, store: store)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            )
-        }
-        if !firstVisible && !secondVisible {
-            return AnyView(Color.clear)
-        }
         let fraction: Double = {
+            if firstVisible != secondVisible { return firstVisible ? 1.0 : 0.0 }
+            if !firstVisible && !secondVisible { return 0.0 }
             if firstContainsZoom { return 1.0 }
             if secondContainsZoom { return 0.0 }
             return storedFraction
         }()
         let isZoomedAcrossThisSplit = firstContainsZoom || secondContainsZoom
+        let splitChromeVisible = firstVisible && secondVisible && !isZoomedAcrossThisSplit
         return AnyView(
             GeometryReader { geo in
                 let total: CGFloat = orientation == .horizontal ? geo.size.width : geo.size.height
-                let usable = max(total - Self.dividerThickness, 0)
-                let firstSize = max(0, usable * fraction)
-                let secondSize = max(0, usable - firstSize)
-                let handleOffset = firstSize - Self.handleHitSize / 2 + Self.dividerThickness / 2
-                // Divider + handle hide during zoom-collapse so the
-                // collapsed side doesn't leave a 1pt hairline at the edge
-                // and the user can't accidentally drag an invisible handle.
-                let chromeVisible: Double = isZoomedAcrossThisSplit ? 0 : 1
+                let dividerThickness = splitChromeVisible ? Self.dividerThickness : 0
+                let usable = max(total - dividerThickness, 0)
+                let firstSize = firstVisible ? max(0, usable * fraction) : 0
+                let secondSize = secondVisible ? max(0, usable - firstSize) : 0
+                let handleOffset = firstSize - Self.handleHitSize / 2 + dividerThickness / 2
+                // Keep both child positions stable while an agent-owned
+                // browser appears or disappears. Replacing this split with
+                // its visible child remounts TerminalView and can stall the
+                // moved libghostty surface.
+                let chromeOpacity: Double = splitChromeVisible ? 1 : 0
 
                 // "Push" the non-zoomed side off the workspace edge while
                 // the zoomed side grows to fill — visually reads as
@@ -1786,8 +1782,8 @@ private struct SplitContainer: View {
                                 .offset(x: firstPushX, y: firstPushY)
                                 .clipped()
                             Rectangle().fill(Theme.chromeHairline)
-                                .frame(width: Self.dividerThickness)
-                                .opacity(chromeVisible)
+                                .frame(width: dividerThickness)
+                                .opacity(chromeOpacity)
                             PaneTreeView(node: second, workspace: workspace, store: store)
                                 .frame(width: secondSize)
                                 .frame(maxHeight: .infinity)
@@ -1810,8 +1806,8 @@ private struct SplitContainer: View {
                         }
                             .frame(width: Self.handleHitSize, height: geo.size.height)
                             .offset(x: handleOffset, y: 0)
-                            .opacity(chromeVisible)
-                            .allowsHitTesting(!isZoomedAcrossThisSplit)
+                            .opacity(chromeOpacity)
+                            .allowsHitTesting(splitChromeVisible)
                             .zIndex(10)
                     } else {
                         VStack(spacing: 0) {
@@ -1821,8 +1817,8 @@ private struct SplitContainer: View {
                                 .offset(x: firstPushX, y: firstPushY)
                                 .clipped()
                             Rectangle().fill(Theme.chromeHairline)
-                                .frame(height: Self.dividerThickness)
-                                .opacity(chromeVisible)
+                                .frame(height: dividerThickness)
+                                .opacity(chromeOpacity)
                             PaneTreeView(node: second, workspace: workspace, store: store)
                                 .frame(height: secondSize)
                                 .frame(maxWidth: .infinity)
@@ -1845,8 +1841,8 @@ private struct SplitContainer: View {
                         }
                             .frame(width: geo.size.width, height: Self.handleHitSize)
                             .offset(x: 0, y: handleOffset)
-                            .opacity(chromeVisible)
-                            .allowsHitTesting(!isZoomedAcrossThisSplit)
+                            .opacity(chromeOpacity)
+                            .allowsHitTesting(splitChromeVisible)
                             .zIndex(10)
                     }
                 }
