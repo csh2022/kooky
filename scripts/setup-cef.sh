@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Downloads and prepares a CEF macOS binary distribution for Kooky's future
-# Chromium-backed browser engine. The downloaded payload is intentionally kept
-# under Vendor/CEF, which is ignored by git.
+# Chromium-backed browser engine. Archives are cached outside the repository so
+# all local worktrees can reuse the same verified download.
 
 set -euo pipefail
 
@@ -13,7 +13,7 @@ CEF_SHA1_MACOSX64_DEFAULT="be87a2104eecbcc2ac30f7ded349e3e9e913efd9"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR_DIR="${ROOT}/Vendor/CEF"
 CURRENT_DIR="${VENDOR_DIR}/current"
-DOWNLOAD_DIR="${VENDOR_DIR}/downloads"
+CACHE_DIR="${KOOKY_CEF_CACHE_DIR:-${HOME}/Library/Caches/Kooky/CEF}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kooky-cef.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -48,7 +48,8 @@ CEF_SHA1="${KOOKY_CEF_SHA1:-$CEF_SHA1_DEFAULT}"
 CEF_ARCHIVE="cef_binary_${CEF_VERSION}_${CEF_PLATFORM}.tar.bz2"
 CEF_URL="${KOOKY_CEF_URL:-https://cef-builds.spotifycdn.com/${CEF_ARCHIVE}}"
 
-ARCHIVE_PATH="${DOWNLOAD_DIR}/${CEF_ARCHIVE}"
+ARCHIVE_PATH="${CACHE_DIR}/${CEF_ARCHIVE}"
+PARTIAL_PATH="${ARCHIVE_PATH}.partial"
 EXTRACT_DIR="${TMP_DIR}/extract"
 
 if [[ "$CEF_PLATFORM" == "unsupported" ]]; then
@@ -57,7 +58,13 @@ if [[ "$CEF_PLATFORM" == "unsupported" ]]; then
     exit 1
 fi
 
-mkdir -p "$VENDOR_DIR" "$DOWNLOAD_DIR"
+if [[ -z "$CEF_SHA1" ]]; then
+    echo "No checksum is configured for CEF ${CEF_VERSION} (${CEF_PLATFORM})." >&2
+    echo "Set KOOKY_CEF_SHA1; unverified CEF archives are not accepted." >&2
+    exit 1
+fi
+
+mkdir -p "$VENDOR_DIR" "$CACHE_DIR"
 
 if [[ -f "${CURRENT_DIR}/.cef-version" &&
       "$(cat "${CURRENT_DIR}/.cef-version")" == "${CEF_VERSION} ${CEF_PLATFORM}" &&
@@ -68,23 +75,37 @@ if [[ -f "${CURRENT_DIR}/.cef-version" &&
     exit 0
 fi
 
-echo "Downloading CEF ${CEF_VERSION} (${CEF_PLATFORM})..."
-curl --fail --show-error --location \
-    --continue-at - \
-    --connect-timeout 10 \
-    --max-time 900 \
-    --retry 5 \
-    --retry-delay 5 \
-    --retry-all-errors \
-    -o "$ARCHIVE_PATH" \
-    "$CEF_URL"
+if [[ -f "$ARCHIVE_PATH" ]]; then
+    ACTUAL_SHA1="$(shasum -a 1 "$ARCHIVE_PATH" | awk '{print $1}')"
+    if [[ "$ACTUAL_SHA1" == "$CEF_SHA1" ]]; then
+        echo "Using verified cached CEF archive: ${ARCHIVE_PATH}"
+    else
+        echo "Discarding corrupt CEF cache entry: ${ARCHIVE_PATH}" >&2
+        rm -f "$ARCHIVE_PATH"
+    fi
+fi
 
-ACTUAL_SHA1="$(shasum -a 1 "$ARCHIVE_PATH" | awk '{print $1}')"
-if [[ -n "$CEF_SHA1" && "$ACTUAL_SHA1" != "$CEF_SHA1" ]]; then
-    echo "CEF checksum mismatch!" >&2
-    echo "  expected: $CEF_SHA1" >&2
-    echo "  actual:   $ACTUAL_SHA1" >&2
-    exit 1
+if [[ ! -f "$ARCHIVE_PATH" ]]; then
+    echo "Downloading CEF ${CEF_VERSION} (${CEF_PLATFORM}) into shared cache..."
+    curl --fail --show-error --location \
+        --continue-at - \
+        --connect-timeout 10 \
+        --max-time 900 \
+        --retry 5 \
+        --retry-delay 5 \
+        --retry-all-errors \
+        -o "$PARTIAL_PATH" \
+        "$CEF_URL"
+
+    ACTUAL_SHA1="$(shasum -a 1 "$PARTIAL_PATH" | awk '{print $1}')"
+    if [[ "$ACTUAL_SHA1" != "$CEF_SHA1" ]]; then
+        echo "CEF checksum mismatch!" >&2
+        echo "  expected: $CEF_SHA1" >&2
+        echo "  actual:   $ACTUAL_SHA1" >&2
+        rm -f "$PARTIAL_PATH"
+        exit 1
+    fi
+    mv "$PARTIAL_PATH" "$ARCHIVE_PATH"
 fi
 
 echo "Verified. Extracting..."

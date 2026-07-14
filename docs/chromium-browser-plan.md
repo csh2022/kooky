@@ -2,9 +2,10 @@
 
 ## Decision
 
-Kooky should add a Chromium-backed browser engine through CEF while keeping
-`WKWebView` as the default engine until Chromium is bundled, launched, and
-validated in the app bundle.
+Kooky ships a Chromium-backed browser engine through CEF. A packaged app is not
+considered valid unless Chromium is bundled, launched, and validated in the app
+bundle. `WKWebView` remains an explicit legacy fallback, not a packaging
+fallback for missing Chromium assets.
 
 The goal is not to become Google Chrome. The goal is a first-class embedded
 browser for agents whose rendering, automation, and diagnostics are close enough
@@ -40,8 +41,8 @@ inside the existing pane model.
 - Default engine is Chromium.
 - Chromium is the default built-in browser engine.
 - `KOOKY_BROWSER_ENGINE=webkit` selects the legacy WebKit path.
-- Until CEF is bundled, selecting Chromium shows an explicit unavailable engine
-  instead of falling back silently.
+- Missing CEF assets are a packaging failure. The runtime error remains a final
+  diagnostic guard for corrupted or manually altered app bundles.
 - When CEF is ready, Chromium uses a Kooky-owned persistent profile directory.
 - Real Chrome fallback remains available for flows where parity depends on the
   user's Chrome identity, cookies, experiments, extensions, or OAuth policy.
@@ -62,21 +63,23 @@ inside the existing pane model.
   `144.0.29+g0b1a012+chromium-144.0.7559.256` for macOS arm64, with sha1
   verification and environment overrides for version, platform, checksum, and
   URL.
-- Teach `scripts/build-app.sh` to place
+- Teach `scripts/build-app.sh` to prepare and place
   `Chromium Embedded Framework.framework` and required helper apps under
-  `Kooky.app/Contents/Frameworks/` when `Vendor/CEF/current` exists. Helper
+  `Kooky.app/Contents/Frameworks/`. Helper
   apps must be Kooky-built bundles; the setup script must not rename CEF sample
   helpers because their internal executable names and bundle metadata would not
   match Kooky's expected helper paths.
-- Keep the binary payload out of git.
-- Add packaging validation that fails when Chromium is selected but bundle
-  assets are missing.
+- Keep the binary payload out of git and cache the verified archive outside the
+  repository so local worktrees share it.
+- Add packaging validation that fails whenever Chromium bundle assets are
+  missing.
 
 ### Stage 3: Native Bridge
 
 - Build `KookyCEFBridge.framework` outside the default SwiftPM target graph so
   developers without `Vendor/CEF` can still build Kooky normally.
-- Bundle that bridge from `Vendor/CEFBridge/current` when it exists.
+- Bundle that bridge from `Vendor/CEFBridge/current`; a missing bridge fails the
+  packaged app build.
 - Add an Objective-C++ CEF bridge target that owns CEF initialization, shutdown,
   browser creation, and the native browser `NSView`.
 - Implement `ChromiumBrowserEngine` in Swift as a thin adapter over the bridge.

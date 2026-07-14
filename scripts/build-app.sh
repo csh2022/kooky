@@ -32,6 +32,17 @@ fi
 BUNDLE_ID="com.iamcorey.kooky"
 APP_NAME="Kooky"
 APP="dist/${APP_NAME}.app"
+CEF_VENDOR_DIR="${ROOT}/Vendor/CEF/current"
+CEF_BRIDGE_DIR="${ROOT}/Vendor/CEFBridge/current"
+
+# A packaged Kooky.app always includes Chromium. Keep lightweight development
+# available through `swift build`, but never emit a successful-looking app
+# bundle with a browser engine that cannot launch.
+echo "==> Preparing GhosttyKit"
+"${ROOT}/scripts/setup-libghostty.sh"
+echo "==> Preparing Chromium runtime"
+"${ROOT}/scripts/setup-cef.sh"
+"${ROOT}/scripts/build-cef-bridge.sh"
 
 echo "==> Building release config"
 swift build -c release --product Kooky
@@ -57,41 +68,39 @@ cp .build/release/Kooky "${APP}/Contents/MacOS/${APP_NAME}"
 # the running .app will silently fall back to .build/release/ on disk.
 cp -R .build/release/Kooky_KookyKit.bundle "${APP}/Contents/Resources/"
 
-CEF_VENDOR_DIR="${ROOT}/Vendor/CEF/current"
-CEF_BRIDGE_DIR="${ROOT}/Vendor/CEFBridge/current"
-if [ -d "$CEF_VENDOR_DIR" ]; then
-    echo "==> Bundling CEF from ${CEF_VENDOR_DIR}"
-    [ -d "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" ] || {
-        echo "missing CEF framework: ${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" >&2
-        exit 1
-    }
-    CEF_FRAMEWORK_DEST="${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
-    mkdir -p "${CEF_FRAMEWORK_DEST}/Versions/A" "${CEF_FRAMEWORK_DEST}/Versions"
-    cp -R "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework/." "${CEF_FRAMEWORK_DEST}/Versions/A/"
-    ln -sfn "Versions/A/Chromium Embedded Framework" "${CEF_FRAMEWORK_DEST}/Chromium Embedded Framework"
-    ln -sfn "Versions/A/Libraries" "${CEF_FRAMEWORK_DEST}/Libraries"
-    ln -sfn "Versions/A/Resources" "${CEF_FRAMEWORK_DEST}/Resources"
-    ln -sfn "A" "${CEF_FRAMEWORK_DEST}/Versions/Current"
-    CEF_HELPERS=()
-    shopt -s nullglob
-    CEF_HELPERS=(
-        "${CEF_VENDOR_DIR}"/Kooky\ Helper*.app
-        "${CEF_BRIDGE_DIR}"/Kooky\ Helper*.app
-    )
-    shopt -u nullglob
-    if [ "${#CEF_HELPERS[@]}" -eq 0 ]; then
-        echo "warning: CEF framework present but no Kooky Helper apps found; Chromium engine will not launch yet" >&2
-    else
-        for helper in "${CEF_HELPERS[@]}"; do
-            cp -R "$helper" "${APP}/Contents/Frameworks/"
-        done
-    fi
-    if [ -d "${CEF_BRIDGE_DIR}/KookyCEFBridge.framework" ]; then
-        echo "==> Bundling KookyCEFBridge from ${CEF_BRIDGE_DIR}"
-        cp -R "${CEF_BRIDGE_DIR}/KookyCEFBridge.framework" "${APP}/Contents/Frameworks/"
-    else
-        echo "warning: CEF framework present but KookyCEFBridge.framework is missing; Chromium engine will not launch yet" >&2
-    fi
+echo "==> Bundling CEF from ${CEF_VENDOR_DIR}"
+[ -d "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" ] || {
+    echo "missing CEF framework: ${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework" >&2
+    exit 1
+}
+CEF_FRAMEWORK_DEST="${APP}/Contents/Frameworks/Chromium Embedded Framework.framework"
+mkdir -p "${CEF_FRAMEWORK_DEST}/Versions/A" "${CEF_FRAMEWORK_DEST}/Versions"
+cp -R "${CEF_VENDOR_DIR}/Chromium Embedded Framework.framework/." "${CEF_FRAMEWORK_DEST}/Versions/A/"
+ln -sfn "Versions/A/Chromium Embedded Framework" "${CEF_FRAMEWORK_DEST}/Chromium Embedded Framework"
+ln -sfn "Versions/A/Libraries" "${CEF_FRAMEWORK_DEST}/Libraries"
+ln -sfn "Versions/A/Resources" "${CEF_FRAMEWORK_DEST}/Resources"
+ln -sfn "A" "${CEF_FRAMEWORK_DEST}/Versions/Current"
+CEF_HELPERS=()
+shopt -s nullglob
+CEF_HELPERS=(
+    "${CEF_VENDOR_DIR}"/Kooky\ Helper*.app
+    "${CEF_BRIDGE_DIR}"/Kooky\ Helper*.app
+)
+shopt -u nullglob
+if [ "${#CEF_HELPERS[@]}" -eq 0 ]; then
+    echo "CEF framework is present but Kooky Helper apps are missing. Run scripts/build-cef-bridge.sh." >&2
+    exit 1
+else
+    for helper in "${CEF_HELPERS[@]}"; do
+        cp -R "$helper" "${APP}/Contents/Frameworks/"
+    done
+fi
+if [ -d "${CEF_BRIDGE_DIR}/KookyCEFBridge.framework" ]; then
+    echo "==> Bundling KookyCEFBridge from ${CEF_BRIDGE_DIR}"
+    cp -R "${CEF_BRIDGE_DIR}/KookyCEFBridge.framework" "${APP}/Contents/Frameworks/"
+else
+    echo "CEF framework is present but KookyCEFBridge.framework is missing. Run scripts/build-cef-bridge.sh." >&2
+    exit 1
 fi
 
 # App icon — generated from branding/AppIcon.png if present. macOS reads
@@ -243,6 +252,8 @@ if [ -d "${APP}/Contents/Frameworks/Chromium Embedded Framework.framework" ]; th
 fi
 codesign --force --sign - "${APP}/Contents/MacOS/${APP_NAME}"
 codesign --force --sign - "${APP}" 2>&1 | tail -3
+
+"${ROOT}/scripts/verify-cef-app.sh" "$APP"
 
 echo ""
 echo "✓ Built ${APP} (v${VERSION})"

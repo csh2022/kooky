@@ -21,6 +21,8 @@ echo "==> Building ${APP_NAME}.app"
     exit 1
 }
 
+"${ROOT}/scripts/verify-cef-app.sh" "$BUILT_APP"
+
 echo "==> Overlay installing ${INSTALL_APP}"
 ditto "$BUILT_APP" "$INSTALL_APP"
 
