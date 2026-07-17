@@ -5,6 +5,7 @@ import Foundation
 final class BrowserSurface {
     let engine: any BrowserEngine
     var addressText: String
+    var onCloseRequested: (() -> Void)?
     private(set) var snapshot: BrowserEngineSnapshot
 
     init(engine: any BrowserEngine) {
@@ -13,6 +14,11 @@ final class BrowserSurface {
         self.addressText = engine.snapshot.urlString
         self.engine.onSnapshotChange = { [weak self] snapshot in
             self?.apply(snapshot)
+        }
+        if let closeReportingEngine = engine as? any BrowserCloseRequestReporting {
+            closeReportingEngine.onCloseRequested = { [weak self] in
+                self?.onCloseRequested?()
+            }
         }
     }
 
@@ -35,6 +41,10 @@ final class BrowserSurface {
         }
     }
 
+    func close() {
+        engine.close()
+    }
+
     private func apply(_ next: BrowserEngineSnapshot) {
         snapshot = next
         if !next.urlString.isEmpty {
@@ -42,4 +52,3 @@ final class BrowserSurface {
         }
     }
 }
-

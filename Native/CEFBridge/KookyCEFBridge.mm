@@ -97,6 +97,7 @@ struct KookyCEFBrowser {
   cef_browser_t* browser;
   KookyCEFClient* client;
   KookyCEFStateCallback callback;
+  KookyCEFCloseRequestedCallback close_requested_callback;
   void* callback_context;
   std::string title;
   std::string url;
@@ -106,6 +107,7 @@ struct KookyCEFBrowser {
   int is_loading;
   int closing;
   int next_eval_id;
+  int pending_async_callbacks;
   std::mutex eval_mutex;
   std::map<int, KookyCEFEvaluation> evaluations;
 };
@@ -512,6 +514,15 @@ void FinishAllEvaluations(KookyCEFBrowser* owner) {
   }
 }
 
+void MaybeDeleteClosedBrowser(KookyCEFBrowser* owner) {
+  if (!owner || !owner->closing || owner->browser || owner->pending_async_callbacks > 0) {
+    return;
+  }
+  FinishAllEvaluations(owner);
+  delete owner->client;
+  delete owner;
+}
+
 }  // namespace
 
 static void KookyCEFResizeBrowser(void* owner) {
@@ -766,8 +777,21 @@ void OnAfterCreated(cef_life_span_handler_t* self, cef_browser_t* browser) {
   Publish(owner);
 }
 
+int OnDoClose(cef_life_span_handler_t* self, cef_browser_t*) {
+  auto* owner = OwnerFromLifeSpan(self);
+  if (owner->closing) {
+    return 1;
+  }
+  DebugLog("browser requested close");
+  if (owner->close_requested_callback) {
+    owner->close_requested_callback(owner->callback_context);
+  }
+  return 1;
+}
+
 void OnBeforeClose(cef_life_span_handler_t* self, cef_browser_t* browser) {
   auto* owner = OwnerFromLifeSpan(self);
+  DebugLog("browser before close");
   if (browser) {
     std::lock_guard<std::mutex> lock(g_browser_map_mutex);
     auto it = g_browsers_by_id.find(browser->get_identifier(browser));
@@ -782,10 +806,10 @@ void OnBeforeClose(cef_life_span_handler_t* self, cef_browser_t* browser) {
     owner->browser = nullptr;
   }
   if (owner->closing) {
+    owner->pending_async_callbacks++;
     dispatch_async(dispatch_get_main_queue(), ^{
-      FinishAllEvaluations(owner);
-      delete owner->client;
-      delete owner;
+      owner->pending_async_callbacks--;
+      MaybeDeleteClosedBrowser(owner);
     });
     return;
   }
@@ -833,6 +857,7 @@ KookyCEFClient* MakeClient(KookyCEFBrowser* owner) {
   client->display.on_title_change = OnTitleChange;
   client->display.on_console_message = OnConsoleMessage;
   client->life_span.on_after_created = OnAfterCreated;
+  client->life_span.do_close = OnDoClose;
   client->life_span.on_before_close = OnBeforeClose;
   client->load.on_loading_state_change = OnLoadingStateChange;
   return client;
@@ -934,7 +959,12 @@ void KookyCEFDoMessageLoopWork(void) {
   });
 }
 
-static void* KookyCEFCreateBrowserWithParent(NSView* parent, const char* url, KookyCEFStateCallback callback, void* context) {
+static void* KookyCEFCreateBrowserWithParent(
+    NSView* parent,
+    const char* url,
+    KookyCEFStateCallback callback,
+    KookyCEFCloseRequestedCallback close_requested_callback,
+    void* context) {
   if (!g_initialized) {
     return nullptr;
   }
@@ -955,6 +985,7 @@ static void* KookyCEFCreateBrowserWithParent(NSView* parent, const char* url, Ko
   owner->browser = nullptr;
   owner->client = MakeClient(owner);
   owner->callback = callback;
+  owner->close_requested_callback = close_requested_callback;
   owner->callback_context = context;
   owner->title = "Chromium";
   owner->url = url ? url : "";
@@ -964,6 +995,7 @@ static void* KookyCEFCreateBrowserWithParent(NSView* parent, const char* url, Ko
   owner->is_loading = 0;
   owner->closing = 0;
   owner->next_eval_id = 1;
+  owner->pending_async_callbacks = 0;
 
   cef_window_info_t window_info = {};
   window_info.size = sizeof(window_info);
@@ -996,16 +1028,25 @@ static void* KookyCEFCreateBrowserWithParent(NSView* parent, const char* url, Ko
   return owner;
 }
 
-void* KookyCEFCreateBrowser(const char* url, KookyCEFStateCallback callback, void* context) {
-  return KookyCEFCreateBrowserWithParent(nil, url, callback, context);
+void* KookyCEFCreateBrowser(
+    const char* url,
+    KookyCEFStateCallback callback,
+    KookyCEFCloseRequestedCallback close_requested_callback,
+    void* context) {
+  return KookyCEFCreateBrowserWithParent(nil, url, callback, close_requested_callback, context);
 }
 
-void* KookyCEFCreateBrowserInView(void* parent_view, const char* url, KookyCEFStateCallback callback, void* context) {
+void* KookyCEFCreateBrowserInView(
+    void* parent_view,
+    const char* url,
+    KookyCEFStateCallback callback,
+    KookyCEFCloseRequestedCallback close_requested_callback,
+    void* context) {
   if (!parent_view) {
     return nullptr;
   }
   NSView* parent = (__bridge NSView*)parent_view;
-  return KookyCEFCreateBrowserWithParent(parent, url, callback, context);
+  return KookyCEFCreateBrowserWithParent(parent, url, callback, close_requested_callback, context);
 }
 
 void* KookyCEFGetView(void* browser) {
@@ -1081,14 +1122,19 @@ void KookyCEFEvaluateJavaScript(
   }
   DebugLog("browser sending eval message");
   std::string script_copy = script ? script : "";
+  owner->pending_async_callbacks++;
   dispatch_async(dispatch_get_main_queue(), ^{
     if (!owner || owner->closing || !owner->browser) {
       callback(context, "");
+      owner->pending_async_callbacks--;
+      MaybeDeleteClosedBrowser(owner);
       return;
     }
     auto* frame = owner->browser->get_main_frame(owner->browser);
     if (!frame) {
       callback(context, "");
+      owner->pending_async_callbacks--;
+      MaybeDeleteClosedBrowser(owner);
       return;
     }
 
@@ -1104,6 +1150,8 @@ void KookyCEFEvaluateJavaScript(
     cef_string_clear(&name);
     if (!message) {
       FinishEvaluation(owner, message_id, "");
+      owner->pending_async_callbacks--;
+      MaybeDeleteClosedBrowser(owner);
       return;
     }
     cef_list_value_t* args = message->get_argument_list(message);
@@ -1115,10 +1163,17 @@ void KookyCEFEvaluateJavaScript(
     frame->send_process_message(frame, PID_RENDERER, message);
     KickMessagePump();
 
+    owner->pending_async_callbacks++;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-      FinishEvaluation(owner, message_id, kEvalContextNotReadyResult);
+      if (!owner->closing) {
+        FinishEvaluation(owner, message_id, kEvalContextNotReadyResult);
+      }
+      owner->pending_async_callbacks--;
       KickMessagePump();
+      MaybeDeleteClosedBrowser(owner);
     });
+    owner->pending_async_callbacks--;
+    MaybeDeleteClosedBrowser(owner);
   });
 }
 
@@ -1130,14 +1185,30 @@ void KookyCEFCloseBrowser(void* browser) {
   if (owner->closing) {
     return;
   }
+  DebugLog("closing browser");
   owner->closing = 1;
   owner->callback = nullptr;
+  owner->close_requested_callback = nullptr;
   owner->callback_context = nullptr;
   FinishAllEvaluations(owner);
+  NSView* container = owner->container;
+  owner->container = nil;
+  if (container) {
+    ((KookyCEFContainerView*)container).browserOwner = nullptr;
+  }
+  NSView* browser_view = nil;
   if (owner->browser) {
     auto* host = owner->browser->get_host(owner->browser);
     if (host) {
+      browser_view = (__bridge NSView*)host->get_window_handle(host);
       host->close_browser(host, 1);
     }
   }
+  if (browser_view) {
+    [browser_view removeFromSuperview];
+  }
+  if (container) {
+    [container removeFromSuperview];
+  }
+  KickMessagePump();
 }

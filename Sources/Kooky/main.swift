@@ -17,6 +17,11 @@ if CommandLine.arguments.contains("--chromium-hook-smoke") {
     exit(ChromiumBrowserSmoke.runHookCommands(urlString: url))
 }
 
+if CommandLine.arguments.contains("--chromium-window-close-smoke") {
+    let url = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") } ?? "https://example.com"
+    exit(ChromiumBrowserSmoke.runWindowClose(urlString: url))
+}
+
 if CommandLine.arguments.contains("--chromium-google-smoke") {
     exit(ChromiumBrowserSmoke.runGoogleCommands())
 }

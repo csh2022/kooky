@@ -59,6 +59,61 @@ public enum ChromiumBrowserSmoke {
     }
 
     @MainActor
+    public static func runWindowClose(urlString: String) -> Int32 {
+        log("window-close smoke starting")
+        guard let request = BrowserLoadRequest(urlString) else {
+            fputs("invalid smoke URL: \(urlString)\n", stderr)
+            return 2
+        }
+        let runtime = ChromiumBrowserRuntime.bundledRuntime()
+        guard case .available = runtime.status() else {
+            fputs((runtime.status().message ?? "Chromium runtime unavailable") + "\n", stderr)
+            return 1
+        }
+        do {
+            _ = NSApplication.shared
+            let engine = try ChromiumBrowserEngine(runtime: runtime)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = engine.view
+            window.orderFrontRegardless()
+
+            var closeRequested = false
+            engine.onCloseRequested = { [weak engine] in
+                closeRequested = true
+                engine?.close()
+            }
+            engine.load(request)
+            guard waitUntil(timeout: 15, predicate: {
+                !engine.snapshot.isLoading
+                    && engine.snapshot.urlString != "about:blank"
+            }) else {
+                throw SmokeFailure("window-close page did not load")
+            }
+
+            engine.click(text: "Close via JavaScript")
+            guard waitUntil(timeout: 5, predicate: { closeRequested }) else {
+                throw SmokeFailure("page did not request browser close")
+            }
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+            guard window.isVisible else {
+                throw SmokeFailure("window.close() closed the top-level Kooky window")
+            }
+
+            print("window-close-smoke: ok")
+            window.close()
+            return 0
+        } catch {
+            fputs("window-close smoke failed: \(error.localizedDescription)\n", stderr)
+            return 1
+        }
+    }
+
+    @MainActor
     public static func runAgentCommands(urlString: String = "https://example.com") -> Int32 {
         log("agent smoke starting")
         guard let url = URL(string: urlString) else {

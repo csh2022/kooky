@@ -271,6 +271,21 @@ final class BrowserPaneLifecycleTests: XCTestCase {
         XCTAssertEqual(workspace.root.allPanes.count, 1)
     }
 
+    func testPageCloseRequestRemovesOnlyBrowserPane() {
+        let engines = BrowserEnginePool()
+        let store = makeStore(browserEngines: engines)
+        let workspace = try! XCTUnwrap(store.active)
+        let terminalPane = try! XCTUnwrap(workspace.root.firstPane)
+        let browser = try! XCTUnwrap(store.openBrowserSplit(in: workspace))
+
+        try! XCTUnwrap(engines.created.first).requestClose()
+
+        XCTAssertNil(workspace.root.browserPane(id: browser.id))
+        XCTAssertEqual(workspace.root.allPanes.map(\.id), [terminalPane.id])
+        XCTAssertTrue(store.workspaces.contains { $0 === workspace })
+        XCTAssertEqual(engines.created.first?.closeCount, 1)
+    }
+
     func testAutoCloseRefusesPinnedOrUserTouchedBrowser() {
         let store = makeStore()
         let workspace = try! XCTUnwrap(store.active)
@@ -312,10 +327,11 @@ private final class BrowserEnginePool {
 }
 
 @MainActor
-private final class TestBrowserEngineForPane: BrowserEngine {
+private final class TestBrowserEngineForPane: BrowserEngine, BrowserCloseRequestReporting {
     let view: NSView = NSView()
     var snapshot: BrowserEngineSnapshot = .empty
     var onSnapshotChange: ((BrowserEngineSnapshot) -> Void)?
+    var onCloseRequested: (() -> Void)?
     var loadedRequests: [BrowserLoadRequest] = []
     var clickedTexts: [String] = []
     var clickedIds: [(id: String, double: Bool)] = []
@@ -334,6 +350,9 @@ private final class TestBrowserEngineForPane: BrowserEngine {
     var stopCount = 0
     var goBackCount = 0
     var goForwardCount = 0
+    var closeCount = 0
+
+    func close() { closeCount += 1 }
 
     func load(_ request: BrowserLoadRequest) {
         loadedRequests.append(request)
@@ -399,4 +418,8 @@ private final class TestBrowserEngineForPane: BrowserEngine {
     func saveScreenshot(to path: String?) async -> String { (path ?? "/tmp/kooky-browser-test.png") + "\n" }
     func credentialForm() async -> BrowserCredentialForm? { nil }
     func fillCredential(_ credential: BrowserCredential) async -> String { "ok filled credential: \(credential.account)\n" }
+
+    func requestClose() {
+        onCloseRequested?()
+    }
 }

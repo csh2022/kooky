@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 @MainActor
-final class ChromiumBrowserEngine: BrowserEngine {
+final class ChromiumBrowserEngine: BrowserEngine, BrowserCloseRequestReporting {
     private enum HistoryNavigationDirection {
         case back
         case forward
@@ -11,11 +11,13 @@ final class ChromiumBrowserEngine: BrowserEngine {
 
     let view: NSView
     var onSnapshotChange: ((BrowserEngineSnapshot) -> Void)?
+    var onCloseRequested: (() -> Void)?
 
     private let bridge: ChromiumBrowserBridge
     private let hostView: ChromiumBrowserEngineHostView
     private let stateBox = ChromiumBrowserStateBox()
     private var browser: CEFPointer?
+    private var didClose = false
     private var callbackContext: CEFPointer?
     private var pendingRequest: BrowserLoadRequest?
     private var didInitializeCEF = false
@@ -50,6 +52,11 @@ final class ChromiumBrowserEngine: BrowserEngine {
                 self?.apply(snapshot)
             }
         }
+        stateBox.onCloseRequested = { [weak self] in
+            Task { @MainActor in
+                self?.onCloseRequested?()
+            }
+        }
         hostView.onAttachedToWindow = { [weak self] in
             self?.ensureBrowserCreated()
         }
@@ -57,7 +64,7 @@ final class ChromiumBrowserEngine: BrowserEngine {
     }
 
     deinit {
-        if let browser {
+        if !didClose, let browser {
             bridge.closeBrowser(browser.raw)
         }
         if let callbackContext {
@@ -74,6 +81,15 @@ final class ChromiumBrowserEngine: BrowserEngine {
         Task { @MainActor [weak self] in
             await Task.yield()
             self?.refreshHostViewAttachment()
+        }
+    }
+
+    func close() {
+        guard !didClose else { return }
+        didClose = true
+        if let browser {
+            bridge.closeBrowser(browser.raw)
+            self.browser = nil
         }
     }
 
@@ -578,7 +594,7 @@ final class ChromiumBrowserEngine: BrowserEngine {
     }
 
     private func ensureBrowserCreated() {
-        guard browser == nil, !browserCreationFailed, hostView.window != nil else { return }
+        guard !didClose, browser == nil, !browserCreationFailed, hostView.window != nil else { return }
         if !didInitializeCEF {
             do {
                 let cacheURL = Self.cacheDirectoryURL()
@@ -596,7 +612,13 @@ final class ChromiumBrowserEngine: BrowserEngine {
             }
         }
         let context = Unmanaged.passRetained(stateBox).toOpaque()
-        guard let browser = bridge.createBrowser(in: hostView, "about:blank", ChromiumBrowserEngine.stateCallback, context) else {
+        guard let browser = bridge.createBrowser(
+            in: hostView,
+            "about:blank",
+            ChromiumBrowserEngine.stateCallback,
+            ChromiumBrowserEngine.closeRequestedCallback,
+            context
+        ) else {
             Unmanaged<ChromiumBrowserStateBox>.fromOpaque(context).release()
             browserCreationFailed = true
             currentSnapshot.isLoading = false
@@ -706,6 +728,12 @@ final class ChromiumBrowserEngine: BrowserEngine {
             errorMessage: nil
         )
         box.publish(snapshot)
+    }
+
+    private static let closeRequestedCallback: ChromiumBrowserBridge.CloseRequestedCallback = { context in
+        guard let context else { return }
+        let box = Unmanaged<ChromiumBrowserStateBox>.fromOpaque(context).takeUnretainedValue()
+        box.requestClose()
     }
 
     private static func string(from pointer: UnsafePointer<CChar>?) -> String {
@@ -842,9 +870,14 @@ private final class ChromiumEvaluateCallbackBox {
 
 private final class ChromiumBrowserStateBox {
     var onSnapshot: ((BrowserEngineSnapshot) -> Void)?
+    var onCloseRequested: (() -> Void)?
 
     func publish(_ snapshot: BrowserEngineSnapshot) {
         onSnapshot?(snapshot)
+    }
+
+    func requestClose() {
+        onCloseRequested?()
     }
 }
 
@@ -885,13 +918,20 @@ private final class ChromiumBrowserBridge: @unchecked Sendable {
         Int32,
         Int32
     ) -> Void
+    typealias CloseRequestedCallback = @convention(c) (UnsafeMutableRawPointer?) -> Void
 
     typealias Initialize = @convention(c) (UnsafePointer<CChar>?) -> Int32
-    typealias CreateBrowser = @convention(c) (UnsafePointer<CChar>?, StateCallback?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+    typealias CreateBrowser = @convention(c) (
+        UnsafePointer<CChar>?,
+        StateCallback?,
+        CloseRequestedCallback?,
+        UnsafeMutableRawPointer?
+    ) -> UnsafeMutableRawPointer?
     typealias CreateBrowserInView = @convention(c) (
         UnsafeMutableRawPointer?,
         UnsafePointer<CChar>?,
         StateCallback?,
+        CloseRequestedCallback?,
         UnsafeMutableRawPointer?
     ) -> UnsafeMutableRawPointer?
     typealias GetView = @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
@@ -948,18 +988,24 @@ private final class ChromiumBrowserBridge: @unchecked Sendable {
         cachePath.withCString { initialize($0) }
     }
 
-    func createBrowser(_ url: String, _ callback: StateCallback?, _ context: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-        url.withCString { createBrowser($0, callback, context) }
+    func createBrowser(
+        _ url: String,
+        _ callback: StateCallback?,
+        _ closeRequestedCallback: CloseRequestedCallback?,
+        _ context: UnsafeMutableRawPointer?
+    ) -> UnsafeMutableRawPointer? {
+        url.withCString { createBrowser($0, callback, closeRequestedCallback, context) }
     }
 
     func createBrowser(
         in parentView: NSView,
         _ url: String,
         _ callback: StateCallback?,
+        _ closeRequestedCallback: CloseRequestedCallback?,
         _ context: UnsafeMutableRawPointer?
     ) -> UnsafeMutableRawPointer? {
         let parent = Unmanaged.passUnretained(parentView).toOpaque()
-        return url.withCString { createBrowserInView(parent, $0, callback, context) }
+        return url.withCString { createBrowserInView(parent, $0, callback, closeRequestedCallback, context) }
     }
 
     func getView(_ browser: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
