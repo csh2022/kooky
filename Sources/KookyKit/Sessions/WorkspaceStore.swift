@@ -1296,6 +1296,10 @@ final class WorkspaceStore {
             surface: BrowserSurface(engine: browserEngineFactory()),
             owner: owner
         )
+        browser.surface.onCloseRequested = { [weak self, weak browser, weak workspace] in
+            guard let self, let browser, let workspace else { return }
+            self.closeBrowserPane(browser, in: workspace)
+        }
         splitLeaf(
             leafNode,
             existingPane: existingPane,
@@ -1523,6 +1527,7 @@ final class WorkspaceStore {
     ) -> Bool {
         if requireAutoOwned, !browser.canAutoClose { return false }
         guard let leafNode = workspace.root.browserNode(browserId: browser.id) else { return false }
+        browser.surface.close()
         if leafNode === workspace.root {
             closeWorkspace(workspace)
             return true

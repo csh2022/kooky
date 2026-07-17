@@ -26,6 +26,7 @@ protocol BrowserEngine: AnyObject {
     var onSnapshotChange: ((BrowserEngineSnapshot) -> Void)? { get set }
 
     func browserHostViewDidAttach()
+    func close()
     func load(_ request: BrowserLoadRequest)
     func reload()
     func stopLoading()
@@ -56,6 +57,12 @@ protocol BrowserEngine: AnyObject {
     func fillCredential(_ credential: BrowserCredential) async -> String
 }
 
+@MainActor
+protocol BrowserCloseRequestReporting: AnyObject {
+    var onCloseRequested: (() -> Void)? { get set }
+}
+
 extension BrowserEngine {
     func browserHostViewDidAttach() {}
+    func close() {}
 }
